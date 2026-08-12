@@ -1,0 +1,996 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DCC Character Sheet</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #1e1b18;
+    --panel: #2a2521;
+    --border: #45392e;
+    --text: #ecdfc8;
+    --muted: #a89684;
+    --accent: #c97b3d;
+    --good: #5f8f5b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+  }
+  #app { padding: 12px 14px 20px; }
+  .empty {
+    text-align: center;
+    color: var(--muted);
+    padding: 40px 20px;
+    line-height: 1.5;
+  }
+  h1 {
+    font-size: 15px;
+    margin: 0 0 2px;
+    letter-spacing: 0.3px;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 11px;
+    margin-bottom: 10px;
+  }
+  .token-name { color: var(--accent); font-weight: 600; }
+  .row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .row > div { flex: 1; }
+  label {
+    display: block;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--muted);
+    margin-bottom: 3px;
+  }
+  input[type=text], input[type=number], textarea, select {
+    width: 100%;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  input:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  textarea { resize: vertical; min-height: 48px; line-height: 1.4; }
+  .hp-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+  }
+  .hp-row input { border: none; background: transparent; padding: 2px; text-align: center; width: 100%; }
+  .hp-btn {
+    background: var(--border);
+    border: none;
+    color: var(--text);
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+  }
+  .hp-btn:hover { background: var(--accent); }
+  .hp-sep { color: var(--muted); }
+  .tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .tab-btn {
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 7px 8px;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .tab-btn:hover { border-color: var(--accent); }
+  .tab-btn.active {
+    background: var(--accent);
+    color: #1e1b18;
+    border-color: var(--accent);
+  }
+  .saves {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .saves.pc-saves { grid-template-columns: repeat(3, 1fr); }
+  .ability-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+  .save-box {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    text-align: center;
+    padding: 5px 2px;
+  }
+  .save-box label { margin-bottom: 2px; }
+  .save-box input, .save-box select {
+    text-align: center;
+    padding: 2px;
+    border: none;
+    background: transparent;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  fieldset {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin: 0 0 10px;
+    padding: 8px;
+  }
+  legend {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--muted);
+    padding: 0 4px;
+  }
+  .stat-line {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 11.5px;
+    color: var(--muted);
+    line-height: 1.5;
+    margin-bottom: 10px;
+    word-break: break-word;
+  }
+  .stat-line b { color: var(--text); }
+  .footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 4px;
+  }
+  .status { font-size: 11px; color: var(--good); min-height: 14px; }
+
+  .main-nav { margin-bottom: 14px; }
+
+  .tracker-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    gap: 8px;
+  }
+  .round-badge {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 11px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .round-badge b { color: var(--text); }
+  .tracker-actions { display: flex; gap: 6px; }
+  .btn-next {
+    background: var(--accent);
+    color: #1e1b18;
+    border: none;
+    border-radius: 6px;
+    padding: 0 12px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn-next:hover { opacity: 0.9; }
+  .tracker-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+  .tracker-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 7px;
+  }
+  .tracker-row.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .tracker-row-header {
+    background: transparent;
+    border: none;
+    padding: 0 7px;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--muted);
+  }
+  .tracker-init { width: 36px; flex: none; }
+  .tracker-init input {
+    width: 100%;
+    text-align: center;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 4px 2px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+  }
+  .roll-btn { flex: none; width: 22px; height: 22px; font-size: 11px; padding: 0; }
+  .tracker-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .tracker-name:hover { color: var(--accent); }
+  .tracker-hp { display: flex; align-items: center; gap: 3px; flex: none; }
+  .tracker-hp input {
+    width: 32px;
+    text-align: center;
+    padding: 3px 2px;
+    font-size: 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+  }
+  .tracker-hp .hp-btn { width: 18px; height: 18px; font-size: 12px; }
+  .tracker-ac { width: 32px; flex: none; }
+  .tracker-ac input {
+    width: 100%;
+    text-align: center;
+    padding: 4px 2px;
+    font-size: 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+  }
+</style>
+</head>
+<body>
+  <div id="app">
+    <div class="tabs main-nav">
+      <button class="tab-btn active" id="nav-sheet">Sheet</button>
+      <button class="tab-btn" id="nav-tracker">Tracker</button>
+    </div>
+
+    <div id="view-sheet">
+    <div class="empty" id="empty-state">
+      Select a token on the map to view or edit its DCC character sheet.<br/><br/>
+      Changes save automatically to the token so anyone in the room sees the same sheet.
+    </div>
+    <div id="sheet" style="display:none">
+      <h1>DCC Character Sheet</h1>
+      <div class="subtitle">Renaming and editing this token's stat block</div>
+
+      <div class="tabs">
+        <button class="tab-btn active" id="tab-monster">Monster</button>
+        <button class="tab-btn" id="tab-pc">Player</button>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Name</label>
+          <input type="text" id="name" placeholder="Character name" />
+        </div>
+      </div>
+
+      <div id="monster-fields">
+        <div class="stat-line" id="statline-preview-monster"></div>
+
+        <div class="row">
+          <div>
+            <label>Init</label>
+            <input type="text" id="init" placeholder="+2" />
+          </div>
+          <div>
+            <label>AC</label>
+            <input type="number" id="ac" />
+          </div>
+          <div>
+            <label>Crit</label>
+            <input type="text" id="crit" placeholder="M/d10" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>HD</label>
+            <input type="text" id="hd" placeholder="4d8+4" />
+          </div>
+          <div>
+            <label>MV</label>
+            <input type="text" id="mv" placeholder="30' or fly 60'" />
+          </div>
+          <div>
+            <label>Act</label>
+            <input type="text" id="act" placeholder="1d20" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Hit Points</label>
+            <div class="hp-row">
+              <button class="hp-btn" id="hp-minus">−</button>
+              <input type="number" id="hp-current" />
+              <span class="hp-sep">/</span>
+              <input type="number" id="hp-max" />
+              <button class="hp-btn" id="hp-plus">+</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="saves">
+          <div class="save-box"><label>Fort</label><input type="text" id="fort" placeholder="+2"/></div>
+          <div class="save-box"><label>Ref</label><input type="text" id="ref" placeholder="+0"/></div>
+          <div class="save-box"><label>Will</label><input type="text" id="will" placeholder="+1"/></div>
+          <div class="save-box">
+            <label>AL</label>
+            <select id="al">
+              <option value="">—</option>
+              <option value="L">L</option>
+              <option value="N">N</option>
+              <option value="C">C</option>
+            </select>
+          </div>
+        </div>
+
+        <fieldset>
+          <legend>Atk</legend>
+          <textarea id="atk" placeholder="claw +4 melee (1d6) or bite +2 melee (1d8)"></textarea>
+        </fieldset>
+
+        <fieldset>
+          <legend>SP (Special)</legend>
+          <textarea id="sp" placeholder="darkvision 60', immune to poison, regenerate 3 hp/round"></textarea>
+        </fieldset>
+
+        <fieldset>
+          <legend>Notes / Description</legend>
+          <textarea id="notes" placeholder="Flavor text, tactics, treasure..."></textarea>
+        </fieldset>
+      </div>
+
+      <div id="pc-fields" style="display:none">
+        <div class="stat-line" id="statline-preview-pc"></div>
+
+        <div class="row">
+          <div>
+            <label>Class</label>
+            <input type="text" id="pc-class" placeholder="Warrior" />
+          </div>
+          <div>
+            <label>Occupation</label>
+            <input type="text" id="pc-occupation" placeholder="Ostler" />
+          </div>
+          <div>
+            <label>Level</label>
+            <input type="text" id="pc-level" placeholder="1" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Alignment</label>
+            <select id="pc-alignment">
+              <option value="">—</option>
+              <option value="L">L</option>
+              <option value="N">N</option>
+              <option value="C">C</option>
+            </select>
+          </div>
+          <div>
+            <label>XP</label>
+            <input type="text" id="pc-xp" placeholder="0" />
+          </div>
+        </div>
+
+        <fieldset>
+          <legend>Abilities</legend>
+          <div class="ability-grid">
+            <div class="save-box"><label>Str</label><input type="text" id="pc-str" placeholder="14 (+1)"/></div>
+            <div class="save-box"><label>Agi</label><input type="text" id="pc-agi" placeholder="10 (+0)"/></div>
+            <div class="save-box"><label>Sta</label><input type="text" id="pc-sta" placeholder="12 (+0)"/></div>
+            <div class="save-box"><label>Per</label><input type="text" id="pc-per" placeholder="8 (-1)"/></div>
+            <div class="save-box"><label>Int</label><input type="text" id="pc-int" placeholder="9 (+0)"/></div>
+            <div class="save-box"><label>Lck</label><input type="text" id="pc-lck" placeholder="11 (+0)"/></div>
+          </div>
+        </fieldset>
+
+        <div class="row">
+          <div>
+            <label>Init</label>
+            <input type="text" id="pc-init" placeholder="+1" />
+          </div>
+          <div>
+            <label>AC</label>
+            <input type="number" id="pc-ac" />
+          </div>
+          <div>
+            <label>Speed</label>
+            <input type="text" id="pc-speed" placeholder="30'" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Crit Die/Table</label>
+            <input type="text" id="pc-crit" placeholder="1d8/III" />
+          </div>
+          <div>
+            <label>Action Dice</label>
+            <input type="text" id="pc-actdice" placeholder="1d20" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Hit Points</label>
+            <div class="hp-row">
+              <button class="hp-btn" id="pc-hp-minus">−</button>
+              <input type="number" id="pc-hp-current" />
+              <span class="hp-sep">/</span>
+              <input type="number" id="pc-hp-max" />
+              <button class="hp-btn" id="pc-hp-plus">+</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="saves pc-saves">
+          <div class="save-box"><label>Fort</label><input type="text" id="pc-fort" placeholder="+0"/></div>
+          <div class="save-box"><label>Ref</label><input type="text" id="pc-ref" placeholder="+0"/></div>
+          <div class="save-box"><label>Will</label><input type="text" id="pc-will" placeholder="+0"/></div>
+        </div>
+
+        <fieldset>
+          <legend>Attack</legend>
+          <textarea id="pc-attack" placeholder="Longsword +1 melee (1d8+1) or Sling +0 missile (1d4)"></textarea>
+        </fieldset>
+
+        <fieldset>
+          <legend>Equipment</legend>
+          <textarea id="pc-equipment" placeholder="Leather armor, backpack, iron ration, 10' pole, 15 gp"></textarea>
+        </fieldset>
+
+        <fieldset>
+          <legend>Spells</legend>
+          <textarea id="pc-spells" placeholder="Known/prepared spells, spell check bonus, mercurial effects"></textarea>
+        </fieldset>
+
+        <fieldset>
+          <legend>Languages</legend>
+          <textarea id="pc-languages" placeholder="Common, Elvish"></textarea>
+        </fieldset>
+
+        <fieldset>
+          <legend>Notes / Description</legend>
+          <textarea id="pc-notes" placeholder="Backstory, luck spent, tactics..."></textarea>
+        </fieldset>
+      </div>
+
+      <div class="footer">
+        <span class="status" id="status"></span>
+      </div>
+    </div>
+    </div>
+
+    <div id="view-tracker" style="display:none">
+      <h1>Combat Tracker</h1>
+      <div class="subtitle">Initiative order for all tokens on the map</div>
+
+      <div class="tracker-header">
+        <div class="round-badge">Round <b id="round-num">1</b></div>
+        <div class="tracker-actions">
+          <button class="hp-btn" id="prev-turn" title="Previous turn">‹</button>
+          <button class="btn-next" id="next-turn">Next Turn</button>
+          <button class="hp-btn" id="reset-tracker" title="Reset round & turns">⟲</button>
+        </div>
+      </div>
+
+      <div class="tracker-row tracker-row-header">
+        <div class="tracker-init">Init</div>
+        <div style="width:22px;"></div>
+        <div class="tracker-name">Name</div>
+        <div class="tracker-hp">HP</div>
+        <div class="tracker-ac">AC</div>
+      </div>
+
+      <div class="tracker-list" id="tracker-list"></div>
+      <div class="empty" id="tracker-empty" style="display:none; padding:24px 10px;">
+        No tokens found on the map.<br/><br/>
+        Tokens on the Character layer will appear here automatically.
+      </div>
+    </div>
+  </div>
+
+<script type="module">
+import OBR from "https://esm.sh/@owlbear-rodeo/sdk@2";
+
+const MONSTER_METADATA_KEY = "com.claude.monster-sheet/dcc-data";
+const PC_METADATA_KEY = "com.claude.monster-sheet/dcc-pc-data";
+const MODE_METADATA_KEY = "com.claude.monster-sheet/sheet-mode";
+const COMBAT_METADATA_KEY = "com.claude.monster-sheet/combat-data";
+const SCENE_STATE_KEY = "com.claude.monster-sheet/combat-state";
+
+const MONSTER_TEXT_FIELD_IDS = ["init","crit","hd","mv","act","fort","ref","will","atk","sp","notes"];
+const MONSTER_NUMBER_FIELD_IDS = ["ac"];
+const MONSTER_SELECT_FIELD_IDS = ["al"];
+const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
+
+const PC_TEXT_FIELD_IDS = ["pc-class","pc-occupation","pc-level","pc-xp","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-actdice","pc-fort","pc-ref","pc-will","pc-attack","pc-equipment","pc-spells","pc-languages","pc-notes"];
+const PC_NUMBER_FIELD_IDS = ["pc-ac"];
+const PC_SELECT_FIELD_IDS = ["pc-alignment"];
+const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
+
+const pcKey = id => id.replace(/^pc-/, "");
+
+const MODES = {
+  monster: {
+    metadataKey: MONSTER_METADATA_KEY,
+    allFieldIds: MONSTER_ALL_FIELD_IDS,
+    hpCurrentId: "hp-current",
+    hpMaxId: "hp-max",
+    keyFor: id => id,
+    containerId: "monster-fields",
+    statlineId: "statline-preview-monster",
+    buttonId: "tab-monster",
+    render: renderMonsterStatline,
+  },
+  pc: {
+    metadataKey: PC_METADATA_KEY,
+    allFieldIds: PC_ALL_FIELD_IDS,
+    hpCurrentId: "pc-hp-current",
+    hpMaxId: "pc-hp-max",
+    keyFor: pcKey,
+    containerId: "pc-fields",
+    statlineId: "statline-preview-pc",
+    buttonId: "tab-pc",
+    render: renderPcStatline,
+  },
+};
+
+const emptyState = document.getElementById("empty-state");
+const sheetEl = document.getElementById("sheet");
+const statusEl = document.getElementById("status");
+const nameEl = document.getElementById("name");
+
+let currentItemId = null;
+let currentMode = "monster";
+let saveTimeout = null;
+let suppressChange = false;
+
+function defaultData(mode) {
+  const cfg = MODES[mode];
+  const d = {};
+  cfg.allFieldIds.forEach(id => d[cfg.keyFor(id)] = "");
+  d.hpCurrent = "";
+  d.hpMax = "";
+  return d;
+}
+
+function fillForm(mode, data) {
+  const cfg = MODES[mode];
+  suppressChange = true;
+  const d = { ...defaultData(mode), ...data };
+  cfg.allFieldIds.forEach(id => document.getElementById(id).value = d[cfg.keyFor(id)] ?? "");
+  document.getElementById(cfg.hpCurrentId).value = d.hpCurrent ?? "";
+  document.getElementById(cfg.hpMaxId).value = d.hpMax ?? "";
+  suppressChange = false;
+  cfg.render(d);
+}
+
+function readForm(mode) {
+  const cfg = MODES[mode];
+  const d = {};
+  cfg.allFieldIds.forEach(id => d[cfg.keyFor(id)] = document.getElementById(id).value);
+  d.hpCurrent = document.getElementById(cfg.hpCurrentId).value;
+  d.hpMax = document.getElementById(cfg.hpMaxId).value;
+  return d;
+}
+
+function firstLine(text) {
+  return (text || "").split("\n")[0];
+}
+
+function renderMonsterStatline(d) {
+  const hp = d.hpMax ? `${d.hpCurrent || d.hpMax}/${d.hpMax}` : (d.hpCurrent || "—");
+  const parts = [
+    d.init ? `<b>Init</b> ${d.init}` : null,
+    d.atk ? `<b>Atk</b> ${firstLine(d.atk)}` : null,
+    `<b>AC</b> ${d.ac || "—"}`,
+    `<b>HD</b> ${d.hd || "—"}`,
+    `<b>HP</b> ${hp}`,
+    `<b>MV</b> ${d.mv || "—"}`,
+    `<b>Act</b> ${d.act || "—"}`,
+    d.sp ? `<b>SP</b> ${firstLine(d.sp)}` : null,
+    (d.fort || d.ref || d.will) ? `<b>SV</b> Fort ${d.fort || "+0"}, Ref ${d.ref || "+0"}, Will ${d.will || "+0"}` : null,
+    d.crit ? `<b>Crit</b> ${d.crit}` : null,
+    d.al ? `<b>AL</b> ${d.al}` : null,
+  ].filter(Boolean);
+  document.getElementById("statline-preview-monster").innerHTML = parts.join("; ");
+}
+
+function renderPcStatline(d) {
+  const hp = d.hpMax ? `${d.hpCurrent || d.hpMax}/${d.hpMax}` : (d.hpCurrent || "—");
+  const classLevel = [d.class || d.occupation || null, d.level ? `Lvl ${d.level}` : null].filter(Boolean).join(" ");
+  const parts = [
+    classLevel ? `<b>${classLevel}</b>` : null,
+    d.alignment ? `<b>AL</b> ${d.alignment}` : null,
+    d.init ? `<b>Init</b> ${d.init}` : null,
+    `<b>AC</b> ${d.ac || "—"}`,
+    `<b>HP</b> ${hp}`,
+    d.speed ? `<b>Spd</b> ${d.speed}` : null,
+    d.actdice ? `<b>Act</b> ${d.actdice}` : null,
+    (d.fort || d.ref || d.will) ? `<b>SV</b> Fort ${d.fort || "+0"}, Ref ${d.ref || "+0"}, Will ${d.will || "+0"}` : null,
+    d.crit ? `<b>Crit</b> ${d.crit}` : null,
+    d.attack ? `<b>Atk</b> ${firstLine(d.attack)}` : null,
+  ].filter(Boolean);
+  document.getElementById("statline-preview-pc").innerHTML = parts.join("; ");
+}
+
+async function saveCurrent() {
+  if (!currentItemId || suppressChange) return;
+  const cfg = MODES[currentMode];
+  const data = readForm(currentMode);
+  const name = nameEl.value;
+  await OBR.scene.items.updateItems([currentItemId], items => {
+    items.forEach(item => {
+      item.metadata[cfg.metadataKey] = data;
+      item.metadata[MODE_METADATA_KEY] = currentMode;
+      if (name.trim()) {
+        item.name = name;
+        if (item.text) {
+          item.text.plainText = name;
+          item.text.type = "PLAIN";
+        }
+      }
+    });
+  });
+  cfg.render(data);
+  showStatus("Saved");
+}
+
+function showStatus(text) {
+  statusEl.textContent = text;
+  clearTimeout(showStatus._t);
+  showStatus._t = setTimeout(() => statusEl.textContent = "", 1500);
+}
+
+function scheduleSave() {
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(saveCurrent, 300);
+}
+
+[...MONSTER_ALL_FIELD_IDS, ...PC_ALL_FIELD_IDS].forEach(id => {
+  document.getElementById(id).addEventListener("input", scheduleSave);
+});
+nameEl.addEventListener("input", scheduleSave);
+
+["hp-current", "hp-max", "pc-hp-current", "pc-hp-max"].forEach(id => {
+  document.getElementById(id).addEventListener("input", scheduleSave);
+});
+
+function adjustHp(curId, maxId, delta) {
+  const el = document.getElementById(curId);
+  const max = Number(document.getElementById(maxId).value) || Infinity;
+  el.value = Math.max(0, Math.min(max, (Number(el.value) || 0) + delta));
+  scheduleSave();
+}
+
+document.getElementById("hp-minus").addEventListener("click", () => adjustHp("hp-current", "hp-max", -1));
+document.getElementById("hp-plus").addEventListener("click", () => adjustHp("hp-current", "hp-max", 1));
+document.getElementById("pc-hp-minus").addEventListener("click", () => adjustHp("pc-hp-current", "pc-hp-max", -1));
+document.getElementById("pc-hp-plus").addEventListener("click", () => adjustHp("pc-hp-current", "pc-hp-max", 1));
+
+function setMode(mode, persist = true) {
+  currentMode = mode;
+  Object.entries(MODES).forEach(([key, cfg]) => {
+    const active = key === mode;
+    document.getElementById(cfg.containerId).style.display = active ? "block" : "none";
+    document.getElementById(cfg.buttonId).classList.toggle("active", active);
+  });
+  if (persist) scheduleSave();
+}
+
+document.getElementById("tab-monster").addEventListener("click", () => setMode("monster"));
+document.getElementById("tab-pc").addEventListener("click", () => setMode("pc"));
+
+// ---- Top-level view switching (Sheet / Tracker) ----
+const viewSheetEl = document.getElementById("view-sheet");
+const viewTrackerEl = document.getElementById("view-tracker");
+
+function setView(view) {
+  document.getElementById("nav-sheet").classList.toggle("active", view === "sheet");
+  document.getElementById("nav-tracker").classList.toggle("active", view === "tracker");
+  viewSheetEl.style.display = view === "sheet" ? "block" : "none";
+  viewTrackerEl.style.display = view === "tracker" ? "block" : "none";
+  if (view === "tracker") refreshTracker();
+}
+document.getElementById("nav-sheet").addEventListener("click", () => setView("sheet"));
+document.getElementById("nav-tracker").addEventListener("click", () => setView("tracker"));
+
+// ---- Combat Tracker ----
+let sceneState = { round: 1, activeId: null };
+let lastTrackerItems = [];
+const trackerSaveTimeouts = {};
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function parseModifier(str) {
+  if (!str) return 0;
+  const m = String(str).match(/-?\d+/);
+  return m ? parseInt(m[0], 10) : 0;
+}
+
+function getStatsForItem(item) {
+  const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+  const key = mode === "pc" ? PC_METADATA_KEY : MONSTER_METADATA_KEY;
+  const data = item.metadata[key] || defaultData(mode);
+  const combat = item.metadata[COMBAT_METADATA_KEY] || {};
+  return {
+    mode, key, data,
+    hpCurrent: data.hpCurrent ?? "",
+    hpMax: data.hpMax ?? "",
+    ac: data.ac ?? "",
+    initBonus: data.init ?? "",
+    initiative: combat.initiative ?? "",
+  };
+}
+
+function isCombatItem(item) {
+  return item.layer === "CHARACTER" && !!item.name;
+}
+
+function computeOrder(items) {
+  return items.slice().sort((a, b) => {
+    const ai = getStatsForItem(a).initiative;
+    const bi = getStatsForItem(b).initiative;
+    const av = ai === "" || ai === null || ai === undefined ? -Infinity : Number(ai);
+    const bv = bi === "" || bi === null || bi === undefined ? -Infinity : Number(bi);
+    if (bv !== av) return bv - av;
+    return (a.name || "").localeCompare(b.name || "");
+  });
+}
+
+function trackerRowHtml(item, stats, isActive) {
+  return `
+    <div class="tracker-row${isActive ? " active" : ""}" data-id="${item.id}">
+      <div class="tracker-init"><input type="number" class="init-input" value="${escapeHtml(stats.initiative)}" /></div>
+      <button class="hp-btn roll-btn" title="Roll initiative (d20${stats.initBonus ? " " + stats.initBonus : ""})">🎲</button>
+      <div class="tracker-name" title="Select on map">${isActive ? "▶ " : ""}${escapeHtml(item.name || "Unnamed")}</div>
+      <div class="tracker-hp">
+        <button class="hp-btn hp-minus">−</button>
+        <input type="number" class="hp-cur" value="${escapeHtml(stats.hpCurrent)}" />
+        <span class="hp-sep">/</span>
+        <input type="number" class="hp-max" value="${escapeHtml(stats.hpMax)}" />
+        <button class="hp-btn hp-plus">+</button>
+      </div>
+      <div class="tracker-ac"><input type="number" class="ac-input" value="${escapeHtml(stats.ac)}" /></div>
+    </div>`;
+}
+
+function renderTrackerRows(items) {
+  const listEl = document.getElementById("tracker-list");
+  const emptyEl = document.getElementById("tracker-empty");
+  document.getElementById("round-num").textContent = sceneState.round || 1;
+  if (!items.length) {
+    listEl.innerHTML = "";
+    emptyEl.style.display = "block";
+    return;
+  }
+  emptyEl.style.display = "none";
+  const order = computeOrder(items);
+  listEl.innerHTML = order.map(item => trackerRowHtml(item, getStatsForItem(item), item.id === sceneState.activeId)).join("");
+  attachTrackerRowListeners();
+}
+
+function attachTrackerRowListeners() {
+  document.querySelectorAll("#tracker-list .tracker-row[data-id]").forEach(row => {
+    const id = row.dataset.id;
+    const initInput = row.querySelector(".init-input");
+    const rollBtn = row.querySelector(".roll-btn");
+    const nameEl = row.querySelector(".tracker-name");
+    const hpCur = row.querySelector(".hp-cur");
+    const hpMax = row.querySelector(".hp-max");
+    const hpMinus = row.querySelector(".hp-minus");
+    const hpPlus = row.querySelector(".hp-plus");
+    const acInput = row.querySelector(".ac-input");
+
+    initInput.addEventListener("input", () => scheduleTrackerUpdate(id, "initiative", initInput.value));
+    rollBtn.addEventListener("click", () => rollInitiativeFor(id));
+    nameEl.addEventListener("click", () => OBR.player.select([id]));
+    hpCur.addEventListener("input", () => scheduleTrackerUpdate(id, "hpCurrent", hpCur.value));
+    hpMax.addEventListener("input", () => scheduleTrackerUpdate(id, "hpMax", hpMax.value));
+    acInput.addEventListener("input", () => scheduleTrackerUpdate(id, "ac", acInput.value));
+    hpMinus.addEventListener("click", () => {
+      const max = Number(hpMax.value) || Infinity;
+      hpCur.value = Math.max(0, Math.min(max, (Number(hpCur.value) || 0) - 1));
+      scheduleTrackerUpdate(id, "hpCurrent", hpCur.value);
+    });
+    hpPlus.addEventListener("click", () => {
+      const max = Number(hpMax.value) || Infinity;
+      hpCur.value = Math.max(0, Math.min(max, (Number(hpCur.value) || 0) + 1));
+      scheduleTrackerUpdate(id, "hpCurrent", hpCur.value);
+    });
+  });
+}
+
+function scheduleTrackerUpdate(id, field, value) {
+  const key = id + ":" + field;
+  clearTimeout(trackerSaveTimeouts[key]);
+  trackerSaveTimeouts[key] = setTimeout(() => applyTrackerUpdate(id, field, value), 300);
+}
+
+async function applyTrackerUpdate(id, field, value) {
+  if (field === "initiative") {
+    await OBR.scene.items.updateItems([id], items => {
+      items.forEach(item => {
+        const combat = item.metadata[COMBAT_METADATA_KEY] || {};
+        item.metadata[COMBAT_METADATA_KEY] = { ...combat, initiative: value };
+      });
+    });
+    return;
+  }
+  await OBR.scene.items.updateItems([id], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      const key = mode === "pc" ? PC_METADATA_KEY : MONSTER_METADATA_KEY;
+      const data = { ...(item.metadata[key] || defaultData(mode)) };
+      data[field] = value;
+      item.metadata[key] = data;
+    });
+  });
+}
+
+async function rollInitiativeFor(id) {
+  const item = lastTrackerItems.find(i => i.id === id) || (await OBR.scene.items.getItems([id]))[0];
+  if (!item) return;
+  const stats = getStatsForItem(item);
+  const mod = parseModifier(stats.initBonus);
+  const roll = Math.floor(Math.random() * 20) + 1 + mod;
+  await OBR.scene.items.updateItems([id], items => {
+    items.forEach(it => {
+      const combat = it.metadata[COMBAT_METADATA_KEY] || {};
+      it.metadata[COMBAT_METADATA_KEY] = { ...combat, initiative: roll };
+    });
+  });
+}
+
+async function refreshTracker() {
+  const items = await OBR.scene.items.getItems();
+  lastTrackerItems = items.filter(isCombatItem);
+  renderTrackerRows(lastTrackerItems);
+}
+
+async function nextTurn() {
+  const order = computeOrder(lastTrackerItems);
+  if (!order.length) return;
+  let idx = order.findIndex(i => i.id === sceneState.activeId);
+  let round = sceneState.round || 1;
+  idx = idx === -1 ? 0 : idx + 1;
+  if (idx >= order.length) { idx = 0; round += 1; }
+  sceneState = { round, activeId: order[idx].id };
+  await OBR.scene.setMetadata({ [SCENE_STATE_KEY]: sceneState });
+}
+
+async function prevTurn() {
+  const order = computeOrder(lastTrackerItems);
+  if (!order.length) return;
+  let idx = order.findIndex(i => i.id === sceneState.activeId);
+  let round = sceneState.round || 1;
+  idx = idx === -1 ? 0 : idx - 1;
+  if (idx < 0) { idx = order.length - 1; round = Math.max(1, round - 1); }
+  sceneState = { round, activeId: order[idx].id };
+  await OBR.scene.setMetadata({ [SCENE_STATE_KEY]: sceneState });
+}
+
+async function resetTracker() {
+  sceneState = { round: 1, activeId: null };
+  await OBR.scene.setMetadata({ [SCENE_STATE_KEY]: sceneState });
+}
+
+document.getElementById("next-turn").addEventListener("click", nextTurn);
+document.getElementById("prev-turn").addEventListener("click", prevTurn);
+document.getElementById("reset-tracker").addEventListener("click", resetTracker);
+
+async function loadSelection(selection) {
+  if (!selection || selection.length === 0) {
+    currentItemId = null;
+    emptyState.style.display = "block";
+    sheetEl.style.display = "none";
+    return;
+  }
+  const items = await OBR.scene.items.getItems(selection);
+  const item = items[0];
+  if (!item) return;
+  currentItemId = item.id;
+  const monsterData = item.metadata[MONSTER_METADATA_KEY] || defaultData("monster");
+  const pcData = item.metadata[PC_METADATA_KEY] || defaultData("pc");
+  fillForm("monster", monsterData);
+  fillForm("pc", pcData);
+  setMode(item.metadata[MODE_METADATA_KEY] || "monster", false);
+  suppressChange = true;
+  nameEl.value = item.name || "";
+  suppressChange = false;
+  emptyState.style.display = "none";
+  sheetEl.style.display = "block";
+}
+
+OBR.onReady(async () => {
+  const selection = await OBR.player.getSelection();
+  await loadSelection(selection);
+
+  const sceneMeta = await OBR.scene.getMetadata();
+  sceneState = sceneMeta[SCENE_STATE_KEY] || { round: 1, activeId: null };
+
+  OBR.player.onChange(async (player) => {
+    await loadSelection(player.selection);
+  });
+
+  OBR.scene.onMetadataChange((metadata) => {
+    sceneState = metadata[SCENE_STATE_KEY] || { round: 1, activeId: null };
+    if (viewTrackerEl.style.display !== "none") {
+      renderTrackerRows(lastTrackerItems);
+    }
+  });
+
+  OBR.scene.items.onChange(async (items) => {
+    if (currentItemId) {
+      const item = items.find(i => i.id === currentItemId);
+      if (item) {
+        const monsterData = item.metadata[MONSTER_METADATA_KEY] || defaultData("monster");
+        const pcData = item.metadata[PC_METADATA_KEY] || defaultData("pc");
+        fillForm("monster", monsterData);
+        fillForm("pc", pcData);
+        setMode(item.metadata[MODE_METADATA_KEY] || currentMode, false);
+        if (document.activeElement !== nameEl) {
+          nameEl.value = item.name || "";
+        }
+      }
+    }
+
+    if (viewTrackerEl.style.display !== "none") {
+      lastTrackerItems = items.filter(isCombatItem);
+      renderTrackerRows(lastTrackerItems);
+    }
+  });
+});
+</script>
+</body>
+</html>

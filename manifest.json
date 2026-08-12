@@ -1,0 +1,14 @@
+{
+  "name": "DCC Character Sheet",
+  "version": "1.1.0",
+  "manifest_version": 1,
+  "author": "You",
+  "description": "A Dungeon Crawl Classics stat block editor for monster/NPC and player character tokens.",
+  "action": {
+    "title": "DCC Character Sheet",
+    "icon": "/icon.svg",
+    "popover": "/index.html",
+    "height": 640,
+    "width": 420
+  }
+}
