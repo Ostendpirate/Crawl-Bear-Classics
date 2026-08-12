@@ -565,13 +565,14 @@
   </div>
 
 <script type="module">
-import OBR from "https://esm.sh/@owlbear-rodeo/sdk@2";
+import OBR, { buildShape } from "https://esm.sh/@owlbear-rodeo/sdk@2";
 
 const MONSTER_METADATA_KEY = "com.claude.monster-sheet/dcc-data";
 const PC_METADATA_KEY = "com.claude.monster-sheet/dcc-pc-data";
 const MODE_METADATA_KEY = "com.claude.monster-sheet/sheet-mode";
 const COMBAT_METADATA_KEY = "com.claude.monster-sheet/combat-data";
 const SCENE_STATE_KEY = "com.claude.monster-sheet/combat-state";
+const DIM_OVERLAY_METADATA_KEY = "com.claude.monster-sheet/dim-overlay";
 
 const MONSTER_TEXT_FIELD_IDS = ["init","crit","hd","mv","act","fort","ref","will","atk","sp","notes"];
 const MONSTER_NUMBER_FIELD_IDS = ["ac"];
@@ -913,6 +914,56 @@ async function applyTrackerUpdate(id, field, value) {
   });
 }
 
+async function setTokenDimmed(id, dim) {
+  try {
+    const allItems = await OBR.scene.items.getItems();
+    const existingOverlays = allItems.filter(
+      i => i.attachedTo === id && i.metadata && i.metadata[DIM_OVERLAY_METADATA_KEY]
+    );
+    if (existingOverlays.length) {
+      await OBR.scene.items.deleteItems(existingOverlays.map(i => i.id));
+    }
+    if (!dim) return;
+
+    const bounds = await OBR.scene.items.getItemBounds([id]);
+    if (!bounds) return;
+    let minX, minY, width, height;
+    if (bounds.min && bounds.max) {
+      minX = bounds.min.x;
+      minY = bounds.min.y;
+      width = bounds.max.x - bounds.min.x;
+      height = bounds.max.y - bounds.min.y;
+    } else if (typeof bounds.width === "number") {
+      minX = bounds.x;
+      minY = bounds.y;
+      width = bounds.width;
+      height = bounds.height;
+    } else {
+      return;
+    }
+    if (!width || !height) return;
+
+    const overlay = buildShape()
+      .width(width)
+      .height(height)
+      .shapeType("RECTANGLE")
+      .position({ x: minX, y: minY })
+      .fillColor("#000000")
+      .fillOpacity(0.55)
+      .strokeOpacity(0)
+      .strokeWidth(0)
+      .attachedTo(id)
+      .layer("ATTACHMENT")
+      .locked(true)
+      .disableHit(true)
+      .metadata({ [DIM_OVERLAY_METADATA_KEY]: true })
+      .build();
+    await OBR.scene.items.addItems([overlay]);
+  } catch (err) {
+    console.error("DCC Sheet: failed to update token dim overlay", err);
+  }
+}
+
 async function toggleEnabled(id) {
   const item = lastTrackerItems.find(i => i.id === id) || (await OBR.scene.items.getItems([id]))[0];
   if (!item) return;
@@ -924,6 +975,7 @@ async function toggleEnabled(id) {
       it.metadata[COMBAT_METADATA_KEY] = { ...combat, enabled: nextEnabled };
     });
   });
+  await setTokenDimmed(id, !nextEnabled);
   // If we just deactivated the token whose turn it currently is, hand off to the next active combatant.
   if (!nextEnabled && sceneState.activeId === id) {
     await nextTurn();
