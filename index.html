@@ -278,6 +278,32 @@
     border-radius: 5px;
     color: var(--text);
   }
+  .tracker-row.inactive { opacity: 0.4; }
+  .tracker-row.inactive .tracker-name { text-decoration: line-through; }
+  .toggle-switch {
+    flex: none;
+    width: 30px;
+    height: 17px;
+    border-radius: 10px;
+    background: var(--border);
+    border: none;
+    position: relative;
+    cursor: pointer;
+    padding: 0;
+  }
+  .toggle-switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: left 0.15s ease, background 0.15s ease;
+  }
+  .toggle-switch.on { background: var(--good); }
+  .toggle-switch.on::after { left: 15px; background: #fff; }
 </style>
 </head>
 <body>
@@ -522,6 +548,7 @@
       </div>
 
       <div class="tracker-row tracker-row-header">
+        <div style="width:30px;"></div>
         <div class="tracker-init">Init</div>
         <div style="width:22px;"></div>
         <div class="tracker-name">Name</div>
@@ -770,6 +797,7 @@ function getStatsForItem(item) {
     ac: data.ac ?? "",
     initBonus: data.init ?? "",
     initiative: combat.initiative ?? "",
+    enabled: combat.enabled !== false,
   };
 }
 
@@ -788,9 +816,14 @@ function computeOrder(items) {
   });
 }
 
+function computeActiveOrder(items) {
+  return computeOrder(items).filter(item => getStatsForItem(item).enabled);
+}
+
 function trackerRowHtml(item, stats, isActive) {
   return `
-    <div class="tracker-row${isActive ? " active" : ""}" data-id="${item.id}">
+    <div class="tracker-row${isActive ? " active" : ""}${!stats.enabled ? " inactive" : ""}" data-id="${item.id}">
+      <button class="toggle-switch${stats.enabled ? " on" : ""}" title="${stats.enabled ? "Deactivate" : "Activate"} this token" aria-pressed="${stats.enabled}"></button>
       <div class="tracker-init"><input type="number" class="init-input" value="${escapeHtml(stats.initiative)}" /></div>
       <button class="hp-btn roll-btn" title="Roll initiative (d20${stats.initBonus ? " " + stats.initBonus : ""})">🎲</button>
       <div class="tracker-name" title="Select on map">${isActive ? "▶ " : ""}${escapeHtml(item.name || "Unnamed")}</div>
@@ -823,6 +856,7 @@ function renderTrackerRows(items) {
 function attachTrackerRowListeners() {
   document.querySelectorAll("#tracker-list .tracker-row[data-id]").forEach(row => {
     const id = row.dataset.id;
+    const toggleBtn = row.querySelector(".toggle-switch");
     const initInput = row.querySelector(".init-input");
     const rollBtn = row.querySelector(".roll-btn");
     const nameEl = row.querySelector(".tracker-name");
@@ -832,6 +866,7 @@ function attachTrackerRowListeners() {
     const hpPlus = row.querySelector(".hp-plus");
     const acInput = row.querySelector(".ac-input");
 
+    toggleBtn.addEventListener("click", () => toggleEnabled(id));
     initInput.addEventListener("input", () => scheduleTrackerUpdate(id, "initiative", initInput.value));
     rollBtn.addEventListener("click", () => rollInitiativeFor(id));
     nameEl.addEventListener("click", () => OBR.player.select([id]));
@@ -858,11 +893,11 @@ function scheduleTrackerUpdate(id, field, value) {
 }
 
 async function applyTrackerUpdate(id, field, value) {
-  if (field === "initiative") {
+  if (field === "initiative" || field === "enabled") {
     await OBR.scene.items.updateItems([id], items => {
       items.forEach(item => {
         const combat = item.metadata[COMBAT_METADATA_KEY] || {};
-        item.metadata[COMBAT_METADATA_KEY] = { ...combat, initiative: value };
+        item.metadata[COMBAT_METADATA_KEY] = { ...combat, [field]: value };
       });
     });
     return;
@@ -876,6 +911,23 @@ async function applyTrackerUpdate(id, field, value) {
       item.metadata[key] = data;
     });
   });
+}
+
+async function toggleEnabled(id) {
+  const item = lastTrackerItems.find(i => i.id === id) || (await OBR.scene.items.getItems([id]))[0];
+  if (!item) return;
+  const stats = getStatsForItem(item);
+  const nextEnabled = !stats.enabled;
+  await OBR.scene.items.updateItems([id], items => {
+    items.forEach(it => {
+      const combat = it.metadata[COMBAT_METADATA_KEY] || {};
+      it.metadata[COMBAT_METADATA_KEY] = { ...combat, enabled: nextEnabled };
+    });
+  });
+  // If we just deactivated the token whose turn it currently is, hand off to the next active combatant.
+  if (!nextEnabled && sceneState.activeId === id) {
+    await nextTurn();
+  }
 }
 
 async function rollInitiativeFor(id) {
@@ -899,7 +951,7 @@ async function refreshTracker() {
 }
 
 async function nextTurn() {
-  const order = computeOrder(lastTrackerItems);
+  const order = computeActiveOrder(lastTrackerItems);
   if (!order.length) return;
   let idx = order.findIndex(i => i.id === sceneState.activeId);
   let round = sceneState.round || 1;
@@ -910,7 +962,7 @@ async function nextTurn() {
 }
 
 async function prevTurn() {
-  const order = computeOrder(lastTrackerItems);
+  const order = computeActiveOrder(lastTrackerItems);
   if (!order.length) return;
   let idx = order.findIndex(i => i.id === sceneState.activeId);
   let round = sceneState.round || 1;
