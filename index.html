@@ -546,6 +546,7 @@
           <button class="hp-btn" id="reset-tracker" title="Reset round & turns">⟲</button>
         </div>
       </div>
+      <div class="status" id="tracker-status"></div>
 
       <div class="tracker-row tracker-row-header">
         <div style="width:30px;"></div>
@@ -901,6 +902,7 @@ async function applyTrackerUpdate(id, field, value) {
         item.metadata[COMBAT_METADATA_KEY] = { ...combat, [field]: value };
       });
     });
+    await refreshTracker();
     return;
   }
   await OBR.scene.items.updateItems([id], items => {
@@ -912,6 +914,16 @@ async function applyTrackerUpdate(id, field, value) {
       item.metadata[key] = data;
     });
   });
+  await refreshTracker();
+}
+
+function showTrackerStatus(text, isError) {
+  const el = document.getElementById("tracker-status");
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = isError ? "#c97b7b" : "var(--good)";
+  clearTimeout(showTrackerStatus._t);
+  showTrackerStatus._t = setTimeout(() => { el.textContent = ""; }, isError ? 6000 : 1500);
 }
 
 async function setTokenDimmed(id, dim) {
@@ -926,7 +938,10 @@ async function setTokenDimmed(id, dim) {
     if (!dim) return;
 
     const bounds = await OBR.scene.items.getItemBounds([id]);
-    if (!bounds) return;
+    if (!bounds) {
+      showTrackerStatus("Dim failed: no bounds returned", true);
+      return;
+    }
     let minX, minY, width, height;
     if (bounds.min && bounds.max) {
       minX = bounds.min.x;
@@ -939,9 +954,13 @@ async function setTokenDimmed(id, dim) {
       width = bounds.width;
       height = bounds.height;
     } else {
+      showTrackerStatus("Dim failed: unrecognized bounds shape", true);
       return;
     }
-    if (!width || !height) return;
+    if (!width || !height) {
+      showTrackerStatus("Dim failed: zero-size bounds", true);
+      return;
+    }
 
     const overlay = buildShape()
       .width(width)
@@ -961,11 +980,12 @@ async function setTokenDimmed(id, dim) {
     await OBR.scene.items.addItems([overlay]);
   } catch (err) {
     console.error("DCC Sheet: failed to update token dim overlay", err);
+    showTrackerStatus("Dim failed: " + (err && err.message ? err.message : String(err)), true);
   }
 }
 
 async function toggleEnabled(id) {
-  const item = lastTrackerItems.find(i => i.id === id) || (await OBR.scene.items.getItems([id]))[0];
+  const [item] = await OBR.scene.items.getItems([id]);
   if (!item) return;
   const stats = getStatsForItem(item);
   const nextEnabled = !stats.enabled;
@@ -980,10 +1000,11 @@ async function toggleEnabled(id) {
   if (!nextEnabled && sceneState.activeId === id) {
     await nextTurn();
   }
+  await refreshTracker();
 }
 
 async function rollInitiativeFor(id) {
-  const item = lastTrackerItems.find(i => i.id === id) || (await OBR.scene.items.getItems([id]))[0];
+  const [item] = await OBR.scene.items.getItems([id]);
   if (!item) return;
   const stats = getStatsForItem(item);
   const mod = parseModifier(stats.initBonus);
@@ -994,6 +1015,7 @@ async function rollInitiativeFor(id) {
       it.metadata[COMBAT_METADATA_KEY] = { ...combat, initiative: roll };
     });
   });
+  await refreshTracker();
 }
 
 async function refreshTracker() {
@@ -1010,6 +1032,7 @@ async function nextTurn() {
   idx = idx === -1 ? 0 : idx + 1;
   if (idx >= order.length) { idx = 0; round += 1; }
   sceneState = { round, activeId: order[idx].id };
+  renderTrackerRows(lastTrackerItems);
   await OBR.scene.setMetadata({ [SCENE_STATE_KEY]: sceneState });
 }
 
@@ -1021,11 +1044,13 @@ async function prevTurn() {
   idx = idx === -1 ? 0 : idx - 1;
   if (idx < 0) { idx = order.length - 1; round = Math.max(1, round - 1); }
   sceneState = { round, activeId: order[idx].id };
+  renderTrackerRows(lastTrackerItems);
   await OBR.scene.setMetadata({ [SCENE_STATE_KEY]: sceneState });
 }
 
 async function resetTracker() {
   sceneState = { round: 1, activeId: null };
+  renderTrackerRows(lastTrackerItems);
   await OBR.scene.setMetadata({ [SCENE_STATE_KEY]: sceneState });
 }
 
