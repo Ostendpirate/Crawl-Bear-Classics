@@ -6,8 +6,8 @@
   "description": "A Dungeon Crawl Classics stat block editor for monster/NPC and player character tokens.",
   "action": {
     "title": "DCC Character Sheet",
-    "icon": "/icon.svg",
-    "popover": "/index.html",
+    "icon": "./icon.svg",
+    "popover": "./index.html",
     "height": 640,
     "width": 420
   }
