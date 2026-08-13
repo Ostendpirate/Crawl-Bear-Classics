@@ -280,6 +280,65 @@
   }
   .tracker-row.inactive { opacity: 0.4; }
   .tracker-row.inactive .tracker-name { text-decoration: line-through; }
+  .attack-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+  .attack-row {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 6px;
+  }
+  .attack-row input[type=text] {
+    padding: 4px 6px;
+    font-size: 12px;
+    min-width: 0;
+  }
+  .attack-row .attack-name { flex: 1.6; }
+  .attack-row .attack-bonus { flex: 0.7; text-align: center; }
+  .attack-row .attack-damage { flex: 0.9; text-align: center; }
+  .attack-remove-btn {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    border: none;
+    background: var(--border);
+    color: var(--text);
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+  }
+  .attack-remove-btn:hover { background: #a5453a; }
+  .add-attack-btn {
+    width: 100%;
+    background: var(--panel);
+    border: 1px dashed var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 7px;
+    font-size: 11px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .add-attack-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .atk-toggle-btn.on { background: var(--accent); color: #1e1b18; }
+  .attack-detail {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    margin: -6px 0 6px;
+    padding: 6px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .attack-detail-row { display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
+  .attack-detail-name { flex: 1; color: var(--text); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .attack-detail-meta { color: var(--muted); white-space: nowrap; }
+  .attack-roll-btn { flex: none; width: 22px; height: 22px; font-size: 11px; }
   .toggle-switch {
     flex: none;
     width: 30px;
@@ -396,8 +455,9 @@
         </div>
 
         <fieldset>
-          <legend>Atk</legend>
-          <textarea id="atk" placeholder="claw +4 melee (1d6) or bite +2 melee (1d8)"></textarea>
+          <legend>Attacks</legend>
+          <div class="attack-list" id="attack-list-monster"></div>
+          <button type="button" class="add-attack-btn" id="add-attack-monster">+ Add Attack</button>
         </fieldset>
 
         <fieldset>
@@ -503,8 +563,9 @@
         </div>
 
         <fieldset>
-          <legend>Attack</legend>
-          <textarea id="pc-attack" placeholder="Longsword +1 melee (1d8+1) or Sling +0 missile (1d4)"></textarea>
+          <legend>Attacks</legend>
+          <div class="attack-list" id="attack-list-pc"></div>
+          <button type="button" class="add-attack-btn" id="add-attack-pc">+ Add Attack</button>
         </fieldset>
 
         <fieldset>
@@ -555,6 +616,7 @@
         <div class="tracker-name">Name</div>
         <div class="tracker-hp">HP</div>
         <div class="tracker-ac">AC</div>
+        <div style="width:22px;"></div>
       </div>
 
       <div class="tracker-list" id="tracker-list"></div>
@@ -575,12 +637,12 @@ const COMBAT_METADATA_KEY = "com.claude.monster-sheet/combat-data";
 const SCENE_STATE_KEY = "com.claude.monster-sheet/combat-state";
 const DIM_OVERLAY_METADATA_KEY = "com.claude.monster-sheet/dim-overlay";
 
-const MONSTER_TEXT_FIELD_IDS = ["init","crit","hd","mv","act","fort","ref","will","atk","sp","notes"];
+const MONSTER_TEXT_FIELD_IDS = ["init","crit","hd","mv","act","fort","ref","will","sp","notes"];
 const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-class","pc-occupation","pc-level","pc-xp","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-actdice","pc-fort","pc-ref","pc-will","pc-attack","pc-equipment","pc-spells","pc-languages","pc-notes"];
+const PC_TEXT_FIELD_IDS = ["pc-class","pc-occupation","pc-level","pc-xp","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-actdice","pc-fort","pc-ref","pc-will","pc-equipment","pc-spells","pc-languages","pc-notes"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
 const PC_SELECT_FIELD_IDS = ["pc-alignment"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
@@ -628,6 +690,7 @@ function defaultData(mode) {
   cfg.allFieldIds.forEach(id => d[cfg.keyFor(id)] = "");
   d.hpCurrent = "";
   d.hpMax = "";
+  d.attacks = [];
   return d;
 }
 
@@ -638,6 +701,7 @@ function fillForm(mode, data) {
   cfg.allFieldIds.forEach(id => document.getElementById(id).value = d[cfg.keyFor(id)] ?? "");
   document.getElementById(cfg.hpCurrentId).value = d.hpCurrent ?? "";
   document.getElementById(cfg.hpMaxId).value = d.hpMax ?? "";
+  renderAttacks(mode, d.attacks || []);
   suppressChange = false;
   cfg.render(d);
 }
@@ -648,18 +712,91 @@ function readForm(mode) {
   cfg.allFieldIds.forEach(id => d[cfg.keyFor(id)] = document.getElementById(id).value);
   d.hpCurrent = document.getElementById(cfg.hpCurrentId).value;
   d.hpMax = document.getElementById(cfg.hpMaxId).value;
+  d.attacks = readAttacks(mode);
   return d;
 }
+
+function emptyAttack() {
+  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "" };
+}
+
+function attackRowHtml(atk) {
+  return `
+    <div class="attack-row" data-id="${atk.id}">
+      <input type="text" class="attack-name" placeholder="Claw" value="${escapeHtml(atk.name)}" />
+      <input type="text" class="attack-bonus" placeholder="+4" value="${escapeHtml(atk.bonus)}" />
+      <input type="text" class="attack-damage" placeholder="1d6" value="${escapeHtml(atk.damage)}" />
+      <button type="button" class="attack-remove-btn" title="Remove attack">×</button>
+    </div>`;
+}
+
+function attackListEl(mode) {
+  return document.getElementById(mode === "pc" ? "attack-list-pc" : "attack-list-monster");
+}
+
+function renderAttacks(mode, attacks) {
+  const listEl = attackListEl(mode);
+  listEl.innerHTML = (attacks || []).map(atk => attackRowHtml(atk)).join("");
+  attachAttackRowListeners(mode);
+}
+
+function readAttacks(mode) {
+  const listEl = attackListEl(mode);
+  return Array.from(listEl.querySelectorAll(".attack-row")).map(row => ({
+    id: row.dataset.id,
+    name: row.querySelector(".attack-name").value,
+    bonus: row.querySelector(".attack-bonus").value,
+    damage: row.querySelector(".attack-damage").value,
+  }));
+}
+
+function attachAttackRowListeners(mode) {
+  attackListEl(mode).querySelectorAll(".attack-row").forEach(row => {
+    row.querySelectorAll("input").forEach(inp => inp.addEventListener("input", scheduleSave));
+    row.querySelector(".attack-remove-btn").addEventListener("click", () => {
+      row.remove();
+      scheduleSave();
+      cfgRenderFromCurrentForm(mode);
+    });
+  });
+}
+
+function cfgRenderFromCurrentForm(mode) {
+  MODES[mode].render(readForm(mode));
+}
+
+document.getElementById("add-attack-monster").addEventListener("click", () => {
+  attackListEl("monster").insertAdjacentHTML("beforeend", attackRowHtml(emptyAttack()));
+  attachAttackRowListeners("monster");
+});
+document.getElementById("add-attack-pc").addEventListener("click", () => {
+  attackListEl("pc").insertAdjacentHTML("beforeend", attackRowHtml(emptyAttack()));
+  attachAttackRowListeners("pc");
+});
 
 function firstLine(text) {
   return (text || "").split("\n")[0];
 }
 
+function formatAttacksSummary(attacks) {
+  if (!attacks || !attacks.length) return null;
+  const parts = attacks
+    .filter(a => a.name || a.bonus || a.damage)
+    .map(a => {
+      let s = a.name || "Attack";
+      if (a.bonus) s += " " + a.bonus;
+      if (a.damage) s += ` (${a.damage})`;
+      return s;
+    });
+  return parts.length ? parts.join(", ") : null;
+}
+
 function renderMonsterStatline(d) {
   const hp = d.hpMax ? `${d.hpCurrent || d.hpMax}/${d.hpMax}` : (d.hpCurrent || "—");
+  const atkSummary = formatAttacksSummary(d.attacks);
   const parts = [
     d.init ? `<b>Init</b> ${d.init}` : null,
-    d.atk ? `<b>Atk</b> ${firstLine(d.atk)}` : null,
+    atkSummary ? `<b>Atk</b> ${atkSummary}` : null,
     `<b>AC</b> ${d.ac || "—"}`,
     `<b>HD</b> ${d.hd || "—"}`,
     `<b>HP</b> ${hp}`,
@@ -676,6 +813,7 @@ function renderMonsterStatline(d) {
 function renderPcStatline(d) {
   const hp = d.hpMax ? `${d.hpCurrent || d.hpMax}/${d.hpMax}` : (d.hpCurrent || "—");
   const classLevel = [d.class || d.occupation || null, d.level ? `Lvl ${d.level}` : null].filter(Boolean).join(" ");
+  const atkSummary = formatAttacksSummary(d.attacks);
   const parts = [
     classLevel ? `<b>${classLevel}</b>` : null,
     d.alignment ? `<b>AL</b> ${d.alignment}` : null,
@@ -686,7 +824,7 @@ function renderPcStatline(d) {
     d.actdice ? `<b>Act</b> ${d.actdice}` : null,
     (d.fort || d.ref || d.will) ? `<b>SV</b> Fort ${d.fort || "+0"}, Ref ${d.ref || "+0"}, Will ${d.will || "+0"}` : null,
     d.crit ? `<b>Crit</b> ${d.crit}` : null,
-    d.attack ? `<b>Atk</b> ${firstLine(d.attack)}` : null,
+    atkSummary ? `<b>Atk</b> ${atkSummary}` : null,
   ].filter(Boolean);
   document.getElementById("statline-preview-pc").innerHTML = parts.join("; ");
 }
@@ -776,6 +914,7 @@ document.getElementById("nav-tracker").addEventListener("click", () => setView("
 let sceneState = { round: 1, activeId: null };
 let lastTrackerItems = [];
 const trackerSaveTimeouts = {};
+const expandedAttackRows = new Set();
 
 function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -785,6 +924,17 @@ function parseModifier(str) {
   if (!str) return 0;
   const m = String(str).match(/-?\d+/);
   return m ? parseInt(m[0], 10) : 0;
+}
+
+function rollDamage(diceStr) {
+  const m = String(diceStr || "").match(/(\d*)d(\d+)\s*([+-]\s*\d+)?/i);
+  if (!m) return null;
+  const count = parseInt(m[1] || "1", 10) || 1;
+  const sides = parseInt(m[2], 10);
+  const mod = m[3] ? parseInt(m[3].replace(/\s+/g, ""), 10) : 0;
+  let total = 0;
+  for (let i = 0; i < count; i++) total += Math.floor(Math.random() * sides) + 1;
+  return total + mod;
 }
 
 function getStatsForItem(item) {
@@ -800,6 +950,7 @@ function getStatsForItem(item) {
     initBonus: data.init ?? "",
     initiative: combat.initiative ?? "",
     enabled: combat.enabled !== false,
+    attacks: (data.attacks || []).filter(a => a.name || a.bonus || a.damage),
   };
 }
 
@@ -823,6 +974,8 @@ function computeActiveOrder(items) {
 }
 
 function trackerRowHtml(item, stats, isActive) {
+  const hasAttacks = stats.attacks.length > 0;
+  const expanded = hasAttacks && expandedAttackRows.has(item.id);
   return `
     <div class="tracker-row${isActive ? " active" : ""}${!stats.enabled ? " inactive" : ""}" data-id="${item.id}">
       <button class="toggle-switch${stats.enabled ? " on" : ""}" title="${stats.enabled ? "Deactivate" : "Activate"} this token" aria-pressed="${stats.enabled}"></button>
@@ -837,6 +990,22 @@ function trackerRowHtml(item, stats, isActive) {
         <button class="hp-btn hp-plus">+</button>
       </div>
       <div class="tracker-ac"><input type="number" class="ac-input" value="${escapeHtml(stats.ac)}" /></div>
+      ${hasAttacks
+        ? `<button class="hp-btn atk-toggle-btn${expanded ? " on" : ""}" title="Show attacks">⚔</button>`
+        : `<div style="width:22px;"></div>`}
+    </div>
+    ${expanded ? attackDetailHtml(item, stats.attacks) : ""}`;
+}
+
+function attackDetailHtml(item, attacks) {
+  return `
+    <div class="attack-detail" data-parent-id="${item.id}">
+      ${attacks.map(a => `
+        <div class="attack-detail-row" data-attack-id="${a.id}">
+          <span class="attack-detail-name">${escapeHtml(a.name || "Attack")}</span>
+          <span class="attack-detail-meta">${escapeHtml(a.bonus || "+0")}${a.damage ? " · " + escapeHtml(a.damage) : ""}</span>
+          <button class="hp-btn attack-roll-btn" title="Roll this attack">🎲</button>
+        </div>`).join("")}
     </div>`;
 }
 
@@ -855,12 +1024,32 @@ function renderTrackerRows(items) {
   attachTrackerRowListeners();
 }
 
+async function rollAttackFor(itemId, attackId) {
+  const [item] = await OBR.scene.items.getItems([itemId]);
+  if (!item) return;
+  const stats = getStatsForItem(item);
+  const atk = stats.attacks.find(a => a.id === attackId);
+  if (!atk) return;
+  const toHit = Math.floor(Math.random() * 20) + 1 + parseModifier(atk.bonus);
+  const dmg = rollDamage(atk.damage);
+  const label = `${item.name || "Token"} — ${atk.name || "Attack"}: ${toHit} to hit${dmg !== null ? `, ${dmg} dmg` : ""}`;
+  showTrackerStatus(label, false, 5000);
+}
+
 function attachTrackerRowListeners() {
+  document.querySelectorAll("#tracker-list .attack-detail").forEach(detail => {
+    const parentId = detail.dataset.parentId;
+    detail.querySelectorAll(".attack-detail-row").forEach(row => {
+      const attackId = row.dataset.attackId;
+      row.querySelector(".attack-roll-btn").addEventListener("click", () => rollAttackFor(parentId, attackId));
+    });
+  });
   document.querySelectorAll("#tracker-list .tracker-row[data-id]").forEach(row => {
     const id = row.dataset.id;
     const toggleBtn = row.querySelector(".toggle-switch");
     const initInput = row.querySelector(".init-input");
     const rollBtn = row.querySelector(".roll-btn");
+    const atkToggleBtn = row.querySelector(".atk-toggle-btn");
     const nameEl = row.querySelector(".tracker-name");
     const hpCur = row.querySelector(".hp-cur");
     const hpMax = row.querySelector(".hp-max");
@@ -871,6 +1060,13 @@ function attachTrackerRowListeners() {
     toggleBtn.addEventListener("click", () => toggleEnabled(id));
     initInput.addEventListener("input", () => scheduleTrackerUpdate(id, "initiative", initInput.value));
     rollBtn.addEventListener("click", () => rollInitiativeFor(id));
+    if (atkToggleBtn) {
+      atkToggleBtn.addEventListener("click", () => {
+        if (expandedAttackRows.has(id)) expandedAttackRows.delete(id);
+        else expandedAttackRows.add(id);
+        renderTrackerRows(lastTrackerItems);
+      });
+    }
     nameEl.addEventListener("click", () => OBR.player.select([id]));
     hpCur.addEventListener("input", () => scheduleTrackerUpdate(id, "hpCurrent", hpCur.value));
     hpMax.addEventListener("input", () => scheduleTrackerUpdate(id, "hpMax", hpMax.value));
@@ -917,13 +1113,13 @@ async function applyTrackerUpdate(id, field, value) {
   await refreshTracker();
 }
 
-function showTrackerStatus(text, isError) {
+function showTrackerStatus(text, isError, duration) {
   const el = document.getElementById("tracker-status");
   if (!el) return;
   el.textContent = text;
   el.style.color = isError ? "#c97b7b" : "var(--good)";
   clearTimeout(showTrackerStatus._t);
-  showTrackerStatus._t = setTimeout(() => { el.textContent = ""; }, isError ? 6000 : 1500);
+  showTrackerStatus._t = setTimeout(() => { el.textContent = ""; }, duration ?? (isError ? 6000 : 1500));
 }
 
 async function setTokenDimmed(id, dim) {
