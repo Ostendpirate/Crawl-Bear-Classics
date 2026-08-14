@@ -883,6 +883,16 @@ document.getElementById("hp-plus").addEventListener("click", () => adjustHp("hp-
 document.getElementById("pc-hp-minus").addEventListener("click", () => adjustHp("pc-hp-current", "pc-hp-max", -1));
 document.getElementById("pc-hp-plus").addEventListener("click", () => adjustHp("pc-hp-current", "pc-hp-max", 1));
 
+function isEditingSheetField() {
+  const active = document.activeElement;
+  if (!active) return false;
+  if (active === nameEl) return true;
+  if (["hp-current", "hp-max", "pc-hp-current", "pc-hp-max"].includes(active.id)) return true;
+  if (MONSTER_ALL_FIELD_IDS.includes(active.id) || PC_ALL_FIELD_IDS.includes(active.id)) return true;
+  if (active.closest(".attack-list")) return true;
+  return false;
+}
+
 function setMode(mode, persist = true) {
   currentMode = mode;
   Object.entries(MODES).forEach(([key, cfg]) => {
@@ -1296,14 +1306,24 @@ OBR.onReady(async () => {
     if (currentItemId) {
       const item = items.find(i => i.id === currentItemId);
       if (item) {
+        // If the user is actively typing anywhere in the sheet (including
+        // an attack row), skip rebuilding the form entirely. fillForm()
+        // rebuilds the attack list via innerHTML, which destroys and
+        // recreates those input elements and drops focus mid-keystroke.
+        // Since this onChange almost always fires as an echo of our own
+        // debounced save, the values we'd be "refreshing" are the ones
+        // already sitting in the fields the user is editing, so skipping
+        // is safe. We still want it to sync when *another* client changed
+        // the item while this one isn't mid-edit.
+        if (isEditingSheetField()) {
+          return;
+        }
         const monsterData = item.metadata[MONSTER_METADATA_KEY] || defaultData("monster");
         const pcData = item.metadata[PC_METADATA_KEY] || defaultData("pc");
         fillForm("monster", monsterData);
         fillForm("pc", pcData);
         setMode(item.metadata[MODE_METADATA_KEY] || currentMode, false);
-        if (document.activeElement !== nameEl) {
-          nameEl.value = item.name || "";
-        }
+        nameEl.value = item.name || "";
       }
     }
 
