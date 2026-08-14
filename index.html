@@ -1278,12 +1278,9 @@ async function loadSelection(selection) {
 }
 
 OBR.onReady(async () => {
-  const selection = await OBR.player.getSelection();
-  await loadSelection(selection);
-
-  const sceneMeta = await OBR.scene.getMetadata();
-  sceneState = sceneMeta[SCENE_STATE_KEY] || { round: 1, activeId: null };
-
+  // Register listeners FIRST, before any other awaited calls. If something
+  // later in this callback throws/rejects, these still get attached, so
+  // clicking a token on the map always keeps working.
   OBR.player.onChange(async (player) => {
     await loadSelection(player.selection);
   });
@@ -1315,6 +1312,24 @@ OBR.onReady(async () => {
       renderTrackerRows(lastTrackerItems);
     }
   });
+
+  // Everything below is best-effort initial state. Wrap each piece so a
+  // failure in one (e.g. scene metadata not being ready yet) can't stop
+  // the others, and can never un-register the listeners above.
+  try {
+    const selection = await OBR.player.getSelection();
+    await loadSelection(selection);
+  } catch (err) {
+    console.error("DCC sheet: initial loadSelection failed", err);
+  }
+
+  try {
+    const sceneMeta = await OBR.scene.getMetadata();
+    sceneState = sceneMeta[SCENE_STATE_KEY] || { round: 1, activeId: null };
+  } catch (err) {
+    console.error("DCC sheet: initial scene.getMetadata failed", err);
+    sceneState = { round: 1, activeId: null };
+  }
 });
 </script>
 </body>
