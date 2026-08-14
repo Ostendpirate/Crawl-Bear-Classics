@@ -1264,13 +1264,28 @@ document.getElementById("next-turn").addEventListener("click", nextTurn);
 document.getElementById("prev-turn").addEventListener("click", prevTurn);
 document.getElementById("reset-tracker").addEventListener("click", resetTracker);
 
+let lastKnownSelectionId = null;
+
 async function loadSelection(selection) {
-  if (!selection || selection.length === 0) {
+  const newId = selection && selection.length > 0 ? selection[0] : null;
+
+  if (!newId) {
+    lastKnownSelectionId = null;
+    if (isEditingSheetField()) return;
     currentItemId = null;
     emptyState.style.display = "block";
     sheetEl.style.display = "none";
     return;
   }
+
+  // OBR.player.onChange fires for lots of player-state changes beyond just
+  // selection (tool switches, sync state, etc). Without this check, every
+  // one of those firings rebuilds the whole form via fillForm(), which
+  // destroys and recreates the attack-row inputs and drops focus mid-edit.
+  const selectionUnchanged = newId === lastKnownSelectionId;
+  lastKnownSelectionId = newId;
+  if (selectionUnchanged && isEditingSheetField()) return;
+
   const items = await OBR.scene.items.getItems(selection);
   const item = items[0];
   if (!item) return;
