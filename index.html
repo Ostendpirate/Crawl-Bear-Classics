@@ -177,6 +177,51 @@
 
   .main-nav { margin-bottom: 14px; }
 
+  .chat-log {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 520px;
+    overflow-y: auto;
+  }
+  .chat-entry {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 9px;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .chat-entry.gm-only { border-color: var(--accent); }
+  .chat-entry-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 2px;
+  }
+  .chat-entry-name-wrap { display: flex; align-items: center; gap: 5px; min-width: 0; }
+  .chat-entry-name {
+    font-weight: 600;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chat-entry-time { font-size: 10px; color: var(--muted); white-space: nowrap; flex: none; }
+  .chat-entry-text { color: var(--muted); word-break: break-word; }
+  .gm-badge {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    background: var(--accent);
+    color: #1e1b18;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-weight: 700;
+    flex: none;
+  }
+
   .tracker-header {
     display: flex;
     justify-content: space-between;
@@ -370,6 +415,7 @@
     <div class="tabs main-nav">
       <button class="tab-btn active" id="nav-sheet">Sheet</button>
       <button class="tab-btn" id="nav-tracker">Tracker</button>
+      <button class="tab-btn" id="nav-chat">Chat</button>
     </div>
 
     <div id="view-sheet">
@@ -625,6 +671,16 @@
         Tokens on the Character layer will appear here automatically.
       </div>
     </div>
+
+    <div id="view-chat" style="display:none">
+      <h1>Chat Log</h1>
+      <div class="subtitle">Rolls made from the Tracker. Monster rolls are only visible to the GM.</div>
+      <div class="chat-log" id="chat-log-list"></div>
+      <div class="empty" id="chat-log-empty" style="display:none; padding:24px 10px;">
+        No rolls yet.<br/><br/>
+        Attack and initiative rolls from the Tracker will show up here.
+      </div>
+    </div>
   </div>
 
 <script type="module">
@@ -636,6 +692,8 @@ const MODE_METADATA_KEY = "com.claude.monster-sheet/sheet-mode";
 const COMBAT_METADATA_KEY = "com.claude.monster-sheet/combat-data";
 const SCENE_STATE_KEY = "com.claude.monster-sheet/combat-state";
 const DIM_OVERLAY_METADATA_KEY = "com.claude.monster-sheet/dim-overlay";
+const CHAT_LOG_METADATA_KEY = "com.claude.monster-sheet/chat-log";
+const CHAT_LOG_MAX_ENTRIES = 60;
 
 const MONSTER_TEXT_FIELD_IDS = ["init","crit","hd","mv","act","fort","ref","will","sp","notes"];
 const MONSTER_NUMBER_FIELD_IDS = ["ac"];
@@ -909,20 +967,27 @@ document.getElementById("tab-pc").addEventListener("click", () => setMode("pc"))
 // ---- Top-level view switching (Sheet / Tracker) ----
 const viewSheetEl = document.getElementById("view-sheet");
 const viewTrackerEl = document.getElementById("view-tracker");
+const viewChatEl = document.getElementById("view-chat");
 
 function setView(view) {
   document.getElementById("nav-sheet").classList.toggle("active", view === "sheet");
   document.getElementById("nav-tracker").classList.toggle("active", view === "tracker");
+  document.getElementById("nav-chat").classList.toggle("active", view === "chat");
   viewSheetEl.style.display = view === "sheet" ? "block" : "none";
   viewTrackerEl.style.display = view === "tracker" ? "block" : "none";
+  viewChatEl.style.display = view === "chat" ? "block" : "none";
   if (view === "tracker") refreshTracker();
+  if (view === "chat") renderChatLog();
 }
 document.getElementById("nav-sheet").addEventListener("click", () => setView("sheet"));
 document.getElementById("nav-tracker").addEventListener("click", () => setView("tracker"));
+document.getElementById("nav-chat").addEventListener("click", () => setView("chat"));
 
-// ---- Combat Tracker ----
+// ---- Combat Tracker & Chat Log ----
 let sceneState = { round: 1, activeId: null };
 let lastTrackerItems = [];
+let lastChatLog = [];
+let currentPlayerRole = "PLAYER";
 const trackerSaveTimeouts = {};
 const expandedAttackRows = new Set();
 
@@ -1044,6 +1109,13 @@ async function rollAttackFor(itemId, attackId) {
   const dmg = rollDamage(atk.damage);
   const label = `${item.name || "Token"} — ${atk.name || "Attack"}: ${toHit} to hit${dmg !== null ? `, ${dmg} dmg` : ""}`;
   showTrackerStatus(label, false, 5000);
+  await appendChatLog({
+    kind: "attack",
+    tokenName: item.name || "Token",
+    mode: stats.mode,
+    text: `${atk.name || "Attack"}: ${toHit} to hit${dmg !== null ? `, ${dmg} dmg` : ""}`,
+    gmOnly: stats.mode === "monster",
+  });
 }
 
 function attachTrackerRowListeners() {
@@ -1130,6 +1202,56 @@ function showTrackerStatus(text, isError, duration) {
   el.style.color = isError ? "#c97b7b" : "var(--good)";
   clearTimeout(showTrackerStatus._t);
   showTrackerStatus._t = setTimeout(() => { el.textContent = ""; }, duration ?? (isError ? 6000 : 1500));
+}
+
+function makeLogId() {
+  return "log" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+// Rolls from monster/NPC tokens are logged as GM-only so players never see
+// monster attack or initiative results in the chat log — only the GM does.
+// PC rolls are visible to everyone.
+async function appendChatLog(entry) {
+  try {
+    const sceneMeta = await OBR.scene.getMetadata();
+    const log = Array.isArray(sceneMeta[CHAT_LOG_METADATA_KEY]) ? sceneMeta[CHAT_LOG_METADATA_KEY] : [];
+    const nextLog = [...log, { id: makeLogId(), ts: Date.now(), ...entry }].slice(-CHAT_LOG_MAX_ENTRIES);
+    lastChatLog = nextLog;
+    await OBR.scene.setMetadata({ [CHAT_LOG_METADATA_KEY]: nextLog });
+    if (viewChatEl.style.display !== "none") renderChatLog();
+  } catch (err) {
+    console.error("DCC sheet: failed to append chat log", err);
+  }
+}
+
+function chatEntryHtml(entry) {
+  const time = new Date(entry.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return `
+    <div class="chat-entry${entry.gmOnly ? " gm-only" : ""}">
+      <div class="chat-entry-top">
+        <div class="chat-entry-name-wrap">
+          ${entry.gmOnly ? `<span class="gm-badge" title="Only visible to the GM">GM</span>` : ""}
+          <span class="chat-entry-name">${escapeHtml(entry.tokenName || "Unknown")}</span>
+        </div>
+        <span class="chat-entry-time">${time}</span>
+      </div>
+      <div class="chat-entry-text">${escapeHtml(entry.text)}</div>
+    </div>`;
+}
+
+function renderChatLog() {
+  const listEl = document.getElementById("chat-log-list");
+  const emptyEl = document.getElementById("chat-log-empty");
+  if (!listEl || !emptyEl) return;
+  // GM sees every roll; players only ever see entries not flagged gmOnly.
+  const visible = lastChatLog.filter(e => !e.gmOnly || currentPlayerRole === "GM");
+  if (!visible.length) {
+    listEl.innerHTML = "";
+    emptyEl.style.display = "block";
+    return;
+  }
+  emptyEl.style.display = "none";
+  listEl.innerHTML = visible.slice().reverse().map(chatEntryHtml).join("");
 }
 
 async function setTokenDimmed(id, dim) {
@@ -1222,6 +1344,13 @@ async function rollInitiativeFor(id) {
     });
   });
   await refreshTracker();
+  await appendChatLog({
+    kind: "initiative",
+    tokenName: item.name || "Token",
+    mode: stats.mode,
+    text: `Initiative: ${roll}${mod ? ` (d20 ${mod >= 0 ? "+" : ""}${mod})` : ""}`,
+    gmOnly: stats.mode === "monster",
+  });
 }
 
 async function refreshTracker() {
@@ -1307,6 +1436,10 @@ OBR.onReady(async () => {
   // later in this callback throws/rejects, these still get attached, so
   // clicking a token on the map always keeps working.
   OBR.player.onChange(async (player) => {
+    if (player.role && player.role !== currentPlayerRole) {
+      currentPlayerRole = player.role;
+      if (viewChatEl.style.display !== "none") renderChatLog();
+    }
     await loadSelection(player.selection);
   });
 
@@ -1314,6 +1447,12 @@ OBR.onReady(async () => {
     sceneState = metadata[SCENE_STATE_KEY] || { round: 1, activeId: null };
     if (viewTrackerEl.style.display !== "none") {
       renderTrackerRows(lastTrackerItems);
+    }
+    if (Array.isArray(metadata[CHAT_LOG_METADATA_KEY])) {
+      lastChatLog = metadata[CHAT_LOG_METADATA_KEY];
+      if (viewChatEl.style.display !== "none") {
+        renderChatLog();
+      }
     }
   });
 
@@ -1359,8 +1498,15 @@ OBR.onReady(async () => {
   }
 
   try {
+    currentPlayerRole = await OBR.player.getRole();
+  } catch (err) {
+    console.error("DCC sheet: initial getRole failed", err);
+  }
+
+  try {
     const sceneMeta = await OBR.scene.getMetadata();
     sceneState = sceneMeta[SCENE_STATE_KEY] || { round: 1, activeId: null };
+    lastChatLog = Array.isArray(sceneMeta[CHAT_LOG_METADATA_KEY]) ? sceneMeta[CHAT_LOG_METADATA_KEY] : [];
   } catch (err) {
     console.error("DCC sheet: initial scene.getMetadata failed", err);
     sceneState = { round: 1, activeId: null };
