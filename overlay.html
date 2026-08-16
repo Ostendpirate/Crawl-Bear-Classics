@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>DCC Dice Overlay</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    overflow: hidden;
+    /* This surface sits on top of the whole map. It must never intercept
+       clicks/drags meant for the scene underneath it. */
+    pointer-events: none;
+  }
+  #dice-stage {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+  }
+  .die-sprite {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 58px;
+    height: 58px;
+    margin: -29px 0 0 -29px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    border-radius: 14px;
+    background: linear-gradient(145deg, #d98f4e, #a5602a);
+    border: 2px solid #f0c896;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.45), inset 0 0 0 2px rgba(255,255,255,0.08);
+    color: #241d16;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    opacity: 0;
+    will-change: transform, opacity;
+    animation: dcc-tumble 950ms cubic-bezier(.2,.8,.2,1) forwards;
+  }
+  .die-sprite .die-type {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    font-weight: 700;
+    opacity: 0.75;
+    line-height: 1;
+  }
+  .die-sprite .die-value {
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1.1;
+  }
+  .die-sprite.settled {
+    animation: dcc-settle-pulse 420ms ease-out 950ms 1;
+  }
+  .die-sprite.fading {
+    animation: dcc-fade-out 450ms ease-in forwards;
+  }
+  @keyframes dcc-tumble {
+    0% {
+      transform: translate(var(--start-x), var(--start-y)) rotate(0deg) scale(0.5);
+      opacity: 0;
+    }
+    12% { opacity: 1; }
+    55% {
+      transform: translate(var(--mid-x), var(--mid-y)) rotate(640deg) scale(1.18);
+    }
+    100% {
+      transform: translate(var(--end-x), var(--end-y)) rotate(830deg) scale(1);
+      opacity: 1;
+    }
+  }
+  @keyframes dcc-settle-pulse {
+    0% { box-shadow: 0 6px 18px rgba(0,0,0,0.45), inset 0 0 0 2px rgba(255,255,255,0.08), 0 0 0 0 rgba(240,200,150,0.6); }
+    60% { box-shadow: 0 6px 18px rgba(0,0,0,0.45), inset 0 0 0 2px rgba(255,255,255,0.08), 0 0 0 14px rgba(240,200,150,0); }
+    100% { box-shadow: 0 6px 18px rgba(0,0,0,0.45), inset 0 0 0 2px rgba(255,255,255,0.08), 0 0 0 0 rgba(240,200,150,0); }
+  }
+  @keyframes dcc-fade-out {
+    to {
+      transform: translate(var(--end-x), var(--end-y)) scale(0.8);
+      opacity: 0;
+    }
+  }
+  .roll-banner {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translate(-50%, -8px);
+    background: rgba(30, 27, 24, 0.88);
+    border: 1px solid #45392e;
+    color: #ecdfc8;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    opacity: 0;
+    animation: dcc-banner-in 400ms ease-out 700ms forwards, dcc-banner-out 450ms ease-in 2600ms forwards;
+  }
+  .roll-banner .accent { color: #c97b3d; }
+  @keyframes dcc-banner-in {
+    to { opacity: 1; transform: translate(-50%, 0); }
+  }
+  @keyframes dcc-banner-out {
+    to { opacity: 0; transform: translate(-50%, -8px); }
+  }
+</style>
+</head>
+<body>
+<div id="dice-stage"></div>
+
+<script type="module">
+import OBR from "https://esm.sh/@owlbear-rodeo/sdk@2";
+
+const DICE_ROLL_CHANNEL = "com.claude.monster-sheet/dice-roll";
+const stage = document.getElementById("dice-stage");
+
+let audioCtx = null;
+function getAudioCtx() {
+  if (audioCtx) return audioCtx;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  } catch (err) {
+    audioCtx = null;
+  }
+  return audioCtx;
+}
+
+// Short bursts of filtered noise standing in for dice clattering, plus a
+// low thud when the roll settles. No external audio files are used, so
+// there's nothing to host or fetch — everything is synthesized on the fly.
+function playRollSound(diceCount) {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  if (ctx.state === "suspended") {
+    ctx.resume().catch(() => {});
+  }
+  const now = ctx.currentTime;
+  const clackCount = Math.min(9, 3 + diceCount * 2);
+  for (let i = 0; i < clackCount; i++) {
+    playClack(ctx, now + Math.random() * 0.85, 0.5 + Math.random() * 0.5);
+  }
+  playThud(ctx, now + 0.95);
+}
+
+function playClack(ctx, time, gainScale) {
+  try {
+    const dur = 0.045;
+    const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2);
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.value = 1100 + Math.random() * 1600;
+    filter.Q.value = 1.1;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.25 * gainScale;
+    src.connect(filter).connect(gain).connect(ctx.destination);
+    src.start(time);
+  } catch (err) { /* best effort — never break the animation over sound */ }
+}
+
+function playThud(ctx, time) {
+  try {
+    const dur = 0.14;
+    const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 1.4);
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 380;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.4;
+    src.connect(filter).connect(gain).connect(ctx.destination);
+    src.start(time);
+  } catch (err) { /* best effort */ }
+}
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+function spawnRoll(payload) {
+  const dice = Array.isArray(payload.dice) ? payload.dice : [];
+  if (!dice.length) return;
+
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const centerX = w / 2;
+  const centerY = h / 2;
+  const clusterSpread = Math.min(160, 34 * dice.length);
+
+  dice.forEach((die, i) => {
+    const angle = Math.random() * Math.PI * 2;
+    const startRadius = Math.max(w, h) * 0.75;
+    const startX = centerX + Math.cos(angle) * startRadius;
+    const startY = centerY + Math.sin(angle) * startRadius;
+    const midX = centerX + (Math.random() - 0.5) * clusterSpread * 1.5;
+    const midY = centerY + (Math.random() - 0.5) * clusterSpread * 1.5;
+    const endAngle = (i / dice.length) * Math.PI * 2 + Math.random() * 0.6;
+    const endRadius = dice.length > 1 ? clusterSpread * 0.4 : 0;
+    const endX = centerX + Math.cos(endAngle) * endRadius;
+    const endY = centerY + Math.sin(endAngle) * endRadius;
+
+    const el = document.createElement("div");
+    el.className = "die-sprite";
+    el.style.setProperty("--start-x", `${startX}px`);
+    el.style.setProperty("--start-y", `${startY}px`);
+    el.style.setProperty("--mid-x", `${midX}px`);
+    el.style.setProperty("--mid-y", `${midY}px`);
+    el.style.setProperty("--end-x", `${endX}px`);
+    el.style.setProperty("--end-y", `${endY}px`);
+    el.style.animationDelay = `${i * 60}ms`;
+    el.innerHTML = `
+      <div class="die-type">d${die.sides}</div>
+      <div class="die-value">${die.value}</div>
+    `;
+    stage.appendChild(el);
+
+    setTimeout(() => el.classList.add("settled"), 950 + i * 60);
+    setTimeout(() => el.classList.add("fading"), 2400 + i * 60);
+    setTimeout(() => el.remove(), 2900 + i * 60);
+  });
+
+  const modText = payload.modifier ? (payload.modifier > 0 ? ` +${payload.modifier}` : ` ${payload.modifier}`) : "";
+  const banner = document.createElement("div");
+  banner.className = "roll-banner";
+  banner.style.top = `${centerY - 70}px`;
+  banner.innerHTML = `${escapeHtml(payload.rollerName || "Someone")} rolls ${escapeHtml(payload.notation || "")}${modText}: <span class="accent">${payload.total}</span>`;
+  stage.appendChild(banner);
+  setTimeout(() => banner.remove(), 3200);
+
+  playRollSound(dice.length);
+}
+
+OBR.onReady(() => {
+  OBR.broadcast.onMessage(DICE_ROLL_CHANNEL, (event) => {
+    try {
+      spawnRoll(event.data);
+    } catch (err) {
+      console.error("DCC dice overlay: failed to render roll", err);
+    }
+  });
+});
+</script>
+</body>
+</html>

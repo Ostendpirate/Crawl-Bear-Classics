@@ -408,6 +408,73 @@
   }
   .toggle-switch.on { background: var(--good); }
   .toggle-switch.on::after { left: 15px; background: #fff; }
+
+  .dice-chain-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin: 10px 0 14px;
+  }
+  .dice-btn {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 12px 4px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .dice-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .dice-btn:active { background: var(--accent); color: #1e1b18; border-color: var(--accent); }
+  .dice-private-row label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    text-transform: none;
+    font-size: 11.5px;
+    color: var(--muted);
+    letter-spacing: normal;
+  }
+  .dice-private-row input[type=checkbox] { width: auto; margin: 0; }
+
+  .dice-tray {
+    position: relative;
+    height: 84px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 10px;
+  }
+  .mini-die {
+    position: absolute;
+    top: 6px;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    border-radius: 9px;
+    background: linear-gradient(145deg, #d98f4e, #a5602a);
+    border: 2px solid #f0c896;
+    color: #241d16;
+    opacity: 0;
+    animation: dcc-mini-drop 550ms cubic-bezier(.34,1.56,.64,1) forwards;
+    transition: opacity 350ms ease;
+  }
+  .mini-die.mini-fade { opacity: 0; }
+  .mini-die-type { font-size: 7px; text-transform: uppercase; font-weight: 700; opacity: .75; line-height: 1; }
+  .mini-die-value { font-size: 14px; font-weight: 800; line-height: 1.1; }
+  @keyframes dcc-mini-drop {
+    0% { transform: translateY(-40px) rotate(0deg); opacity: 0; }
+    25% { opacity: 1; }
+    70% { transform: translateY(26px) rotate(300deg); }
+    100% { transform: translateY(22px) rotate(340deg); opacity: 1; }
+  }
 </style>
 </head>
 <body>
@@ -415,6 +482,7 @@
     <div class="tabs main-nav">
       <button class="tab-btn active" id="nav-sheet">Sheet</button>
       <button class="tab-btn" id="nav-tracker">Tracker</button>
+      <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Chat</button>
     </div>
 
@@ -670,6 +738,60 @@
         No tokens found on the map.<br/><br/>
         Tokens on the Character layer will appear here automatically.
       </div>
+    </div>
+
+    <div id="view-dice" style="display:none">
+      <h1>Dice Roller</h1>
+      <div class="subtitle">The full DCC dice chain, plus custom rolls. Rolls tumble across every screen at the table unless marked private.</div>
+
+      <div class="dice-tray" id="dice-tray"></div>
+
+      <div class="row">
+        <div>
+          <label>Count</label>
+          <input type="number" id="dice-count" value="1" min="1" max="20" />
+        </div>
+        <div>
+          <label>Modifier</label>
+          <input type="text" id="dice-modifier" placeholder="+0" />
+        </div>
+      </div>
+
+      <div class="dice-chain-grid" id="dice-chain-grid">
+        <button type="button" class="dice-btn" data-sides="3">d3</button>
+        <button type="button" class="dice-btn" data-sides="4">d4</button>
+        <button type="button" class="dice-btn" data-sides="5">d5</button>
+        <button type="button" class="dice-btn" data-sides="6">d6</button>
+        <button type="button" class="dice-btn" data-sides="7">d7</button>
+        <button type="button" class="dice-btn" data-sides="8">d8</button>
+        <button type="button" class="dice-btn" data-sides="10">d10</button>
+        <button type="button" class="dice-btn" data-sides="12">d12</button>
+        <button type="button" class="dice-btn" data-sides="14">d14</button>
+        <button type="button" class="dice-btn" data-sides="16">d16</button>
+        <button type="button" class="dice-btn" data-sides="20">d20</button>
+        <button type="button" class="dice-btn" data-sides="24">d24</button>
+        <button type="button" class="dice-btn" data-sides="30">d30</button>
+        <button type="button" class="dice-btn" data-sides="100">d%</button>
+      </div>
+
+      <fieldset>
+        <legend>Custom Roll</legend>
+        <div class="row">
+          <div>
+            <input type="text" id="dice-custom" placeholder="e.g. 2d6+3, 1d24-1" />
+          </div>
+        </div>
+        <button type="button" class="btn-next" id="dice-custom-roll" style="width:100%; padding:8px 0;">Roll</button>
+      </fieldset>
+
+      <div class="row dice-private-row" id="dice-gm-row" style="display:none;">
+        <label>
+          <input type="checkbox" id="dice-private" />
+          <span>Private roll (only you can see this)</span>
+        </label>
+      </div>
+
+      <div class="status" id="dice-status"></div>
     </div>
 
     <div id="view-chat" style="display:none">
@@ -967,20 +1089,24 @@ document.getElementById("tab-pc").addEventListener("click", () => setMode("pc"))
 // ---- Top-level view switching (Sheet / Tracker) ----
 const viewSheetEl = document.getElementById("view-sheet");
 const viewTrackerEl = document.getElementById("view-tracker");
+const viewDiceEl = document.getElementById("view-dice");
 const viewChatEl = document.getElementById("view-chat");
 
 function setView(view) {
   document.getElementById("nav-sheet").classList.toggle("active", view === "sheet");
   document.getElementById("nav-tracker").classList.toggle("active", view === "tracker");
+  document.getElementById("nav-dice").classList.toggle("active", view === "dice");
   document.getElementById("nav-chat").classList.toggle("active", view === "chat");
   viewSheetEl.style.display = view === "sheet" ? "block" : "none";
   viewTrackerEl.style.display = view === "tracker" ? "block" : "none";
+  viewDiceEl.style.display = view === "dice" ? "block" : "none";
   viewChatEl.style.display = view === "chat" ? "block" : "none";
   if (view === "tracker") refreshTracker();
   if (view === "chat") renderChatLog();
 }
 document.getElementById("nav-sheet").addEventListener("click", () => setView("sheet"));
 document.getElementById("nav-tracker").addEventListener("click", () => setView("tracker"));
+document.getElementById("nav-dice").addEventListener("click", () => setView("dice"));
 document.getElementById("nav-chat").addEventListener("click", () => setView("chat"));
 
 // ---- Combat Tracker & Chat Log ----
@@ -1254,6 +1380,196 @@ function renderChatLog() {
   listEl.innerHTML = visible.slice().reverse().map(chatEntryHtml).join("");
 }
 
+// ---- Dice Roller ----
+// Broadcasts land on this channel; overlay.html (the background surface
+// that renders on top of the whole map) listens on the exact same string
+// and plays the big tumbling animation + sound for everyone at the table.
+const DICE_ROLL_CHANNEL = "com.claude.monster-sheet/dice-roll";
+
+let currentPlayerName = "";
+
+function rollOneDie(sides) {
+  return Math.floor(Math.random() * sides) + 1;
+}
+
+function performDiceRoll(count, sides, modifier) {
+  const n = Math.max(1, Math.min(20, Math.floor(count) || 1));
+  const dice = [];
+  for (let i = 0; i < n; i++) dice.push({ sides, value: rollOneDie(sides) });
+  const sum = dice.reduce((s, d) => s + d.value, 0);
+  return { dice, modifier: modifier || 0, total: sum + (modifier || 0), notation: `${n}d${sides}` };
+}
+
+// Parses free-text notation like "2d6+3" or "1d24-1" typed into the
+// custom-roll field. Returns null if it doesn't look like dice notation.
+function parseCustomNotation(str) {
+  const m = String(str || "").trim().match(/^(\d*)d(\d+)\s*([+-]\s*\d+)?$/i);
+  if (!m) return null;
+  const count = parseInt(m[1] || "1", 10) || 1;
+  const sides = parseInt(m[2], 10);
+  const modifier = m[3] ? parseInt(m[3].replace(/\s+/g, ""), 10) : 0;
+  if (!sides) return null;
+  return { count, sides, modifier };
+}
+
+function showDiceStatus(text, isError) {
+  const el = document.getElementById("dice-status");
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = isError ? "#c97b7b" : "var(--good)";
+  clearTimeout(showDiceStatus._t);
+  showDiceStatus._t = setTimeout(() => { el.textContent = ""; }, isError ? 6000 : 5000);
+}
+
+function refreshDiceGmRowVisibility() {
+  const row = document.getElementById("dice-gm-row");
+  if (row) row.style.display = currentPlayerRole === "GM" ? "flex" : "none";
+}
+
+// Small in-popover animation, separate from the full-screen overlay. It's
+// what a GM sees for a private roll (since nothing gets broadcast for
+// those), and it also gives instant local feedback on every roll before
+// the broadcast round-trip finishes.
+function playLocalMiniRoll(result) {
+  const tray = document.getElementById("dice-tray");
+  if (!tray) return;
+  tray.innerHTML = "";
+  const w = tray.clientWidth || 300;
+  result.dice.forEach((die, i) => {
+    const el = document.createElement("div");
+    el.className = "mini-die";
+    const x = 18 + Math.random() * Math.max(20, w - 76);
+    el.style.left = `${x}px`;
+    el.style.animationDelay = `${i * 70}ms`;
+    el.innerHTML = `<div class="mini-die-type">d${die.sides}</div><div class="mini-die-value">${die.value}</div>`;
+    tray.appendChild(el);
+    setTimeout(() => el.classList.add("mini-fade"), 1400 + i * 70);
+    setTimeout(() => el.remove(), 1800 + i * 70);
+  });
+}
+
+// Synthesized dice-clatter sound (short filtered noise bursts) plus a low
+// thud on landing. Runs from a genuine click inside this popover, so it's
+// never blocked by browser autoplay restrictions the way overlay.html's
+// copy of this can sometimes be in other players' tabs.
+let diceAudioCtx = null;
+function getDiceAudioCtx() {
+  if (diceAudioCtx) return diceAudioCtx;
+  try {
+    diceAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  } catch (err) {
+    diceAudioCtx = null;
+  }
+  return diceAudioCtx;
+}
+
+function playLocalRollSound(diceCount) {
+  const ctx = getDiceAudioCtx();
+  if (!ctx) return;
+  if (ctx.state === "suspended") ctx.resume().catch(() => {});
+  const now = ctx.currentTime;
+  const clackCount = Math.min(9, 3 + diceCount * 2);
+  for (let i = 0; i < clackCount; i++) {
+    playClack(ctx, now + Math.random() * 0.7, 0.5 + Math.random() * 0.5);
+  }
+  playThud(ctx, now + 0.8);
+}
+
+function playClack(ctx, time, gainScale) {
+  try {
+    const dur = 0.045;
+    const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2);
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.value = 1100 + Math.random() * 1600;
+    filter.Q.value = 1.1;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.22 * gainScale;
+    src.connect(filter).connect(gain).connect(ctx.destination);
+    src.start(time);
+  } catch (err) { /* sound is best-effort, never block the roll over it */ }
+}
+
+function playThud(ctx, time) {
+  try {
+    const dur = 0.14;
+    const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 1.4);
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 380;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.35;
+    src.connect(filter).connect(gain).connect(ctx.destination);
+    src.start(time);
+  } catch (err) { /* best effort */ }
+}
+
+async function executeDiceRoll(count, sides, modifier) {
+  const privateEl = document.getElementById("dice-private");
+  const isPrivate = !!(privateEl && privateEl.checked && currentPlayerRole === "GM");
+  const result = performDiceRoll(count, sides, modifier);
+  const rollerName = currentPlayerName || (currentPlayerRole === "GM" ? "GM" : "Player");
+  const modText = result.modifier ? (result.modifier > 0 ? ` +${result.modifier}` : ` ${result.modifier}`) : "";
+  const breakdown = `[${result.dice.map(d => d.value).join(", ")}]`;
+
+  showDiceStatus(`${result.notation}${modText}: ${breakdown} = ${result.total}${isPrivate ? " (private)" : ""}`, false);
+  playLocalMiniRoll(result);
+  playLocalRollSound(result.dice.length);
+
+  if (!isPrivate) {
+    try {
+      await OBR.broadcast.sendMessage(DICE_ROLL_CHANNEL, {
+        rollerName,
+        notation: result.notation,
+        dice: result.dice,
+        modifier: result.modifier,
+        total: result.total,
+        ts: Date.now(),
+      }, { destination: "ALL" });
+    } catch (err) {
+      console.error("DCC sheet: failed to broadcast dice roll", err);
+    }
+  }
+
+  await appendChatLog({
+    kind: "dice",
+    tokenName: rollerName,
+    text: `Rolled ${result.notation}${modText}: ${breakdown} = ${result.total}`,
+    gmOnly: isPrivate,
+  });
+}
+
+document.querySelectorAll("#dice-chain-grid .dice-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const sides = parseInt(btn.dataset.sides, 10);
+    const mod = parseModifier(document.getElementById("dice-modifier").value);
+    const count = parseInt(document.getElementById("dice-count").value, 10) || 1;
+    executeDiceRoll(count, sides, mod);
+  });
+});
+
+document.getElementById("dice-custom-roll").addEventListener("click", () => {
+  const input = document.getElementById("dice-custom");
+  const parsed = parseCustomNotation(input.value);
+  if (!parsed) {
+    showDiceStatus(`Couldn't read "${input.value}" — try something like 2d6+3`, true);
+    return;
+  }
+  executeDiceRoll(parsed.count, parsed.sides, parsed.modifier);
+});
+
 async function setTokenDimmed(id, dim) {
   try {
     const allItems = await OBR.scene.items.getItems();
@@ -1439,7 +1755,9 @@ OBR.onReady(async () => {
     if (player.role && player.role !== currentPlayerRole) {
       currentPlayerRole = player.role;
       if (viewChatEl.style.display !== "none") renderChatLog();
+      refreshDiceGmRowVisibility();
     }
+    if (typeof player.name === "string") currentPlayerName = player.name;
     await loadSelection(player.selection);
   });
 
@@ -1499,8 +1817,15 @@ OBR.onReady(async () => {
 
   try {
     currentPlayerRole = await OBR.player.getRole();
+    refreshDiceGmRowVisibility();
   } catch (err) {
     console.error("DCC sheet: initial getRole failed", err);
+  }
+
+  try {
+    currentPlayerName = await OBR.player.getName();
+  } catch (err) {
+    console.error("DCC sheet: initial getName failed", err);
   }
 
   try {
