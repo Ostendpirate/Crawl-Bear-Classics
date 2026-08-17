@@ -223,6 +223,34 @@
   }
 
   .token-roster-wrap { margin-bottom: 14px; }
+  .token-roster-toggle {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    background: transparent;
+    border: none;
+    padding: 0 0 6px;
+    margin: 0;
+    cursor: pointer;
+    font-family: inherit;
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .token-roster-toggle:hover { color: var(--accent); }
+  .token-roster-count {
+    margin-left: 6px;
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: none;
+    letter-spacing: normal;
+  }
+  .token-roster-chevron {
+    margin-left: auto;
+    flex: none;
+    font-size: 10px;
+  }
   .token-roster {
     display: flex;
     flex-direction: column;
@@ -552,9 +580,15 @@
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
-      <div class="subtitle" id="token-roster-subtitle">Tokens</div>
-      <div class="token-roster" id="token-roster-list"></div>
-      <div class="token-roster-empty" id="token-roster-empty" style="display:none;"></div>
+      <button type="button" class="token-roster-toggle" id="token-roster-toggle">
+        <span id="token-roster-subtitle">Tokens</span>
+        <span class="token-roster-count" id="token-roster-count"></span>
+        <span class="token-roster-chevron" id="token-roster-chevron">▸</span>
+      </button>
+      <div class="token-roster-content" id="token-roster-content" style="display:none;">
+        <div class="token-roster" id="token-roster-list"></div>
+        <div class="token-roster-empty" id="token-roster-empty" style="display:none;"></div>
+      </div>
     </div>
     <div class="empty" id="empty-state">
       Select a token on the map to view or edit its DCC character sheet.<br/><br/>
@@ -901,7 +935,6 @@ const COMBAT_METADATA_KEY = "com.claude.monster-sheet/combat-data";
 const SCENE_STATE_KEY = "com.claude.monster-sheet/combat-state";
 const DIM_OVERLAY_METADATA_KEY = "com.claude.monster-sheet/dim-overlay";
 const CHAT_LOG_METADATA_KEY = "com.claude.monster-sheet/chat-log";
-const OWNER_METADATA_KEY = "com.claude.monster-sheet/owner";
 const CHAT_LOG_MAX_ENTRIES = 60;
 
 const EMPTY_STATE_DEFAULT_HTML = `Select a token on the map to view or edit its DCC character sheet.<br/><br/>Changes save automatically to the token so anyone in the room sees the same sheet.`;
@@ -1254,23 +1287,42 @@ function isCombatItem(item) {
 }
 
 // ---- Token roster (Sheet tab) & owner assignment ----
-// "Ownership" for the player-facing roster filter is, in priority order:
-//   1. An explicit owner assigned by the GM (stored in item.metadata under
-//      OWNER_METADATA_KEY as { id, name }), via the Owner dropdown on the
-//      sheet.
-//   2. Falling back to createdUserId, the Owlbear-native record of who
-//      placed the token on the map, for tokens nobody has explicitly
-//      assigned yet.
+//
+// Owlbear Rodeo has a native "Owner Only" room permission for the
+// Character layer: when the GM turns it on (Room > Player Permissions >
+// Characters > Owner Only), players can only move/edit tokens where
+// item.createdUserId matches their own player ID, and the GM is always
+// exempt. That's exactly "players can only move their own token, GM moves
+// everything" - it's not something this extension can enable by itself
+// (there's no SDK method to set room permissions, only read them), but
+// this extension's Owner dropdown writes directly to that same
+// createdUserId field, so turning the native permission on makes it work.
+//
+// createdUserId is scene-local: it lives on one item in one scene, and a
+// same-named token in a different scene is a different item that starts
+// out unassigned. To make assignments "persistent in all scenes", the
+// source of truth is actually ROOM metadata (roomOwnerMap, keyed by token
+// name, synced via OBR.room.getMetadata/setMetadata - room metadata isn't
+// tied to any one scene). Whenever the GM's client sees a token whose name
+// matches a roomOwnerMap entry but whose createdUserId hasn't caught up
+// yet (e.g. it's a fresh token in a scene that's never seen this name
+// before), it silently re-applies the assignment. This does mean: (a) the
+// GM needs to have this extension open at least once in a new scene for
+// existing assignments to catch up, and (b) renaming a token breaks its
+// link to the map, since matching is by name.
+const ROOM_OWNER_MAP_KEY = "com.claude.monster-sheet/owner-map";
+let roomOwnerMap = {};
+
 function isOwnToken(item) {
-  const owner = item.metadata[OWNER_METADATA_KEY];
-  if (owner && owner.id) return owner.id === currentPlayerId;
+  const mapped = roomOwnerMap[item.name];
+  if (mapped && mapped.id) return mapped.id === currentPlayerId;
   return item.createdUserId === currentPlayerId;
 }
 
 function tokenRosterItemHtml(item, showOwner) {
   const mode = item.metadata[MODE_METADATA_KEY] || "monster";
   const isActive = item.id === currentItemId;
-  const owner = item.metadata[OWNER_METADATA_KEY];
+  const owner = roomOwnerMap[item.name];
   const ownerLabel = showOwner && owner && owner.name
     ? `<span class="token-roster-owner" title="Assigned to ${escapeHtml(owner.name)}">${escapeHtml(owner.name)}</span>`
     : "";
@@ -1286,11 +1338,13 @@ function renderTokenRoster() {
   const listEl = document.getElementById("token-roster-list");
   const emptyEl = document.getElementById("token-roster-empty");
   const subtitleEl = document.getElementById("token-roster-subtitle");
+  const countEl = document.getElementById("token-roster-count");
   if (!listEl || !emptyEl || !subtitleEl) return;
 
   const isGm = currentPlayerRole === "GM";
   const visible = isGm ? lastRosterItems : lastRosterItems.filter(isOwnToken);
   subtitleEl.textContent = isGm ? "All Tokens" : "Your Tokens";
+  if (countEl) countEl.textContent = visible.length ? `(${visible.length})` : "";
 
   if (!visible.length) {
     listEl.innerHTML = "";
@@ -1309,13 +1363,52 @@ function renderTokenRoster() {
   });
 }
 
+let tokenRosterCollapsed = true;
+
+function applyTokenRosterCollapsedState() {
+  const contentEl = document.getElementById("token-roster-content");
+  const chevronEl = document.getElementById("token-roster-chevron");
+  if (contentEl) contentEl.style.display = tokenRosterCollapsed ? "none" : "block";
+  if (chevronEl) chevronEl.textContent = tokenRosterCollapsed ? "▸" : "▾";
+}
+
+document.getElementById("token-roster-toggle").addEventListener("click", () => {
+  tokenRosterCollapsed = !tokenRosterCollapsed;
+  applyTokenRosterCollapsedState();
+});
+
 async function refreshTokenRoster() {
   try {
     const items = await OBR.scene.items.getItems();
     lastRosterItems = items.filter(isCombatItem);
     renderTokenRoster();
+    if (currentPlayerRole === "GM") await applyPersistentOwnership(lastRosterItems);
   } catch (err) {
     console.error("DCC sheet: failed to refresh token roster", err);
+  }
+}
+
+// GM-only: for any character token whose name matches a persisted
+// assignment but whose native createdUserId hasn't caught up yet (new
+// scene, first time this name has appeared, etc.), re-apply it. This is
+// what makes assignments carry over between scenes instead of needing to
+// be redone by hand every time.
+async function applyPersistentOwnership(items) {
+  if (currentPlayerRole !== "GM") return;
+  const toFix = items.filter(item => {
+    const mapped = roomOwnerMap[item.name];
+    return mapped && mapped.id && item.createdUserId !== mapped.id;
+  });
+  if (!toFix.length) return;
+  try {
+    await OBR.scene.items.updateItems(toFix.map(item => item.id), draftItems => {
+      draftItems.forEach(item => {
+        const mapped = roomOwnerMap[item.name];
+        if (mapped && mapped.id) item.createdUserId = mapped.id;
+      });
+    });
+  } catch (err) {
+    console.error("DCC sheet: failed to apply persistent ownership", err);
   }
 }
 
@@ -1346,7 +1439,7 @@ function ownerSelectOptionsHtml(assignedId, assignedName) {
 function refreshOwnerSelectForItem(item) {
   const sel = document.getElementById("owner-select");
   if (!sel) return;
-  const owner = item.metadata[OWNER_METADATA_KEY] || null;
+  const owner = roomOwnerMap[item.name] || null;
   sel.innerHTML = ownerSelectOptionsHtml(owner ? owner.id : null, owner ? owner.name : null);
   sel.value = owner ? owner.id : "";
 }
@@ -1367,22 +1460,39 @@ document.getElementById("owner-select").addEventListener("change", async () => {
   if (!currentItemId) return;
   const sel = document.getElementById("owner-select");
   const id = sel.value;
-  let ownerValue = null;
+  const [item] = await OBR.scene.items.getItems([currentItemId]);
+  if (!item) return;
+  const tokenName = item.name;
+
+  const nextMap = { ...roomOwnerMap };
   if (id) {
     const player = currentPartyPlayers.find(p => p.id === id);
-    ownerValue = { id, name: player ? (player.name || "Unnamed player") : "Unknown player" };
+    nextMap[tokenName] = { id, name: player ? (player.name || "Unnamed player") : "Unknown player" };
+  } else {
+    delete nextMap[tokenName];
   }
+  roomOwnerMap = nextMap;
+
+  try {
+    await OBR.room.setMetadata({ [ROOM_OWNER_MAP_KEY]: roomOwnerMap });
+  } catch (err) {
+    console.error("DCC sheet: failed to persist owner assignment", err);
+  }
+
+  // Also apply straight to this item's native createdUserId so the actual
+  // Owlbear "Owner Only" movement permission (if enabled) takes effect
+  // immediately in the current scene, not just on next sync. Unassigning
+  // hands createdUserId back to the GM, since the GM is exempt from Owner
+  // Only anyway and there's no real "nobody" value to set it to.
   try {
     await OBR.scene.items.updateItems([currentItemId], items => {
-      items.forEach(item => {
-        if (ownerValue) item.metadata[OWNER_METADATA_KEY] = ownerValue;
-        else delete item.metadata[OWNER_METADATA_KEY];
-      });
+      items.forEach(it => { it.createdUserId = id || currentPlayerId; });
     });
-    showStatus("Owner updated");
   } catch (err) {
-    console.error("DCC sheet: failed to update owner", err);
+    console.error("DCC sheet: failed to update item owner", err);
   }
+
+  showStatus("Owner updated");
 });
 
 function computeOrder(items) {
@@ -2065,6 +2175,8 @@ OBR.onReady(async () => {
   // Register listeners FIRST, before any other awaited calls. If something
   // later in this callback throws/rejects, these still get attached, so
   // clicking a token on the map always keeps working.
+  applyTokenRosterCollapsedState();
+
   OBR.player.onChange(async (player) => {
     let rosterNeedsRerender = false;
     if (player.role && player.role !== currentPlayerRole) {
@@ -2086,6 +2198,30 @@ OBR.onReady(async () => {
   OBR.party.onChange((players) => {
     currentPartyPlayers = players;
     refreshOwnerSelectOptions();
+  });
+
+  OBR.room.onMetadataChange((metadata) => {
+    const map = metadata[ROOM_OWNER_MAP_KEY];
+    roomOwnerMap = (map && typeof map === "object") ? map : {};
+    if (viewSheetEl.style.display !== "none") renderTokenRoster();
+    if (currentItemId) {
+      const item = lastRosterItems.find(i => i.id === currentItemId);
+      if (item) {
+        refreshOwnerSelectForItem(item);
+        // The assignment may have just been revoked from this player. The
+        // matching items.onChange (once createdUserId catches up) would
+        // also catch this, but that requires the GM's client to be open
+        // to perform the sync; checking against roomOwnerMap directly here
+        // closes the sheet immediately regardless.
+        if (currentPlayerRole !== "GM" && !isOwnToken(item)) {
+          currentItemId = null;
+          lastKnownSelectionId = null;
+          emptyState.innerHTML = EMPTY_STATE_NOT_OWNED_HTML;
+          emptyState.style.display = "block";
+          sheetEl.style.display = "none";
+        }
+      }
+    }
   });
 
   OBR.scene.onMetadataChange((metadata) => {
@@ -2144,6 +2280,7 @@ OBR.onReady(async () => {
 
     lastRosterItems = items.filter(isCombatItem);
     if (viewSheetEl.style.display !== "none") renderTokenRoster();
+    if (currentPlayerRole === "GM") await applyPersistentOwnership(lastRosterItems);
   });
 
   // Everything below is best-effort initial state. Wrap each piece so a
@@ -2174,6 +2311,14 @@ OBR.onReady(async () => {
     currentPartyPlayers = await OBR.party.getPlayers();
   } catch (err) {
     console.error("DCC sheet: initial party.getPlayers failed", err);
+  }
+
+  try {
+    const roomMeta = await OBR.room.getMetadata();
+    const map = roomMeta[ROOM_OWNER_MAP_KEY];
+    roomOwnerMap = (map && typeof map === "object") ? map : {};
+  } catch (err) {
+    console.error("DCC sheet: initial room.getMetadata failed", err);
   }
 
   try {
