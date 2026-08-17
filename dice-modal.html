@@ -20,35 +20,45 @@
     position: absolute;
     top: 0;
     left: 0;
-    width: 58px;
-    height: 58px;
-    margin: -29px 0 0 -29px;
+    width: var(--die-size, 58px);
+    height: var(--die-size, 58px);
+    margin-top: calc(var(--die-size, 58px) * -0.5);
+    margin-left: calc(var(--die-size, 58px) * -0.5);
+    opacity: 0;
+    will-change: transform, opacity;
+    animation: dcc-tumble 950ms cubic-bezier(.2,.8,.2,1) forwards;
+    filter: drop-shadow(0 6px 14px rgba(0,0,0,0.45));
+  }
+  /* The shape (clip-path) lives on this inner element, not the sprite
+     itself. Clipping an element also clips its own box-shadow, so any
+     "glow" has to come from a CSS filter on the unclipped parent instead -
+     filter: drop-shadow() is computed from the child's painted alpha shape,
+     so it correctly outlines the polygon rather than a rectangle. */
+  .die-face {
+    width: 100%;
+    height: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-direction: column;
-    border-radius: 14px;
     background: linear-gradient(145deg, #d98f4e, #a5602a);
     border: 2px solid #f0c896;
-    box-shadow: 0 6px 18px rgba(0,0,0,0.45), inset 0 0 0 2px rgba(255,255,255,0.08);
+    box-shadow: inset 0 0 0 2px rgba(255,255,255,0.08);
     color: #241d16;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    opacity: 0;
-    will-change: transform, opacity;
-    animation: dcc-tumble 950ms cubic-bezier(.2,.8,.2,1) forwards;
   }
-  .die-sprite .die-type {
-    font-size: 9px;
+  .die-face .die-type {
+    font-size: calc(var(--die-size, 58px) * 0.155);
     text-transform: uppercase;
     letter-spacing: 0.4px;
     font-weight: 700;
     opacity: 0.75;
     line-height: 1;
   }
-  .die-sprite .die-value {
-    font-size: 22px;
+  .die-face .die-value {
+    font-size: calc(var(--die-size, 58px) * 0.38);
     font-weight: 800;
-    line-height: 1.1;
+    line-height: 1.15;
   }
   .die-sprite.settled {
     animation: dcc-settle-pulse 420ms ease-out 950ms 1;
@@ -63,9 +73,9 @@
     100% { transform: translate(var(--end-x), var(--end-y)) rotate(830deg) scale(1); opacity: 1; }
   }
   @keyframes dcc-settle-pulse {
-    0% { box-shadow: 0 6px 18px rgba(0,0,0,0.45), inset 0 0 0 2px rgba(255,255,255,0.08), 0 0 0 0 rgba(240,200,150,0.6); }
-    60% { box-shadow: 0 6px 18px rgba(0,0,0,0.45), inset 0 0 0 2px rgba(255,255,255,0.08), 0 0 0 14px rgba(240,200,150,0); }
-    100% { box-shadow: 0 6px 18px rgba(0,0,0,0.45), inset 0 0 0 2px rgba(255,255,255,0.08), 0 0 0 0 rgba(240,200,150,0); }
+    0% { filter: drop-shadow(0 6px 14px rgba(0,0,0,0.45)) drop-shadow(0 0 0 rgba(240,200,150,0.6)); }
+    60% { filter: drop-shadow(0 6px 14px rgba(0,0,0,0.45)) drop-shadow(0 0 14px rgba(240,200,150,0)); }
+    100% { filter: drop-shadow(0 6px 14px rgba(0,0,0,0.45)) drop-shadow(0 0 0 rgba(240,200,150,0)); }
   }
   @keyframes dcc-fade-out {
     to { transform: translate(var(--end-x), var(--end-y)) scale(0.8); opacity: 0; }
@@ -100,6 +110,54 @@ import OBR from "https://esm.sh/@owlbear-rodeo/sdk@2";
 
 const MODAL_ID = "com.claude.monster-sheet/dice-modal";
 const stage = document.getElementById("dice-stage");
+
+// Every die in the DCC chain gets its own silhouette + relative size,
+// rather than one rounded-square rendered for every value of `sides`.
+// `n` is the polygon vertex count used to draw the face, `rotation` orients
+// it (degrees, -90 = point-up), and `scale` multiplies the base pixel size
+// so bigger dice actually read as bigger on screen. Where two dice share a
+// vertex count (d10/d12 as pentagons, d7/d14 as heptagons) a different
+// rotation offset keeps their silhouettes visually distinct.
+const DIE_VISUALS = {
+  3:   { n: 3,  rotation: -90,    scale: 0.80 },
+  4:   { n: 3,  rotation: -90,    scale: 0.85 },
+  5:   { n: 5,  rotation: -90,    scale: 0.90 },
+  6:   { n: 4,  rotation: 45,     scale: 1.00 },
+  7:   { n: 7,  rotation: -90,    scale: 1.05 },
+  8:   { n: 4,  rotation: 0,      scale: 1.08 },
+  10:  { n: 5,  rotation: -90,    scale: 1.14 },
+  12:  { n: 5,  rotation: -54,    scale: 1.22 },
+  14:  { n: 7,  rotation: -64.29, scale: 1.27 },
+  16:  { n: 8,  rotation: -67.5,  scale: 1.32 },
+  20:  { n: 6,  rotation: -90,    scale: 1.38 },
+  24:  { n: 9,  rotation: -90,    scale: 1.44 },
+  30:  { n: 14, rotation: -90,    scale: 1.52 },
+  100: { n: 5,  rotation: -18,    scale: 1.16 },
+};
+
+function getDieVisual(sides) {
+  return DIE_VISUALS[sides] || DIE_VISUALS[6];
+}
+
+function regularPolygonClipPath(n, rotationDeg) {
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const angle = (rotationDeg + (360 / n) * i) * Math.PI / 180;
+    const x = (50 + 50 * Math.cos(angle)).toFixed(2);
+    const y = (50 + 50 * Math.sin(angle)).toFixed(2);
+    pts.push(`${x}% ${y}%`);
+  }
+  return `polygon(${pts.join(", ")})`;
+}
+
+function dieClipPath(sides) {
+  const v = getDieVisual(sides);
+  return regularPolygonClipPath(v.n, v.rotation);
+}
+
+function dieSizePx(sides, basePx) {
+  return Math.round(getDieVisual(sides).scale * basePx);
+}
 
 function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({
@@ -212,6 +270,8 @@ function spawnRoll(payload) {
 
     const el = document.createElement("div");
     el.className = "die-sprite";
+    const sizePx = dieSizePx(die.sides, 58);
+    el.style.setProperty("--die-size", `${sizePx}px`);
     el.style.setProperty("--start-x", `${startX}px`);
     el.style.setProperty("--start-y", `${startY}px`);
     el.style.setProperty("--mid-x", `${midX}px`);
@@ -219,7 +279,7 @@ function spawnRoll(payload) {
     el.style.setProperty("--end-x", `${endX}px`);
     el.style.setProperty("--end-y", `${endY}px`);
     el.style.animationDelay = `${i * 60}ms`;
-    el.innerHTML = `<div class="die-type">d${die.sides}</div><div class="die-value">${die.value}</div>`;
+    el.innerHTML = `<div class="die-face" style="clip-path:${dieClipPath(die.sides)}"><div class="die-type">d${die.sides}</div><div class="die-value">${die.value}</div></div>`;
     stage.appendChild(el);
 
     setTimeout(() => el.classList.add("settled"), 950 + i * 60);
