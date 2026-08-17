@@ -222,6 +222,66 @@
     flex: none;
   }
 
+  .token-roster-wrap { margin-bottom: 14px; }
+  .token-roster {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 176px;
+    overflow-y: auto;
+  }
+  .token-roster-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 9px;
+    cursor: pointer;
+    font-size: 12.5px;
+  }
+  .token-roster-item:hover { border-color: var(--accent); }
+  .token-roster-item.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .token-roster-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+  .token-roster-badge {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    background: var(--border);
+    color: var(--muted);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-weight: 700;
+    flex: none;
+  }
+  .token-roster-badge.pc { background: var(--good); color: #1e1b18; }
+  .token-roster-owner {
+    font-size: 10px;
+    color: var(--muted);
+    flex: none;
+    max-width: 90px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .token-roster-empty {
+    text-align: center;
+    color: var(--muted);
+    font-size: 11.5px;
+    padding: 10px 4px;
+  }
+
   .tracker-header {
     display: flex;
     justify-content: space-between;
@@ -491,6 +551,11 @@
     </div>
 
     <div id="view-sheet">
+    <div class="token-roster-wrap">
+      <div class="subtitle" id="token-roster-subtitle">Tokens</div>
+      <div class="token-roster" id="token-roster-list"></div>
+      <div class="token-roster-empty" id="token-roster-empty" style="display:none;"></div>
+    </div>
     <div class="empty" id="empty-state">
       Select a token on the map to view or edit its DCC character sheet.<br/><br/>
       Changes save automatically to the token so anyone in the room sees the same sheet.
@@ -508,6 +573,15 @@
         <div>
           <label>Name</label>
           <input type="text" id="name" placeholder="Character name" />
+        </div>
+      </div>
+
+      <div class="row" id="owner-row" style="display:none;">
+        <div>
+          <label>Owner</label>
+          <select id="owner-select">
+            <option value="">— Unassigned —</option>
+          </select>
         </div>
       </div>
 
@@ -827,6 +901,7 @@ const COMBAT_METADATA_KEY = "com.claude.monster-sheet/combat-data";
 const SCENE_STATE_KEY = "com.claude.monster-sheet/combat-state";
 const DIM_OVERLAY_METADATA_KEY = "com.claude.monster-sheet/dim-overlay";
 const CHAT_LOG_METADATA_KEY = "com.claude.monster-sheet/chat-log";
+const OWNER_METADATA_KEY = "com.claude.monster-sheet/owner";
 const CHAT_LOG_MAX_ENTRIES = 60;
 
 const MONSTER_TEXT_FIELD_IDS = ["init","crit","hd","mv","act","fort","ref","will","sp","notes"];
@@ -1113,6 +1188,7 @@ function setView(view) {
   viewTrackerEl.style.display = view === "tracker" ? "block" : "none";
   viewDiceEl.style.display = view === "dice" ? "block" : "none";
   viewChatEl.style.display = view === "chat" ? "block" : "none";
+  if (view === "sheet") refreshTokenRoster();
   if (view === "tracker") refreshTracker();
   if (view === "chat") renderChatLog();
 }
@@ -1126,6 +1202,9 @@ let sceneState = { round: 1, activeId: null };
 let lastTrackerItems = [];
 let lastChatLog = [];
 let currentPlayerRole = "PLAYER";
+let currentPlayerId = "";
+let lastRosterItems = [];
+let currentPartyPlayers = [];
 const trackerSaveTimeouts = {};
 const expandedAttackRows = new Set();
 
@@ -1170,6 +1249,138 @@ function getStatsForItem(item) {
 function isCombatItem(item) {
   return item.layer === "CHARACTER" && !!item.name;
 }
+
+// ---- Token roster (Sheet tab) & owner assignment ----
+// "Ownership" for the player-facing roster filter is, in priority order:
+//   1. An explicit owner assigned by the GM (stored in item.metadata under
+//      OWNER_METADATA_KEY as { id, name }), via the Owner dropdown on the
+//      sheet.
+//   2. Falling back to createdUserId, the Owlbear-native record of who
+//      placed the token on the map, for tokens nobody has explicitly
+//      assigned yet.
+function isOwnToken(item) {
+  const owner = item.metadata[OWNER_METADATA_KEY];
+  if (owner && owner.id) return owner.id === currentPlayerId;
+  return item.createdUserId === currentPlayerId;
+}
+
+function tokenRosterItemHtml(item, showOwner) {
+  const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+  const isActive = item.id === currentItemId;
+  const owner = item.metadata[OWNER_METADATA_KEY];
+  const ownerLabel = showOwner && owner && owner.name
+    ? `<span class="token-roster-owner" title="Assigned to ${escapeHtml(owner.name)}">${escapeHtml(owner.name)}</span>`
+    : "";
+  return `
+    <div class="token-roster-item${isActive ? " active" : ""}" data-id="${item.id}">
+      <span class="token-roster-badge${mode === "pc" ? " pc" : ""}">${mode === "pc" ? "PC" : "NPC"}</span>
+      <span class="token-roster-name">${escapeHtml(item.name || "Unnamed")}</span>
+      ${ownerLabel}
+    </div>`;
+}
+
+function renderTokenRoster() {
+  const listEl = document.getElementById("token-roster-list");
+  const emptyEl = document.getElementById("token-roster-empty");
+  const subtitleEl = document.getElementById("token-roster-subtitle");
+  if (!listEl || !emptyEl || !subtitleEl) return;
+
+  const isGm = currentPlayerRole === "GM";
+  const visible = isGm ? lastRosterItems : lastRosterItems.filter(isOwnToken);
+  subtitleEl.textContent = isGm ? "All Tokens" : "Your Tokens";
+
+  if (!visible.length) {
+    listEl.innerHTML = "";
+    emptyEl.style.display = "block";
+    emptyEl.textContent = isGm
+      ? "No tokens on the map yet."
+      : "No tokens assigned to you yet. Ask your GM to assign one, or drop your own token onto the scene.";
+    return;
+  }
+  emptyEl.style.display = "none";
+
+  const sorted = visible.slice().sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  listEl.innerHTML = sorted.map(item => tokenRosterItemHtml(item, isGm)).join("");
+  listEl.querySelectorAll(".token-roster-item").forEach(row => {
+    row.addEventListener("click", () => OBR.player.select([row.dataset.id], true));
+  });
+}
+
+async function refreshTokenRoster() {
+  try {
+    const items = await OBR.scene.items.getItems();
+    lastRosterItems = items.filter(isCombatItem);
+    renderTokenRoster();
+  } catch (err) {
+    console.error("DCC sheet: failed to refresh token roster", err);
+  }
+}
+
+function refreshOwnerRowVisibility() {
+  const row = document.getElementById("owner-row");
+  if (row) row.style.display = currentPlayerRole === "GM" ? "block" : "none";
+}
+
+// Builds the <option> list for the Owner select. Always includes the
+// currently-connected party (OBR.party.getPlayers() excludes the GM
+// themselves, which is fine since the GM doesn't need to "own" a token
+// through this control). If a token is assigned to someone who has since
+// disconnected, they're kept as a labeled option so the assignment isn't
+// silently lost from view.
+function ownerSelectOptionsHtml(assignedId, assignedName) {
+  const seen = new Set();
+  const options = ['<option value="">— Unassigned —</option>'];
+  currentPartyPlayers.forEach(p => {
+    seen.add(p.id);
+    options.push(`<option value="${escapeHtml(p.id)}">${escapeHtml(p.name || "Unnamed player")}</option>`);
+  });
+  if (assignedId && !seen.has(assignedId)) {
+    options.push(`<option value="${escapeHtml(assignedId)}">${escapeHtml(assignedName || "Offline player")} (offline)</option>`);
+  }
+  return options.join("");
+}
+
+function refreshOwnerSelectForItem(item) {
+  const sel = document.getElementById("owner-select");
+  if (!sel) return;
+  const owner = item.metadata[OWNER_METADATA_KEY] || null;
+  sel.innerHTML = ownerSelectOptionsHtml(owner ? owner.id : null, owner ? owner.name : null);
+  sel.value = owner ? owner.id : "";
+}
+
+// Rebuilds just the option list (e.g. on party roster change) while
+// preserving whatever is currently selected, including an offline owner.
+function refreshOwnerSelectOptions() {
+  const sel = document.getElementById("owner-select");
+  if (!sel) return;
+  const prevValue = sel.value;
+  const prevOption = sel.options[sel.selectedIndex];
+  const prevName = prevOption ? prevOption.textContent.replace(/ \(offline\)$/, "") : "";
+  sel.innerHTML = ownerSelectOptionsHtml(prevValue || null, prevName);
+  sel.value = prevValue;
+}
+
+document.getElementById("owner-select").addEventListener("change", async () => {
+  if (!currentItemId) return;
+  const sel = document.getElementById("owner-select");
+  const id = sel.value;
+  let ownerValue = null;
+  if (id) {
+    const player = currentPartyPlayers.find(p => p.id === id);
+    ownerValue = { id, name: player ? (player.name || "Unnamed player") : "Unknown player" };
+  }
+  try {
+    await OBR.scene.items.updateItems([currentItemId], items => {
+      items.forEach(item => {
+        if (ownerValue) item.metadata[OWNER_METADATA_KEY] = ownerValue;
+        else delete item.metadata[OWNER_METADATA_KEY];
+      });
+    });
+    showStatus("Owner updated");
+  } catch (err) {
+    console.error("DCC sheet: failed to update owner", err);
+  }
+});
 
 function computeOrder(items) {
   return items.slice().sort((a, b) => {
@@ -1800,6 +2011,7 @@ async function loadSelection(selection) {
     currentItemId = null;
     emptyState.style.display = "block";
     sheetEl.style.display = "none";
+    renderTokenRoster();
     return;
   }
 
@@ -1823,8 +2035,10 @@ async function loadSelection(selection) {
   suppressChange = true;
   nameEl.value = item.name || "";
   suppressChange = false;
+  refreshOwnerSelectForItem(item);
   emptyState.style.display = "none";
   sheetEl.style.display = "block";
+  renderTokenRoster();
 }
 
 OBR.onReady(async () => {
@@ -1832,13 +2046,26 @@ OBR.onReady(async () => {
   // later in this callback throws/rejects, these still get attached, so
   // clicking a token on the map always keeps working.
   OBR.player.onChange(async (player) => {
+    let rosterNeedsRerender = false;
     if (player.role && player.role !== currentPlayerRole) {
       currentPlayerRole = player.role;
       if (viewChatEl.style.display !== "none") renderChatLog();
       refreshDiceGmRowVisibility();
+      refreshOwnerRowVisibility();
+      rosterNeedsRerender = true;
     }
+    if (typeof player.id === "string" && player.id !== currentPlayerId) {
+      currentPlayerId = player.id;
+      rosterNeedsRerender = true;
+    }
+    if (rosterNeedsRerender && viewSheetEl.style.display !== "none") renderTokenRoster();
     if (typeof player.name === "string") currentPlayerName = player.name;
     await loadSelection(player.selection);
+  });
+
+  OBR.party.onChange((players) => {
+    currentPartyPlayers = players;
+    refreshOwnerSelectOptions();
   });
 
   OBR.scene.onMetadataChange((metadata) => {
@@ -1876,6 +2103,7 @@ OBR.onReady(async () => {
         fillForm("pc", pcData);
         setMode(item.metadata[MODE_METADATA_KEY] || currentMode, false);
         nameEl.value = item.name || "";
+        refreshOwnerSelectForItem(item);
       }
     }
 
@@ -1883,6 +2111,9 @@ OBR.onReady(async () => {
       lastTrackerItems = items.filter(isCombatItem);
       renderTrackerRows(lastTrackerItems);
     }
+
+    lastRosterItems = items.filter(isCombatItem);
+    if (viewSheetEl.style.display !== "none") renderTokenRoster();
   });
 
   // Everything below is best-effort initial state. Wrap each piece so a
@@ -1898,8 +2129,31 @@ OBR.onReady(async () => {
   try {
     currentPlayerRole = await OBR.player.getRole();
     refreshDiceGmRowVisibility();
+    refreshOwnerRowVisibility();
   } catch (err) {
     console.error("DCC sheet: initial getRole failed", err);
+  }
+
+  try {
+    currentPlayerId = OBR.player.id || (await OBR.player.getId());
+  } catch (err) {
+    console.error("DCC sheet: initial getId failed", err);
+  }
+
+  try {
+    currentPartyPlayers = await OBR.party.getPlayers();
+    if (currentItemId) {
+      const [item] = await OBR.scene.items.getItems([currentItemId]);
+      if (item) refreshOwnerSelectForItem(item);
+    }
+  } catch (err) {
+    console.error("DCC sheet: initial party.getPlayers failed", err);
+  }
+
+  try {
+    await refreshTokenRoster();
+  } catch (err) {
+    console.error("DCC sheet: initial refreshTokenRoster failed", err);
   }
 
   try {
