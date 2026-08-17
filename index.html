@@ -1336,6 +1336,31 @@ async function fetchCombatItemsWithRetry(maxAttempts = 5, delayMs = 300) {
 const ROOM_OWNER_MAP_KEY = "com.claude.monster-sheet/owner-map";
 let roomOwnerMap = {};
 
+// A token being "assigned" to a player is also treated as "this token
+// should exist in every scene the party visits" - roomTokenTemplates
+// stores a full, scene-independent copy of each assigned token (image,
+// character sheet metadata, everything except id/position) so it can be
+// cloned into a new scene automatically. Kept fresh by comparing each
+// item's lastModified (Owlbear-managed, updates automatically on any
+// change) against what's already captured.
+const ROOM_TOKEN_TEMPLATE_KEY = "com.claude.monster-sheet/token-templates";
+let roomTokenTemplates = {};
+
+function cloneItemForTemplate(item) {
+  const clone = JSON.parse(JSON.stringify(item));
+  delete clone.id;
+  delete clone.lastModifiedUserId;
+  return clone;
+}
+
+function templateNeedsRefresh(item) {
+  const existing = roomTokenTemplates[item.name];
+  if (!existing) return true;
+  if (!item.lastModified) return false;
+  const existingModified = existing.lastModified ? new Date(existing.lastModified).getTime() : 0;
+  return new Date(item.lastModified).getTime() > existingModified;
+}
+
 function isOwnToken(item) {
   const mapped = roomOwnerMap[item.name];
   if (mapped && mapped.id) return mapped.id === currentPlayerId;
@@ -1404,7 +1429,13 @@ async function refreshTokenRoster() {
   try {
     lastRosterItems = await fetchCombatItemsWithRetry();
     renderTokenRoster();
-    if (currentPlayerRole === "GM") await applyPersistentOwnership(lastRosterItems);
+    if (currentPlayerRole === "GM") {
+      await applyPersistentOwnership(lastRosterItems);
+      const beforeCount = lastRosterItems.length;
+      await cloneMissingAssignedTokens(lastRosterItems);
+      lastRosterItems = await fetchCombatItemsWithRetry();
+      if (lastRosterItems.length !== beforeCount) renderTokenRoster();
+    }
   } catch (err) {
     console.error("DCC sheet: failed to refresh token roster", err);
   }
@@ -1414,9 +1445,29 @@ async function refreshTokenRoster() {
 // assignment but whose native createdUserId hasn't caught up yet (new
 // scene, first time this name has appeared, etc.), re-apply it. This is
 // what makes assignments carry over between scenes instead of needing to
-// be redone by hand every time.
+// be redone by hand every time. Also opportunistically refreshes
+// roomTokenTemplates for assigned tokens so the cloned copy used in
+// cloneMissingAssignedTokens stays reasonably current.
 async function applyPersistentOwnership(items) {
   if (currentPlayerRole !== "GM") return;
+
+  let templatesChanged = false;
+  const nextTemplates = { ...roomTokenTemplates };
+  items.forEach(item => {
+    if (roomOwnerMap[item.name] && templateNeedsRefresh(item)) {
+      nextTemplates[item.name] = cloneItemForTemplate(item);
+      templatesChanged = true;
+    }
+  });
+  if (templatesChanged) {
+    roomTokenTemplates = nextTemplates;
+    try {
+      await OBR.room.setMetadata({ [ROOM_TOKEN_TEMPLATE_KEY]: roomTokenTemplates });
+    } catch (err) {
+      console.error("DCC sheet: failed to persist token templates", err);
+    }
+  }
+
   const toFix = items.filter(item => {
     const mapped = roomOwnerMap[item.name];
     return mapped && mapped.id && item.createdUserId !== mapped.id;
@@ -1431,6 +1482,41 @@ async function applyPersistentOwnership(items) {
     });
   } catch (err) {
     console.error("DCC sheet: failed to apply persistent ownership", err);
+  }
+}
+
+// GM-only: for any assigned token that has a saved template but isn't
+// present in the current scene at all (by name), add a clone of it - full
+// image, character sheet metadata, everything - so the party's tokens
+// actually show up in a new scene instead of just having their ownership
+// pre-applied once someone manually places them. New clones are lined up
+// near the scene origin since a saved position from a different map's
+// layout wouldn't mean anything here; drag them into place afterward.
+async function cloneMissingAssignedTokens(existingItems) {
+  if (currentPlayerRole !== "GM") return;
+  const existingNames = new Set(existingItems.map(item => item.name));
+  const missing = Object.entries(roomOwnerMap).filter(([name, owner]) => {
+    return owner && owner.id && roomTokenTemplates[name] && !existingNames.has(name);
+  });
+  if (!missing.length) return;
+
+  const newItems = missing.map(([name, owner], index) => {
+    const clone = cloneItemForTemplate(roomTokenTemplates[name]);
+    clone.id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`;
+    clone.createdUserId = owner.id;
+    clone.position = { x: index * 70, y: 0 };
+    return clone;
+  });
+
+  try {
+    await OBR.scene.items.addItems(newItems);
+    showTrackerStatus(
+      `Added ${newItems.length} token${newItems.length > 1 ? "s" : ""} from your saved roster near the scene origin.`,
+      false,
+      5000
+    );
+  } catch (err) {
+    console.error("DCC sheet: failed to clone tokens into new scene", err);
   }
 }
 
@@ -1499,6 +1585,15 @@ document.getElementById("owner-select").addEventListener("change", async () => {
     await OBR.room.setMetadata({ [ROOM_OWNER_MAP_KEY]: roomOwnerMap });
   } catch (err) {
     console.error("DCC sheet: failed to persist owner assignment", err);
+  }
+
+  if (id) {
+    roomTokenTemplates = { ...roomTokenTemplates, [tokenName]: cloneItemForTemplate(item) };
+    try {
+      await OBR.room.setMetadata({ [ROOM_TOKEN_TEMPLATE_KEY]: roomTokenTemplates });
+    } catch (err) {
+      console.error("DCC sheet: failed to persist token template", err);
+    }
   }
 
   // Also apply straight to this item's native createdUserId so the actual
@@ -2224,6 +2319,8 @@ OBR.onReady(async () => {
   OBR.room.onMetadataChange((metadata) => {
     const map = metadata[ROOM_OWNER_MAP_KEY];
     roomOwnerMap = (map && typeof map === "object") ? map : {};
+    const templates = metadata[ROOM_TOKEN_TEMPLATE_KEY];
+    roomTokenTemplates = (templates && typeof templates === "object") ? templates : {};
     if (viewSheetEl.style.display !== "none") renderTokenRoster();
     if (currentItemId) {
       const item = lastRosterItems.find(i => i.id === currentItemId);
@@ -2327,12 +2424,9 @@ OBR.onReady(async () => {
     if (viewChatEl.style.display !== "none") renderChatLog();
 
     try {
-      const combatItems = await fetchCombatItemsWithRetry();
-      lastTrackerItems = combatItems;
-      lastRosterItems = combatItems;
+      await refreshTokenRoster();
+      lastTrackerItems = lastRosterItems;
       if (viewTrackerEl.style.display !== "none") renderTrackerRows(lastTrackerItems);
-      if (viewSheetEl.style.display !== "none") renderTokenRoster();
-      if (currentPlayerRole === "GM") await applyPersistentOwnership(combatItems);
     } catch (err) {
       console.error("DCC sheet: scene change items fetch failed", err);
     }
@@ -2383,6 +2477,8 @@ OBR.onReady(async () => {
     const roomMeta = await OBR.room.getMetadata();
     const map = roomMeta[ROOM_OWNER_MAP_KEY];
     roomOwnerMap = (map && typeof map === "object") ? map : {};
+    const templates = roomMeta[ROOM_TOKEN_TEMPLATE_KEY];
+    roomTokenTemplates = (templates && typeof templates === "object") ? templates : {};
   } catch (err) {
     console.error("DCC sheet: initial room.getMetadata failed", err);
   }
