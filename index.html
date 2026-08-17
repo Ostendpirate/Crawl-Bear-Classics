@@ -1465,15 +1465,28 @@ async function applyPersistentOwnership(items) {
   if (currentPlayerRole !== "GM") return;
 
   let templatesChanged = false;
-  const nextTemplates = { ...roomTokenTemplates };
+  let latestTemplates = roomTokenTemplates;
   items.forEach(item => {
     const mapped = roomOwnerMap[item.name];
     if (mapped && mapped.id && templateNeedsRefresh(item)) {
-      nextTemplates[item.name] = cloneItemForTemplate(item);
       templatesChanged = true;
     }
   });
   if (templatesChanged) {
+    try {
+      const latestRoomMeta = await OBR.room.getMetadata();
+      const templates = latestRoomMeta[ROOM_TOKEN_TEMPLATE_KEY];
+      latestTemplates = (templates && typeof templates === "object") ? templates : {};
+    } catch (err) {
+      console.error("DCC sheet: failed to read latest room metadata before template sync", err);
+    }
+    const nextTemplates = { ...latestTemplates };
+    items.forEach(item => {
+      const mapped = roomOwnerMap[item.name];
+      if (mapped && mapped.id && templateNeedsRefresh(item)) {
+        nextTemplates[item.name] = cloneItemForTemplate(item);
+      }
+    });
     roomTokenTemplates = nextTemplates;
     try {
       await OBR.room.setMetadata({ [ROOM_TOKEN_TEMPLATE_KEY]: roomTokenTemplates });
@@ -1616,7 +1629,25 @@ document.getElementById("owner-select").addEventListener("change", async () => {
   }
   const tokenName = item.name;
 
-  const nextMap = { ...roomOwnerMap };
+  // Merge into a FRESH read of room metadata, not the possibly-stale local
+  // roomOwnerMap/roomTokenTemplates cache. Without this, a write that
+  // lands in between "we last synced" and "we finish this write" - e.g.
+  // the automatic template sync that runs right after a scene switch, on
+  // the same GM client, for a different token - would get silently
+  // discarded when we overwrite the whole key with our stale local copy.
+  let latestOwnerMap = roomOwnerMap;
+  let latestTemplates = roomTokenTemplates;
+  try {
+    const latestRoomMeta = await OBR.room.getMetadata();
+    const map = latestRoomMeta[ROOM_OWNER_MAP_KEY];
+    latestOwnerMap = (map && typeof map === "object") ? map : {};
+    const templates = latestRoomMeta[ROOM_TOKEN_TEMPLATE_KEY];
+    latestTemplates = (templates && typeof templates === "object") ? templates : {};
+  } catch (err) {
+    console.error("DCC sheet: failed to read latest room metadata before owner write", err);
+  }
+
+  const nextMap = { ...latestOwnerMap };
   if (id) {
     const player = currentPartyPlayers.find(p => p.id === id);
     nextMap[tokenName] = { id, name: player ? (player.name || "Unnamed player") : "Unknown player" };
@@ -1630,9 +1661,9 @@ document.getElementById("owner-select").addEventListener("change", async () => {
     nextMap[tokenName] = { id: null, name: null };
   }
   roomOwnerMap = nextMap;
-  if (id) {
-    roomTokenTemplates = { ...roomTokenTemplates, [tokenName]: cloneItemForTemplate(item) };
-  }
+  roomTokenTemplates = id
+    ? { ...latestTemplates, [tokenName]: cloneItemForTemplate(item) }
+    : latestTemplates;
 
   // Optimistic local update - the roster reflects the new owner right
   // away instead of waiting on the writes below to round-trip and echo
@@ -2464,6 +2495,24 @@ OBR.onReady(async () => {
   // data left over from the previous scene.
   OBR.scene.onReadyChange(async (ready) => {
     if (!ready) return;
+
+    // Re-fetch room metadata directly rather than trusting whatever
+    // roomOwnerMap/roomTokenTemplates already happen to be in memory from
+    // the onMetadataChange listener. That listener should keep them
+    // current on its own, but a scene transition is exactly the kind of
+    // moment where a missed or delayed event would matter most - it's the
+    // instant a stale "still owned by you" reading would actually be
+    // visible to a player, in a scene the GM may have just unassigned
+    // them from tokens in.
+    try {
+      const roomMeta = await OBR.room.getMetadata();
+      const map = roomMeta[ROOM_OWNER_MAP_KEY];
+      roomOwnerMap = (map && typeof map === "object") ? map : {};
+      const templates = roomMeta[ROOM_TOKEN_TEMPLATE_KEY];
+      roomTokenTemplates = (templates && typeof templates === "object") ? templates : {};
+    } catch (err) {
+      console.error("DCC sheet: scene change room.getMetadata failed", err);
+    }
 
     try {
       const sceneMeta = await OBR.scene.getMetadata();
