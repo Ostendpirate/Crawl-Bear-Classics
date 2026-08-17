@@ -2283,6 +2283,52 @@ OBR.onReady(async () => {
     if (currentPlayerRole === "GM") await applyPersistentOwnership(lastRosterItems);
   });
 
+  // OBR.scene.items.onChange only fires for changes WITHIN the scene this
+  // extension is currently subscribed to - switching to a different scene
+  // isn't a "change" on that subscription, so nothing above ever reruns
+  // for the new scene's items on its own. onReadyChange is what actually
+  // fires when the active scene changes (the previous scene stops being
+  // ready, then the new one starts). This is the hook that makes owner
+  // assignments actually catch up in a scene the GM has just switched to,
+  // and also keeps the tracker/chat log/roster/sheet from showing stale
+  // data left over from the previous scene.
+  OBR.scene.onReadyChange(async (ready) => {
+    if (!ready) return;
+
+    try {
+      const sceneMeta = await OBR.scene.getMetadata();
+      sceneState = sceneMeta[SCENE_STATE_KEY] || { round: 1, activeId: null };
+      lastChatLog = Array.isArray(sceneMeta[CHAT_LOG_METADATA_KEY]) ? sceneMeta[CHAT_LOG_METADATA_KEY] : [];
+    } catch (err) {
+      console.error("DCC sheet: scene change scene.getMetadata failed", err);
+      sceneState = { round: 1, activeId: null };
+    }
+    if (viewChatEl.style.display !== "none") renderChatLog();
+
+    try {
+      const items = await OBR.scene.items.getItems();
+      const combatItems = items.filter(isCombatItem);
+      lastTrackerItems = combatItems;
+      lastRosterItems = combatItems;
+      if (viewTrackerEl.style.display !== "none") renderTrackerRows(lastTrackerItems);
+      if (viewSheetEl.style.display !== "none") renderTokenRoster();
+      if (currentPlayerRole === "GM") await applyPersistentOwnership(combatItems);
+    } catch (err) {
+      console.error("DCC sheet: scene change items fetch failed", err);
+    }
+
+    // The old selection (and any sheet built from it) belonged to the
+    // previous scene's item IDs, which mean nothing here.
+    currentItemId = null;
+    lastKnownSelectionId = null;
+    try {
+      const selection = await OBR.player.getSelection();
+      await loadSelection(selection);
+    } catch (err) {
+      console.error("DCC sheet: scene change loadSelection failed", err);
+    }
+  });
+
   // Everything below is best-effort initial state. Wrap each piece so a
   // failure in one (e.g. scene metadata not being ready yet) can't stop
   // the others, and can never un-register the listeners above.
