@@ -904,6 +904,9 @@ const CHAT_LOG_METADATA_KEY = "com.claude.monster-sheet/chat-log";
 const OWNER_METADATA_KEY = "com.claude.monster-sheet/owner";
 const CHAT_LOG_MAX_ENTRIES = 60;
 
+const EMPTY_STATE_DEFAULT_HTML = `Select a token on the map to view or edit its DCC character sheet.<br/><br/>Changes save automatically to the token so anyone in the room sees the same sheet.`;
+const EMPTY_STATE_NOT_OWNED_HTML = `This token isn't assigned to you.<br/><br/>Ask your GM to assign it to you, or pick one of your own tokens from the list above.`;
+
 const MONSTER_TEXT_FIELD_IDS = ["init","crit","hd","mv","act","fort","ref","will","sp","notes"];
 const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al"];
@@ -2009,6 +2012,7 @@ async function loadSelection(selection) {
     lastKnownSelectionId = null;
     if (isEditingSheetField()) return;
     currentItemId = null;
+    emptyState.innerHTML = EMPTY_STATE_DEFAULT_HTML;
     emptyState.style.display = "block";
     sheetEl.style.display = "none";
     renderTokenRoster();
@@ -2026,6 +2030,21 @@ async function loadSelection(selection) {
   const items = await OBR.scene.items.getItems(selection);
   const item = items[0];
   if (!item) return;
+
+  // The token roster only hides other players' tokens from the list, but
+  // Owlbear still lets any player click-select any token on the map. This
+  // check closes that gap: a non-GM opening a token they don't own gets a
+  // blocked message instead of that token's sheet, whether they got there
+  // via the roster (which wouldn't offer it) or by clicking it directly.
+  if (currentPlayerRole !== "GM" && !isOwnToken(item)) {
+    currentItemId = null;
+    emptyState.innerHTML = EMPTY_STATE_NOT_OWNED_HTML;
+    emptyState.style.display = "block";
+    sheetEl.style.display = "none";
+    renderTokenRoster();
+    return;
+  }
+
   currentItemId = item.id;
   const monsterData = item.metadata[MONSTER_METADATA_KEY] || defaultData("monster");
   const pcData = item.metadata[PC_METADATA_KEY] || defaultData("pc");
@@ -2036,6 +2055,7 @@ async function loadSelection(selection) {
   nameEl.value = item.name || "";
   suppressChange = false;
   refreshOwnerSelectForItem(item);
+  emptyState.innerHTML = EMPTY_STATE_DEFAULT_HTML;
   emptyState.style.display = "none";
   sheetEl.style.display = "block";
   renderTokenRoster();
@@ -2085,25 +2105,35 @@ OBR.onReady(async () => {
     if (currentItemId) {
       const item = items.find(i => i.id === currentItemId);
       if (item) {
-        // If the user is actively typing anywhere in the sheet (including
-        // an attack row), skip rebuilding the form entirely. fillForm()
-        // rebuilds the attack list via innerHTML, which destroys and
-        // recreates those input elements and drops focus mid-keystroke.
-        // Since this onChange almost always fires as an echo of our own
-        // debounced save, the values we'd be "refreshing" are the ones
-        // already sitting in the fields the user is editing, so skipping
-        // is safe. We still want it to sync when *another* client changed
-        // the item while this one isn't mid-edit.
-        if (isEditingSheetField()) {
-          return;
+        // If ownership was just reassigned away from this player (e.g. the
+        // GM handed the token to someone else, or unassigned it) while
+        // they had it open, close the sheet rather than let them keep
+        // editing something that's no longer theirs.
+        if (currentPlayerRole !== "GM" && !isOwnToken(item)) {
+          currentItemId = null;
+          lastKnownSelectionId = null;
+          emptyState.innerHTML = EMPTY_STATE_NOT_OWNED_HTML;
+          emptyState.style.display = "block";
+          sheetEl.style.display = "none";
+        } else if (isEditingSheetField()) {
+          // If the user is actively typing anywhere in the sheet (including
+          // an attack row), skip rebuilding the form entirely. fillForm()
+          // rebuilds the attack list via innerHTML, which destroys and
+          // recreates those input elements and drops focus mid-keystroke.
+          // Since this onChange almost always fires as an echo of our own
+          // debounced save, the values we'd be "refreshing" are the ones
+          // already sitting in the fields the user is editing, so skipping
+          // is safe. We still want it to sync when *another* client changed
+          // the item while this one isn't mid-edit.
+        } else {
+          const monsterData = item.metadata[MONSTER_METADATA_KEY] || defaultData("monster");
+          const pcData = item.metadata[PC_METADATA_KEY] || defaultData("pc");
+          fillForm("monster", monsterData);
+          fillForm("pc", pcData);
+          setMode(item.metadata[MODE_METADATA_KEY] || currentMode, false);
+          nameEl.value = item.name || "";
+          refreshOwnerSelectForItem(item);
         }
-        const monsterData = item.metadata[MONSTER_METADATA_KEY] || defaultData("monster");
-        const pcData = item.metadata[PC_METADATA_KEY] || defaultData("pc");
-        fillForm("monster", monsterData);
-        fillForm("pc", pcData);
-        setMode(item.metadata[MODE_METADATA_KEY] || currentMode, false);
-        nameEl.value = item.name || "";
-        refreshOwnerSelectForItem(item);
       }
     }
 
@@ -2119,13 +2149,13 @@ OBR.onReady(async () => {
   // Everything below is best-effort initial state. Wrap each piece so a
   // failure in one (e.g. scene metadata not being ready yet) can't stop
   // the others, and can never un-register the listeners above.
-  try {
-    const selection = await OBR.player.getSelection();
-    await loadSelection(selection);
-  } catch (err) {
-    console.error("DCC sheet: initial loadSelection failed", err);
-  }
-
+  //
+  // Role, ID, and party are fetched BEFORE the initial loadSelection call
+  // below, since loadSelection uses currentPlayerRole/currentPlayerId to
+  // decide whether the current selection is even viewable. Fetching them
+  // after would mean a GM opening the popover with a token already
+  // selected briefly gets treated as an ordinary player (currentPlayerRole
+  // defaults to "PLAYER") and incorrectly blocked from their own sheet.
   try {
     currentPlayerRole = await OBR.player.getRole();
     refreshDiceGmRowVisibility();
@@ -2142,12 +2172,24 @@ OBR.onReady(async () => {
 
   try {
     currentPartyPlayers = await OBR.party.getPlayers();
+  } catch (err) {
+    console.error("DCC sheet: initial party.getPlayers failed", err);
+  }
+
+  try {
+    const selection = await OBR.player.getSelection();
+    await loadSelection(selection);
+  } catch (err) {
+    console.error("DCC sheet: initial loadSelection failed", err);
+  }
+
+  try {
     if (currentItemId) {
       const [item] = await OBR.scene.items.getItems([currentItemId]);
       if (item) refreshOwnerSelectForItem(item);
     }
   } catch (err) {
-    console.error("DCC sheet: initial party.getPlayers failed", err);
+    console.error("DCC sheet: initial owner select refresh failed", err);
   }
 
   try {
