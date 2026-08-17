@@ -1286,6 +1286,29 @@ function isCombatItem(item) {
   return item.layer === "CHARACTER" && !!item.name;
 }
 
+// Right after a scene finishes loading (OBR.scene.onReadyChange firing
+// true), there can be a brief window where OBR.scene.items.getItems() is
+// callable but the item sync hasn't fully landed yet, so it comes back
+// empty even though the scene genuinely has tokens on it. A single empty
+// result is ambiguous - it might be a real empty scene, or it might be
+// "asked too early." This retries a few times with a short backoff before
+// accepting "empty" as the real answer, without meaningfully slowing down
+// the common case where items are already there on the first try.
+async function fetchCombatItemsWithRetry(maxAttempts = 5, delayMs = 300) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const items = await OBR.scene.items.getItems();
+      const combatItems = items.filter(isCombatItem);
+      if (combatItems.length > 0 || attempt === maxAttempts - 1) return combatItems;
+    } catch (err) {
+      console.error(`DCC sheet: getItems failed (attempt ${attempt + 1}/${maxAttempts})`, err);
+      if (attempt === maxAttempts - 1) return [];
+    }
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+  return [];
+}
+
 // ---- Token roster (Sheet tab) & owner assignment ----
 //
 // Owlbear Rodeo has a native "Owner Only" room permission for the
@@ -1379,8 +1402,7 @@ document.getElementById("token-roster-toggle").addEventListener("click", () => {
 
 async function refreshTokenRoster() {
   try {
-    const items = await OBR.scene.items.getItems();
-    lastRosterItems = items.filter(isCombatItem);
+    lastRosterItems = await fetchCombatItemsWithRetry();
     renderTokenRoster();
     if (currentPlayerRole === "GM") await applyPersistentOwnership(lastRosterItems);
   } catch (err) {
@@ -2074,8 +2096,7 @@ async function rollInitiativeFor(id) {
 }
 
 async function refreshTracker() {
-  const items = await OBR.scene.items.getItems();
-  lastTrackerItems = items.filter(isCombatItem);
+  lastTrackerItems = await fetchCombatItemsWithRetry();
   renderTrackerRows(lastTrackerItems);
 }
 
@@ -2306,8 +2327,7 @@ OBR.onReady(async () => {
     if (viewChatEl.style.display !== "none") renderChatLog();
 
     try {
-      const items = await OBR.scene.items.getItems();
-      const combatItems = items.filter(isCombatItem);
+      const combatItems = await fetchCombatItemsWithRetry();
       lastTrackerItems = combatItems;
       lastRosterItems = combatItems;
       if (viewTrackerEl.style.display !== "none") renderTrackerRows(lastTrackerItems);
