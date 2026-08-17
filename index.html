@@ -753,11 +753,19 @@
       <div class="row">
         <div>
           <label>Count</label>
-          <input type="number" id="dice-count" value="1" min="1" max="20" />
+          <div class="hp-row">
+            <button type="button" class="hp-btn" id="dice-count-minus">−</button>
+            <input type="number" id="dice-count" value="1" min="1" max="20" />
+            <button type="button" class="hp-btn" id="dice-count-plus">+</button>
+          </div>
         </div>
         <div>
           <label>Modifier</label>
-          <input type="text" id="dice-modifier" placeholder="+0" />
+          <div class="hp-row">
+            <button type="button" class="hp-btn" id="dice-modifier-minus">−</button>
+            <input type="text" id="dice-modifier" placeholder="+0" />
+            <button type="button" class="hp-btn" id="dice-modifier-plus">+</button>
+          </div>
         </div>
       </div>
 
@@ -1599,6 +1607,29 @@ async function executeDiceRoll(count, sides, modifier) {
     gmOnly: isPrivate,
   });
 }
+
+function adjustDiceCount(delta) {
+  const el = document.getElementById("dice-count");
+  const min = Number(el.min) || 1;
+  const max = Number(el.max) || 20;
+  const next = (Number(el.value) || 1) + delta;
+  el.value = Math.max(min, Math.min(max, next));
+}
+
+function formatModifier(n) {
+  if (!n) return "";
+  return n > 0 ? `+${n}` : `${n}`;
+}
+
+function adjustDiceModifier(delta) {
+  const el = document.getElementById("dice-modifier");
+  el.value = formatModifier(parseModifier(el.value) + delta);
+}
+
+document.getElementById("dice-count-minus").addEventListener("click", () => adjustDiceCount(-1));
+document.getElementById("dice-count-plus").addEventListener("click", () => adjustDiceCount(1));
+document.getElementById("dice-modifier-minus").addEventListener("click", () => adjustDiceModifier(-1));
+document.getElementById("dice-modifier-plus").addEventListener("click", () => adjustDiceModifier(1));
 
 document.querySelectorAll("#dice-chain-grid .dice-btn").forEach(btn => {
   btn.addEventListener("click", () => {
