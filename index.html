@@ -1154,10 +1154,11 @@ async function saveCurrent() {
   showStatus("Saved");
 }
 
-function showStatus(text) {
+function showStatus(text, isError) {
   statusEl.textContent = text;
+  statusEl.style.color = isError ? "#c97b7b" : "var(--good)";
   clearTimeout(showStatus._t);
-  showStatus._t = setTimeout(() => statusEl.textContent = "", 1500);
+  showStatus._t = setTimeout(() => statusEl.textContent = "", isError ? 4000 : 1500);
 }
 
 function scheduleSave() {
@@ -1565,11 +1566,33 @@ function refreshOwnerSelectOptions() {
 }
 
 document.getElementById("owner-select").addEventListener("change", async () => {
-  if (!currentItemId) return;
   const sel = document.getElementById("owner-select");
+  if (!currentItemId) return;
   const id = sel.value;
-  const [item] = await OBR.scene.items.getItems([currentItemId]);
-  if (!item) return;
+  const itemId = currentItemId;
+
+  // The previous version awaited three separate round trips back-to-back
+  // (owner map, then templates, then the item update) with no feedback
+  // until all three finished. On a slow connection that reads as "nothing
+  // happened," which is exactly what prompts someone to re-pick the same
+  // option - so now: disable + show "Saving" immediately, do the two
+  // independent writes in parallel instead of in sequence, and give a
+  // real error message instead of silently no-oping if the item can't be
+  // found (which is itself a plausible cause of "it just didn't work").
+  sel.disabled = true;
+  showStatus("Saving owner…");
+
+  let item;
+  try {
+    [item] = await OBR.scene.items.getItems([itemId]);
+  } catch (err) {
+    console.error("DCC sheet: failed to fetch item for owner assignment", err);
+  }
+  if (!item) {
+    sel.disabled = false;
+    showStatus("Couldn't save - try reselecting the token", true);
+    return;
+  }
   const tokenName = item.name;
 
   const nextMap = { ...roomOwnerMap };
@@ -1580,36 +1603,38 @@ document.getElementById("owner-select").addEventListener("change", async () => {
     delete nextMap[tokenName];
   }
   roomOwnerMap = nextMap;
-
-  try {
-    await OBR.room.setMetadata({ [ROOM_OWNER_MAP_KEY]: roomOwnerMap });
-  } catch (err) {
-    console.error("DCC sheet: failed to persist owner assignment", err);
-  }
-
   if (id) {
     roomTokenTemplates = { ...roomTokenTemplates, [tokenName]: cloneItemForTemplate(item) };
-    try {
-      await OBR.room.setMetadata({ [ROOM_TOKEN_TEMPLATE_KEY]: roomTokenTemplates });
-    } catch (err) {
-      console.error("DCC sheet: failed to persist token template", err);
-    }
   }
 
-  // Also apply straight to this item's native createdUserId so the actual
-  // Owlbear "Owner Only" movement permission (if enabled) takes effect
-  // immediately in the current scene, not just on next sync. Unassigning
-  // hands createdUserId back to the GM, since the GM is exempt from Owner
-  // Only anyway and there's no real "nobody" value to set it to.
-  try {
-    await OBR.scene.items.updateItems([currentItemId], items => {
+  // Optimistic local update - the roster reflects the new owner right
+  // away instead of waiting on the writes below to round-trip and echo
+  // back through onMetadataChange/items.onChange.
+  renderTokenRoster();
+
+  const results = await Promise.allSettled([
+    OBR.room.setMetadata({
+      [ROOM_OWNER_MAP_KEY]: roomOwnerMap,
+      [ROOM_TOKEN_TEMPLATE_KEY]: roomTokenTemplates,
+    }),
+    // Also apply straight to this item's native createdUserId so the actual
+    // Owlbear "Owner Only" movement permission (if enabled) takes effect
+    // immediately in the current scene, not just on next sync. Unassigning
+    // hands createdUserId back to the GM, since the GM is exempt from Owner
+    // Only anyway and there's no real "nobody" value to set it to.
+    OBR.scene.items.updateItems([itemId], items => {
       items.forEach(it => { it.createdUserId = id || currentPlayerId; });
-    });
-  } catch (err) {
-    console.error("DCC sheet: failed to update item owner", err);
-  }
+    }),
+  ]);
 
-  showStatus("Owner updated");
+  sel.disabled = false;
+  const failed = results.some(r => r.status === "rejected");
+  if (failed) {
+    results.forEach(r => { if (r.status === "rejected") console.error("DCC sheet: owner assignment write failed", r.reason); });
+    showStatus("Owner saved locally, but sync failed - try again", true);
+  } else {
+    showStatus("Owner updated");
+  }
 });
 
 function computeOrder(items) {
