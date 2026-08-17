@@ -1362,9 +1362,21 @@ function templateNeedsRefresh(item) {
   return new Date(item.lastModified).getTime() > existingModified;
 }
 
+// A roomOwnerMap entry means "this token name has been managed through the
+// Owner dropdown at least once." Once managed, mapped.id is the sole
+// source of truth for ownership - INCLUDING when mapped.id is null
+// (explicitly unassigned) - and createdUserId is never consulted again for
+// that name. This matters because unassigning only resets createdUserId on
+// the item open in the CURRENT scene; any other scene that already has a
+// cloned copy of that token keeps its old createdUserId until the GM's
+// client happens to visit it. Falling back to createdUserId for a managed-
+// but-unassigned name would read that stale value as real ownership. Names
+// that have never been touched by the Owner dropdown at all (mapped is
+// undefined) still fall back to createdUserId, preserving the native
+// "player dragged their own token onto the map" behavior.
 function isOwnToken(item) {
   const mapped = roomOwnerMap[item.name];
-  if (mapped && mapped.id) return mapped.id === currentPlayerId;
+  if (mapped) return mapped.id === currentPlayerId;
   return item.createdUserId === currentPlayerId;
 }
 
@@ -1455,7 +1467,8 @@ async function applyPersistentOwnership(items) {
   let templatesChanged = false;
   const nextTemplates = { ...roomTokenTemplates };
   items.forEach(item => {
-    if (roomOwnerMap[item.name] && templateNeedsRefresh(item)) {
+    const mapped = roomOwnerMap[item.name];
+    if (mapped && mapped.id && templateNeedsRefresh(item)) {
       nextTemplates[item.name] = cloneItemForTemplate(item);
       templatesChanged = true;
     }
@@ -1469,16 +1482,24 @@ async function applyPersistentOwnership(items) {
     }
   }
 
+  // Covers both directions: apply a positive assignment (mapped.id set),
+  // and clean up a stale owner left over from before an explicit
+  // unassignment (mapped exists with id: null, hands createdUserId back
+  // to the GM). Names never touched by the Owner dropdown (mapped
+  // undefined) are left alone entirely - their createdUserId is native
+  // Owlbear data, not ours to touch.
   const toFix = items.filter(item => {
     const mapped = roomOwnerMap[item.name];
-    return mapped && mapped.id && item.createdUserId !== mapped.id;
+    if (!mapped) return false;
+    const desired = mapped.id || currentPlayerId;
+    return item.createdUserId !== desired;
   });
   if (!toFix.length) return;
   try {
     await OBR.scene.items.updateItems(toFix.map(item => item.id), draftItems => {
       draftItems.forEach(item => {
         const mapped = roomOwnerMap[item.name];
-        if (mapped && mapped.id) item.createdUserId = mapped.id;
+        if (mapped) item.createdUserId = mapped.id || currentPlayerId;
       });
     });
   } catch (err) {
@@ -1550,7 +1571,7 @@ function refreshOwnerSelectForItem(item) {
   if (!sel) return;
   const owner = roomOwnerMap[item.name] || null;
   sel.innerHTML = ownerSelectOptionsHtml(owner ? owner.id : null, owner ? owner.name : null);
-  sel.value = owner ? owner.id : "";
+  sel.value = (owner && owner.id) ? owner.id : "";
 }
 
 // Rebuilds just the option list (e.g. on party roster change) while
@@ -1600,7 +1621,13 @@ document.getElementById("owner-select").addEventListener("change", async () => {
     const player = currentPartyPlayers.find(p => p.id === id);
     nextMap[tokenName] = { id, name: player ? (player.name || "Unnamed player") : "Unknown player" };
   } else {
-    delete nextMap[tokenName];
+    // Explicitly unassigning still leaves an entry behind (id: null)
+    // rather than deleting the key. This name is now "managed" - isOwnToken
+    // and applyPersistentOwnership both treat a managed-but-unassigned
+    // entry as authoritative and will never fall back to (or leave stale)
+    // a copy's createdUserId from before this unassignment, in this scene
+    // or any other the GM later revisits.
+    nextMap[tokenName] = { id: null, name: null };
   }
   roomOwnerMap = nextMap;
   if (id) {
