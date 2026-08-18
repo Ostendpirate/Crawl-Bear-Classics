@@ -540,6 +540,18 @@
     display: block;
     margin-top: 2px;
   }
+  .fumble-die-line {
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .fumble-die-line span#pc-fumble-die {
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .fumble-die-note {
+    font-size: 10px;
+  }
   .add-attack-btn {
     width: 100%;
     background: var(--panel);
@@ -875,7 +887,7 @@
           </div>
           <div>
             <label>Speed</label>
-            <input type="text" id="pc-speed" placeholder="30'" />
+            <input type="text" id="pc-speed" readonly title="Base speed (by race/class) minus equipped armor's speed penalty" />
           </div>
         </div>
 
@@ -959,6 +971,7 @@
 
         <fieldset>
           <legend>Attacks</legend>
+          <div class="fumble-die-line">Fumble Die: <span id="pc-fumble-die">d4</span> <span class="fumble-die-note">(based on equipped armor/shield)</span></div>
           <div class="attack-list" id="attack-list-pc"></div>
           <button type="button" class="add-attack-btn" id="add-attack-pc">+ Add Attack</button>
         </fieldset>
@@ -1301,6 +1314,8 @@ function renderMonsterStatline(d) {
 function renderPcStatline(d) {
   const ac = recalcPcAC();
   recalcPcCheckPenalty();
+  const speed = recalcPcSpeed();
+  recalcPcFumbleDie();
   const hp = d.hpMax ? `${d.hpCurrent || d.hpMax}/${d.hpMax}` : (d.hpCurrent || "—");
   const classLevel = [d.class || d.occupation || null, d.level ? `Lvl ${d.level}` : null].filter(Boolean).join(" ");
   const atkSummary = formatAttacksSummary(d.attacks);
@@ -1310,7 +1325,7 @@ function renderPcStatline(d) {
     d.init ? `<b>Init</b> ${d.init}` : null,
     `<b>AC</b> ${ac}`,
     `<b>HP</b> ${hp}`,
-    d.speed ? `<b>Spd</b> ${d.speed}` : null,
+    `<b>Spd</b> ${speed}'`,
     d.actdice ? `<b>Act</b> ${d.actdice}` : null,
     (d.fort || d.ref || d.will) ? `<b>SV</b> Fort ${d.fort || "+0"}, Ref ${d.ref || "+0"}, Will ${d.will || "+0"}` : null,
     d.crit ? `<b>Crit</b> ${d.crit}` : null,
@@ -1463,24 +1478,41 @@ function refreshDerivedPcFields() {
 // (e.g. Studded Leather and Hide are both +3 but priced/penalized
 // differently), and checkPenalty doesn't track 1:1 with the AC bonus
 // either (e.g. Hide is +3 AC/-3 CP but Studded Leather is +3 AC/-2 CP).
-// "slot" governs mutual exclusivity below: a character wears one suit of
-// body armor and carries one shield at a time, but can own several of
-// each - only one per slot can be marked equipped.
+// speedPenalty (feet subtracted from base speed) and fumbleDie (die
+// rolled on a combat fumble) come from the same source table. "slot"
+// governs mutual exclusivity below: a character wears one suit of body
+// armor and carries one shield at a time, but can own several of each -
+// only one per slot can be marked equipped.
 const DCC_ARMOR_TYPES = [
-  { key: "none", label: "None", bonus: 0, checkPenalty: 0, slot: "armor" },
-  { key: "padded", label: "Padded", bonus: 1, checkPenalty: 0, slot: "armor" },
-  { key: "leather", label: "Leather", bonus: 2, checkPenalty: -1, slot: "armor" },
-  { key: "studded", label: "Studded Leather", bonus: 3, checkPenalty: -2, slot: "armor" },
-  { key: "hide", label: "Hide", bonus: 3, checkPenalty: -3, slot: "armor" },
-  { key: "scale", label: "Scale Mail", bonus: 4, checkPenalty: -4, slot: "armor" },
-  { key: "chain", label: "Chainmail", bonus: 5, checkPenalty: -5, slot: "armor" },
-  { key: "banded", label: "Banded Mail", bonus: 6, checkPenalty: -6, slot: "armor" },
-  { key: "halfplate", label: "Half-Plate", bonus: 7, checkPenalty: -7, slot: "armor" },
-  { key: "fullplate", label: "Full Plate", bonus: 8, checkPenalty: -8, slot: "armor" },
-  { key: "shield", label: "Shield", bonus: 1, checkPenalty: -1, slot: "shield" },
-  { key: "custom-armor", label: "Custom Armor", bonus: 0, checkPenalty: 0, slot: "armor" },
-  { key: "custom-shield", label: "Custom Shield", bonus: 0, checkPenalty: 0, slot: "shield" },
+  { key: "none", label: "None", bonus: 0, checkPenalty: 0, speedPenalty: 0, fumbleDie: 4, slot: "armor" },
+  { key: "padded", label: "Padded", bonus: 1, checkPenalty: 0, speedPenalty: 0, fumbleDie: 8, slot: "armor" },
+  { key: "leather", label: "Leather", bonus: 2, checkPenalty: -1, speedPenalty: 0, fumbleDie: 8, slot: "armor" },
+  { key: "studded", label: "Studded Leather", bonus: 3, checkPenalty: -2, speedPenalty: 0, fumbleDie: 8, slot: "armor" },
+  { key: "hide", label: "Hide", bonus: 3, checkPenalty: -3, speedPenalty: 0, fumbleDie: 12, slot: "armor" },
+  { key: "scale", label: "Scale Mail", bonus: 4, checkPenalty: -4, speedPenalty: 5, fumbleDie: 12, slot: "armor" },
+  { key: "chain", label: "Chainmail", bonus: 5, checkPenalty: -5, speedPenalty: 5, fumbleDie: 12, slot: "armor" },
+  { key: "banded", label: "Banded Mail", bonus: 6, checkPenalty: -6, speedPenalty: 10, fumbleDie: 16, slot: "armor" },
+  { key: "halfplate", label: "Half-Plate", bonus: 7, checkPenalty: -7, speedPenalty: 10, fumbleDie: 16, slot: "armor" },
+  { key: "fullplate", label: "Full Plate", bonus: 8, checkPenalty: -8, speedPenalty: 10, fumbleDie: 16, slot: "armor" },
+  { key: "shield", label: "Shield", bonus: 1, checkPenalty: -1, speedPenalty: 0, fumbleDie: 8, slot: "shield" },
+  { key: "custom-armor", label: "Custom Armor", bonus: 0, checkPenalty: 0, speedPenalty: 0, fumbleDie: 4, slot: "armor" },
+  { key: "custom-shield", label: "Custom Shield", bonus: 0, checkPenalty: 0, speedPenalty: 0, fumbleDie: 8, slot: "shield" },
 ];
+
+// DCC ties base movement speed to race, not class - but Warrior/Wizard/
+// Cleric/Thief are all "class only" (the character is presumed Human,
+// base speed 30'), while Dwarf/Elf/Halfling are combined race+class
+// entries. Elves share the Human 30' base; Dwarves and Halflings are 20'.
+// "Other/Homebrew" and no-class-yet fall back to 30' as the common case.
+const DCC_CLASS_BASE_SPEED = {
+  "Dwarf": 20,
+  "Halfling": 20,
+  "Elf": 30,
+};
+
+function basePcSpeedForClass(cls) {
+  return DCC_CLASS_BASE_SPEED[cls] ?? 30;
+}
 
 function armorTypeEntry(key) {
   return DCC_ARMOR_TYPES.find(t => t.key === key) || DCC_ARMOR_TYPES[0];
@@ -1550,6 +1582,8 @@ function attachArmorRowListeners() {
       scheduleSave();
       recalcPcAC();
       recalcPcCheckPenalty();
+      recalcPcSpeed();
+      recalcPcFumbleDie();
       syncArmorIntoEquipment();
     });
     bonusInput.addEventListener("input", () => {
@@ -1577,6 +1611,8 @@ function attachArmorRowListeners() {
       scheduleSave();
       recalcPcAC();
       recalcPcCheckPenalty();
+      recalcPcSpeed();
+      recalcPcFumbleDie();
       syncArmorIntoEquipment();
     });
     row.querySelector(".attack-remove-btn").addEventListener("click", () => {
@@ -1584,6 +1620,8 @@ function attachArmorRowListeners() {
       scheduleSave();
       recalcPcAC();
       recalcPcCheckPenalty();
+      recalcPcSpeed();
+      recalcPcFumbleDie();
       syncArmorIntoEquipment();
     });
   });
@@ -1594,6 +1632,8 @@ document.getElementById("add-armor-pc").addEventListener("click", () => {
   attachArmorRowListeners();
   recalcPcAC();
   recalcPcCheckPenalty();
+  recalcPcSpeed();
+  recalcPcFumbleDie();
   syncArmorIntoEquipment();
 });
 
@@ -1650,6 +1690,41 @@ function recalcPcCheckPenalty() {
   return total;
 }
 
+// Speed = base speed for the character's race/class, minus whatever
+// speed penalty their equipped armor imposes (only the heavier tiers -
+// Scale Mail/Chainmail and up - actually carry one; shields don't per the
+// table). Fully deterministic once class and equipped armor are known, so
+// like AC this is unconditionally computed and the field is read-only.
+function recalcPcSpeed() {
+  const speedEl = document.getElementById("pc-speed");
+  if (!speedEl) return 0;
+  const classEl = document.getElementById("pc-class");
+  const base = basePcSpeedForClass(classEl ? classEl.value : "");
+  const penalty = readArmorItems()
+    .filter(item => item.equipped)
+    .reduce((sum, item) => sum + (armorTypeEntry(item.type).speedPenalty || 0), 0);
+  const total = Math.max(0, base - penalty);
+  speedEl.value = `${total}'`;
+  return total;
+}
+
+// Fumble die depends on whichever equipped item (armor or shield) is most
+// restrictive, not a sum - dice types don't add. Using the larger die
+// between armor and shield matches the rulebook's general framing of
+// "heavier armor -> bigger fumble die," and every entry in the table
+// happens to use only d4/d8/d12/d16, so a plain numeric max is safe here
+// without needing the full DCC dice-chain ordering.
+function recalcPcFumbleDie() {
+  const el = document.getElementById("pc-fumble-die");
+  if (!el) return 4;
+  const equipped = readArmorItems().filter(item => item.equipped);
+  const die = equipped.length
+    ? Math.max(...equipped.map(item => armorTypeEntry(item.type).fumbleDie || 4))
+    : 4;
+  el.textContent = `d${die}`;
+  return die;
+}
+
 // Keeps an auto-managed block of "<Label> (+<n> AC) [equipped]" lines at
 // the top of the Equipment text in sync with the Armor & Shields
 // inventory - every owned piece gets a line, with equipped ones flagged,
@@ -1687,6 +1762,7 @@ document.getElementById("pc-ac-misc").addEventListener("input", () => {
 
 document.getElementById("pc-class").addEventListener("change", () => {
   recalcPcCheckPenalty();
+  recalcPcSpeed();
   scheduleSave();
 });
 
