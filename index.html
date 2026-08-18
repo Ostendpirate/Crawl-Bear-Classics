@@ -65,6 +65,11 @@
     outline: none;
     border-color: var(--accent);
   }
+  input:read-only {
+    color: var(--accent);
+    font-weight: 700;
+    cursor: default;
+  }
   textarea { resize: vertical; min-height: 48px; line-height: 1.4; }
   .hp-row {
     display: flex;
@@ -142,6 +147,30 @@
     font-size: 13px;
     font-weight: 600;
   }
+  .field-sync-row {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+  .field-sync-row input {
+    flex: 1;
+    min-width: 0;
+    width: auto;
+  }
+  .derived-sync-btn {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    font-size: 10px;
+    line-height: 1;
+    background: var(--border);
+    border: none;
+    border-radius: 4px;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .derived-sync-btn:hover { background: var(--accent); color: #1e1b18; }
   fieldset {
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -432,6 +461,20 @@
   .attack-row .attack-name { flex: 1.6; }
   .attack-row .attack-bonus { flex: 0.7; text-align: center; }
   .attack-row .attack-damage { flex: 0.9; text-align: center; }
+  .attack-quick-btn {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    font-size: 9px;
+    font-weight: 700;
+    background: var(--border);
+    border: none;
+    border-radius: 4px;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .attack-quick-btn:hover { background: var(--accent); color: #1e1b18; }
   .attack-remove-btn {
     flex: none;
     width: 20px;
@@ -445,6 +488,37 @@
     line-height: 1;
   }
   .attack-remove-btn:hover { background: #a5453a; }
+  .armor-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+  .armor-row {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 6px;
+  }
+  .armor-row.equipped { border-color: var(--good); }
+  .armor-equipped {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--good);
+  }
+  .armor-type {
+    flex: 1.6;
+    min-width: 0;
+    padding: 4px 6px;
+    font-size: 12px;
+  }
+  .armor-bonus {
+    flex: 0.6;
+    text-align: center;
+    padding: 4px 6px;
+    font-size: 12px;
+    min-width: 0;
+  }
   .add-attack-btn {
     width: 100%;
     background: var(--panel);
@@ -759,17 +833,33 @@
         <div class="row">
           <div>
             <label>Init</label>
-            <input type="text" id="pc-init" placeholder="+1" />
+            <div class="field-sync-row">
+              <input type="text" id="pc-init" placeholder="+1" />
+              <button type="button" class="derived-sync-btn" data-target="pc-init" title="Set to Agility modifier">↻</button>
+            </div>
           </div>
           <div>
             <label>AC</label>
-            <input type="number" id="pc-ac" />
+            <input type="number" id="pc-ac" readonly title="10 + Agi mod + Armor + Shield + Misc" />
           </div>
           <div>
             <label>Speed</label>
             <input type="text" id="pc-speed" placeholder="30'" />
           </div>
         </div>
+
+        <div class="row">
+          <div>
+            <label>Misc AC</label>
+            <input type="text" id="pc-ac-misc" placeholder="+0" />
+          </div>
+        </div>
+
+        <fieldset>
+          <legend>Armor &amp; Shields</legend>
+          <div class="armor-list" id="armor-list-pc"></div>
+          <button type="button" class="add-attack-btn" id="add-armor-pc">+ Add Armor / Shield</button>
+        </fieldset>
 
         <div class="row">
           <div>
@@ -793,12 +883,43 @@
               <button class="hp-btn" id="pc-hp-plus">+</button>
             </div>
           </div>
+          <div style="flex:0.75;">
+            <label>Hit Die</label>
+            <div class="hp-row">
+              <select id="pc-hitdie">
+                <option value="4">d4</option>
+                <option value="6">d6</option>
+                <option value="8" selected>d8</option>
+                <option value="10">d10</option>
+                <option value="12">d12</option>
+              </select>
+              <button type="button" class="hp-btn" id="pc-roll-hp" title="Roll Hit Die + Stamina modifier, add to Max HP">🎲</button>
+            </div>
+          </div>
         </div>
 
         <div class="saves pc-saves">
-          <div class="save-box"><label>Fort</label><input type="text" id="pc-fort" placeholder="+0"/></div>
-          <div class="save-box"><label>Ref</label><input type="text" id="pc-ref" placeholder="+0"/></div>
-          <div class="save-box"><label>Will</label><input type="text" id="pc-will" placeholder="+0"/></div>
+          <div class="save-box">
+            <label>Fort</label>
+            <div class="field-sync-row">
+              <input type="text" id="pc-fort" placeholder="+0"/>
+              <button type="button" class="derived-sync-btn" data-target="pc-fort" title="Set to Stamina modifier">↻</button>
+            </div>
+          </div>
+          <div class="save-box">
+            <label>Ref</label>
+            <div class="field-sync-row">
+              <input type="text" id="pc-ref" placeholder="+0"/>
+              <button type="button" class="derived-sync-btn" data-target="pc-ref" title="Set to Agility modifier">↻</button>
+            </div>
+          </div>
+          <div class="save-box">
+            <label>Will</label>
+            <div class="field-sync-row">
+              <input type="text" id="pc-will" placeholder="+0"/>
+              <button type="button" class="derived-sync-btn" data-target="pc-will" title="Set to Personality modifier">↻</button>
+            </div>
+          </div>
         </div>
 
         <fieldset>
@@ -958,9 +1079,9 @@ const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-class","pc-occupation","pc-level","pc-xp","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-actdice","pc-fort","pc-ref","pc-will","pc-equipment","pc-spells","pc-languages","pc-notes"];
+const PC_TEXT_FIELD_IDS = ["pc-class","pc-occupation","pc-level","pc-xp","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-actdice","pc-fort","pc-ref","pc-will","pc-equipment","pc-spells","pc-languages","pc-notes","pc-ac-misc"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
-const PC_SELECT_FIELD_IDS = ["pc-alignment"];
+const PC_SELECT_FIELD_IDS = ["pc-alignment", "pc-hitdie"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
 
 const pcKey = id => id.replace(/^pc-/, "");
@@ -1007,6 +1128,7 @@ function defaultData(mode) {
   d.hpCurrent = "";
   d.hpMax = "";
   d.attacks = [];
+  d.armorItems = [];
   return d;
 }
 
@@ -1018,6 +1140,7 @@ function fillForm(mode, data) {
   document.getElementById(cfg.hpCurrentId).value = d.hpCurrent ?? "";
   document.getElementById(cfg.hpMaxId).value = d.hpMax ?? "";
   renderAttacks(mode, d.attacks || []);
+  if (mode === "pc") renderArmorItems(d.armorItems || []);
   suppressChange = false;
   cfg.render(d);
 }
@@ -1029,6 +1152,7 @@ function readForm(mode) {
   d.hpCurrent = document.getElementById(cfg.hpCurrentId).value;
   d.hpMax = document.getElementById(cfg.hpMaxId).value;
   d.attacks = readAttacks(mode);
+  d.armorItems = mode === "pc" ? readArmorItems() : [];
   return d;
 }
 
@@ -1036,11 +1160,14 @@ function emptyAttack() {
   return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "" };
 }
 
-function attackRowHtml(atk) {
+function attackRowHtml(atk, mode) {
+  const quickButtons = mode === "pc" ? `
+      <button type="button" class="attack-quick-btn" data-mod="str" title="Set Bonus to Str modifier">Str</button>
+      <button type="button" class="attack-quick-btn" data-mod="agi" title="Set Bonus to Agi modifier">Agi</button>` : "";
   return `
     <div class="attack-row" data-id="${atk.id}">
       <input type="text" class="attack-name" placeholder="Claw" value="${escapeHtml(atk.name)}" />
-      <input type="text" class="attack-bonus" placeholder="+4" value="${escapeHtml(atk.bonus)}" />
+      <input type="text" class="attack-bonus" placeholder="+4" value="${escapeHtml(atk.bonus)}" />${quickButtons}
       <input type="text" class="attack-damage" placeholder="1d6" value="${escapeHtml(atk.damage)}" />
       <button type="button" class="attack-remove-btn" title="Remove attack">×</button>
     </div>`;
@@ -1052,7 +1179,7 @@ function attackListEl(mode) {
 
 function renderAttacks(mode, attacks) {
   const listEl = attackListEl(mode);
-  listEl.innerHTML = (attacks || []).map(atk => attackRowHtml(atk)).join("");
+  listEl.innerHTML = (attacks || []).map(atk => attackRowHtml(atk, mode)).join("");
   attachAttackRowListeners(mode);
 }
 
@@ -1074,6 +1201,16 @@ function attachAttackRowListeners(mode) {
       scheduleSave();
       cfgRenderFromCurrentForm(mode);
     });
+    if (mode === "pc") {
+      row.querySelectorAll(".attack-quick-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const sourceId = btn.dataset.mod === "agi" ? "pc-agi" : "pc-str";
+          row.querySelector(".attack-bonus").value = formatSignedNumber(abilityModifierFromField(sourceId));
+          scheduleSave();
+          cfgRenderFromCurrentForm(mode);
+        });
+      });
+    }
   });
 }
 
@@ -1082,11 +1219,11 @@ function cfgRenderFromCurrentForm(mode) {
 }
 
 document.getElementById("add-attack-monster").addEventListener("click", () => {
-  attackListEl("monster").insertAdjacentHTML("beforeend", attackRowHtml(emptyAttack()));
+  attackListEl("monster").insertAdjacentHTML("beforeend", attackRowHtml(emptyAttack(), "monster"));
   attachAttackRowListeners("monster");
 });
 document.getElementById("add-attack-pc").addEventListener("click", () => {
-  attackListEl("pc").insertAdjacentHTML("beforeend", attackRowHtml(emptyAttack()));
+  attackListEl("pc").insertAdjacentHTML("beforeend", attackRowHtml(emptyAttack(), "pc"));
   attachAttackRowListeners("pc");
 });
 
@@ -1127,6 +1264,7 @@ function renderMonsterStatline(d) {
 }
 
 function renderPcStatline(d) {
+  const ac = recalcPcAC();
   const hp = d.hpMax ? `${d.hpCurrent || d.hpMax}/${d.hpMax}` : (d.hpCurrent || "—");
   const classLevel = [d.class || d.occupation || null, d.level ? `Lvl ${d.level}` : null].filter(Boolean).join(" ");
   const atkSummary = formatAttacksSummary(d.attacks);
@@ -1134,7 +1272,7 @@ function renderPcStatline(d) {
     classLevel ? `<b>${classLevel}</b>` : null,
     d.alignment ? `<b>AL</b> ${d.alignment}` : null,
     d.init ? `<b>Init</b> ${d.init}` : null,
-    `<b>AC</b> ${d.ac || "—"}`,
+    `<b>AC</b> ${ac}`,
     `<b>HP</b> ${hp}`,
     d.speed ? `<b>Spd</b> ${d.speed}` : null,
     d.actdice ? `<b>Act</b> ${d.actdice}` : null,
@@ -1200,6 +1338,305 @@ document.getElementById("hp-plus").addEventListener("click", () => adjustHp("hp-
 document.getElementById("pc-hp-minus").addEventListener("click", () => adjustHp("pc-hp-current", "pc-hp-max", -1));
 document.getElementById("pc-hp-plus").addEventListener("click", () => adjustHp("pc-hp-current", "pc-hp-max", 1));
 
+// ---- DCC ability modifiers & derived-stat automation (Player mode) ----
+//
+// DCC RPG's ability modifier table is NOT the (score-10)/2 formula from
+// D&D 5e - it's its own non-linear table from the core rulebook. Scores
+// above 18 aren't part of the core 3d6 table; the two extra tiers below
+// are a reasonable extrapolation for racial-bonus edge cases, not
+// something printed in the book.
+const DCC_ABILITY_MOD_TABLE = [
+  { max: 3, mod: -3 },
+  { max: 5, mod: -2 },
+  { max: 8, mod: -1 },
+  { max: 13, mod: 0 },
+  { max: 15, mod: 1 },
+  { max: 17, mod: 2 },
+  { max: 19, mod: 3 },
+  { max: Infinity, mod: 4 },
+];
+
+function dccAbilityModifier(score) {
+  for (const row of DCC_ABILITY_MOD_TABLE) {
+    if (score <= row.max) return row.mod;
+  }
+  return 4;
+}
+
+function formatSignedNumber(n) {
+  return n > 0 ? `+${n}` : `${n}`;
+}
+
+// Ability fields store (and display) as "14 (+1)" - this pulls just the
+// leading number back out, whether the field currently holds a bare score,
+// an already-formatted "score (mod)" string, or is empty.
+function parseAbilityScore(raw) {
+  const m = String(raw || "").match(/-?\d+/);
+  return m ? parseInt(m[0], 10) : null;
+}
+
+function abilityModifierFromField(id) {
+  const el = document.getElementById(id);
+  if (!el) return 0;
+  const score = parseAbilityScore(el.value);
+  return score === null ? 0 : dccAbilityModifier(score);
+}
+
+const PC_ABILITY_FIELD_IDS = ["pc-str", "pc-agi", "pc-sta", "pc-per", "pc-int", "pc-lck"];
+
+PC_ABILITY_FIELD_IDS.forEach(id => {
+  document.getElementById(id).addEventListener("blur", () => {
+    const el = document.getElementById(id);
+    const score = parseAbilityScore(el.value);
+    if (score !== null) {
+      el.value = `${score} (${formatSignedNumber(dccAbilityModifier(score))})`;
+      scheduleSave();
+    }
+    refreshDerivedPcFields();
+  });
+});
+
+// Maps each derived field to the ability field that feeds it.
+const PC_DERIVED_FIELD_SOURCES = {
+  "pc-init": "pc-agi",
+  "pc-fort": "pc-sta",
+  "pc-ref": "pc-agi",
+  "pc-will": "pc-per",
+};
+
+// Passive half of the automation: whenever an ability score is edited,
+// fill in any of Init/Fort/Ref/Will that are still blank with that
+// ability's modifier. Never touches a field that already has something in
+// it - DCC saves and Init are class/level base PLUS the ability modifier,
+// and there's no way to know a character's class base from here, so this
+// only ever provides the ability-mod half as a starting point, not a
+// silent overwrite of whatever the player already entered (which might
+// already include their class base).
+function refreshDerivedPcFields() {
+  Object.entries(PC_DERIVED_FIELD_SOURCES).forEach(([fieldId, sourceId]) => {
+    const el = document.getElementById(fieldId);
+    if (!el || el.value.trim() !== "") return;
+    el.value = formatSignedNumber(abilityModifierFromField(sourceId));
+  });
+  recalcPcAC();
+  scheduleSave();
+}
+
+// DCC's core armor table - verified against a DCC quick-reference before
+// hardcoding, since the AC bonus per tier is NOT a flat +1 increment
+// (e.g. Studded Leather and Hide are both +3 but priced/penalized
+// differently). "slot" governs mutual exclusivity below: a character
+// wears one suit of body armor and carries one shield at a time, but can
+// own several of each - only one per slot can be marked equipped.
+const DCC_ARMOR_TYPES = [
+  { key: "none", label: "None", bonus: 0, slot: "armor" },
+  { key: "padded", label: "Padded", bonus: 1, slot: "armor" },
+  { key: "leather", label: "Leather", bonus: 2, slot: "armor" },
+  { key: "studded", label: "Studded Leather", bonus: 3, slot: "armor" },
+  { key: "hide", label: "Hide", bonus: 3, slot: "armor" },
+  { key: "scale", label: "Scale Mail", bonus: 4, slot: "armor" },
+  { key: "chain", label: "Chainmail", bonus: 5, slot: "armor" },
+  { key: "banded", label: "Banded Mail", bonus: 6, slot: "armor" },
+  { key: "halfplate", label: "Half-Plate", bonus: 7, slot: "armor" },
+  { key: "fullplate", label: "Full Plate", bonus: 8, slot: "armor" },
+  { key: "shield", label: "Shield", bonus: 1, slot: "shield" },
+  { key: "custom-armor", label: "Custom Armor", bonus: 0, slot: "armor" },
+  { key: "custom-shield", label: "Custom Shield", bonus: 0, slot: "shield" },
+];
+
+function armorTypeEntry(key) {
+  return DCC_ARMOR_TYPES.find(t => t.key === key) || DCC_ARMOR_TYPES[0];
+}
+
+function armorTypeOptionsHtml(selectedKey) {
+  return DCC_ARMOR_TYPES.map(t =>
+    `<option value="${t.key}"${t.key === selectedKey ? " selected" : ""}>${escapeHtml(t.label)}</option>`
+  ).join("");
+}
+
+function emptyArmorItem() {
+  return { id: "g" + Math.random().toString(36).slice(2, 9), type: "leather", bonus: 2, equipped: false };
+}
+
+function armorRowHtml(item) {
+  return `
+    <div class="armor-row${item.equipped ? " equipped" : ""}" data-id="${item.id}">
+      <input type="checkbox" class="armor-equipped" ${item.equipped ? "checked" : ""} title="Equipped" />
+      <select class="armor-type">${armorTypeOptionsHtml(item.type)}</select>
+      <input type="text" class="armor-bonus" placeholder="+0" value="${escapeHtml(item.bonus)}" />
+      <button type="button" class="attack-remove-btn" title="Remove">×</button>
+    </div>`;
+}
+
+function armorListEl() {
+  return document.getElementById("armor-list-pc");
+}
+
+function renderArmorItems(items) {
+  const listEl = armorListEl();
+  if (!listEl) return;
+  listEl.innerHTML = (items || []).map(armorRowHtml).join("");
+  attachArmorRowListeners();
+}
+
+function readArmorItems() {
+  const listEl = armorListEl();
+  if (!listEl) return [];
+  return Array.from(listEl.querySelectorAll(".armor-row")).map(row => ({
+    id: row.dataset.id,
+    type: row.querySelector(".armor-type").value,
+    bonus: row.querySelector(".armor-bonus").value,
+    equipped: row.querySelector(".armor-equipped").checked,
+  }));
+}
+
+function attachArmorRowListeners() {
+  const listEl = armorListEl();
+  if (!listEl) return;
+  listEl.querySelectorAll(".armor-row").forEach(row => {
+    const typeSel = row.querySelector(".armor-type");
+    const bonusInput = row.querySelector(".armor-bonus");
+    const equippedBox = row.querySelector(".armor-equipped");
+
+    // Picking a type is a convenience fill for Bonus, not a lock - the
+    // bonus stays freely editable afterward for masterwork/magic items.
+    typeSel.addEventListener("change", () => {
+      bonusInput.value = armorTypeEntry(typeSel.value).bonus;
+      scheduleSave();
+      recalcPcAC();
+      syncArmorIntoEquipment();
+    });
+    bonusInput.addEventListener("input", () => {
+      scheduleSave();
+      recalcPcAC();
+      syncArmorIntoEquipment();
+    });
+    equippedBox.addEventListener("change", () => {
+      row.classList.toggle("equipped", equippedBox.checked);
+      if (equippedBox.checked) {
+        const slot = armorTypeEntry(typeSel.value).slot;
+        listEl.querySelectorAll(".armor-row").forEach(other => {
+          if (other === row) return;
+          const otherType = other.querySelector(".armor-type").value;
+          if (armorTypeEntry(otherType).slot === slot) {
+            other.querySelector(".armor-equipped").checked = false;
+            other.classList.remove("equipped");
+          }
+        });
+      }
+      scheduleSave();
+      recalcPcAC();
+      syncArmorIntoEquipment();
+    });
+    row.querySelector(".attack-remove-btn").addEventListener("click", () => {
+      row.remove();
+      scheduleSave();
+      recalcPcAC();
+      syncArmorIntoEquipment();
+    });
+  });
+}
+
+document.getElementById("add-armor-pc").addEventListener("click", () => {
+  armorListEl().insertAdjacentHTML("beforeend", armorRowHtml(emptyArmorItem()));
+  attachArmorRowListeners();
+  recalcPcAC();
+  syncArmorIntoEquipment();
+});
+
+// AC is fully deterministic in DCC (10 + Agi mod + equipped Armor +
+// equipped Shield + any misc bonus), unlike saves/attacks which need a
+// class table this app doesn't have - so unlike those, this is
+// unconditionally computed and the field itself is read-only.
+function recalcPcAC() {
+  const acEl = document.getElementById("pc-ac");
+  const miscEl = document.getElementById("pc-ac-misc");
+  if (!acEl) return 10;
+  const agiMod = abilityModifierFromField("pc-agi");
+  const equippedBonus = readArmorItems()
+    .filter(item => item.equipped)
+    .reduce((sum, item) => sum + (parseInt(item.bonus, 10) || 0), 0);
+  const miscMatch = String(miscEl ? miscEl.value : "").match(/-?\d+/);
+  const miscBonus = miscMatch ? parseInt(miscMatch[0], 10) : 0;
+  const total = 10 + agiMod + equippedBonus + miscBonus;
+  acEl.value = total;
+  return total;
+}
+
+// Keeps an auto-managed block of "<Label> (+<n> AC) [equipped]" lines at
+// the top of the Equipment text in sync with the Armor & Shields
+// inventory - every owned piece gets a line, with equipped ones flagged,
+// without disturbing anything else the player has typed there. Matched
+// and replaced by exact line pattern each time, so editing the inventory
+// repeatedly never leaves duplicate or stale entries behind.
+function syncArmorIntoEquipment() {
+  const equipEl = document.getElementById("pc-equipment");
+  if (!equipEl) return;
+
+  const items = readArmorItems();
+  const lines = (equipEl.value || "").split("\n").filter(line => {
+    return !/^.+ \(\+\d+ AC\)( \[equipped\])?$/.test(line.trim());
+  });
+  while (lines.length && lines[0].trim() === "") lines.shift();
+
+  const autoLines = items
+    .filter(item => (parseInt(item.bonus, 10) || 0) !== 0 || item.equipped)
+    .map(item => {
+      const label = armorTypeEntry(item.type).label;
+      const bonus = parseInt(item.bonus, 10) || 0;
+      return `${label} (${bonus >= 0 ? "+" : ""}${bonus} AC)${item.equipped ? " [equipped]" : ""}`;
+    });
+
+  equipEl.value = autoLines.length
+    ? (lines.length ? [...autoLines, "", ...lines].join("\n") : autoLines.join("\n"))
+    : lines.join("\n");
+  scheduleSave();
+}
+
+document.getElementById("pc-ac-misc").addEventListener("input", () => {
+  recalcPcAC();
+  scheduleSave();
+});
+
+// Active half: an explicit click always sets the field to exactly the
+// linked ability's current modifier, overwriting whatever was there. This
+// is the tool for resyncing after an ability score changes (e.g. a level-
+// up ability increase) - the player re-adds their class base on top of
+// the fresh modifier afterward if the field is meant to hold a total.
+function syncDerivedPcField(fieldId) {
+  const sourceId = PC_DERIVED_FIELD_SOURCES[fieldId];
+  if (!sourceId) return;
+  const el = document.getElementById(fieldId);
+  if (!el) return;
+  el.value = formatSignedNumber(abilityModifierFromField(sourceId));
+  scheduleSave();
+  cfgRenderFromCurrentForm("pc");
+}
+
+document.querySelectorAll(".derived-sync-btn").forEach(btn => {
+  btn.addEventListener("click", () => syncDerivedPcField(btn.dataset.target));
+});
+
+// DCC's standard level-up rule: roll your class hit die, add your Stamina
+// modifier, minimum 1 HP gained. Adds the result to both current and max
+// HP (a fresh level-up means those HP are available immediately), rather
+// than just max, matching how it plays at the table.
+function rollPcHpLevelUp() {
+  const dieSides = parseInt(document.getElementById("pc-hitdie").value, 10) || 8;
+  const staMod = abilityModifierFromField("pc-sta");
+  const rolled = Math.floor(Math.random() * dieSides) + 1;
+  const gained = Math.max(1, rolled + staMod);
+  const maxEl = document.getElementById("pc-hp-max");
+  const curEl = document.getElementById("pc-hp-current");
+  maxEl.value = (Number(maxEl.value) || 0) + gained;
+  curEl.value = (Number(curEl.value) || 0) + gained;
+  scheduleSave();
+  showStatus(`Rolled d${dieSides} (${rolled}) ${formatSignedNumber(staMod)} Sta = +${gained} HP`);
+  cfgRenderFromCurrentForm("pc");
+}
+
+document.getElementById("pc-roll-hp").addEventListener("click", rollPcHpLevelUp);
+
 function isEditingSheetField() {
   const active = document.activeElement;
   if (!active) return false;
@@ -1207,6 +1644,7 @@ function isEditingSheetField() {
   if (["hp-current", "hp-max", "pc-hp-current", "pc-hp-max"].includes(active.id)) return true;
   if (MONSTER_ALL_FIELD_IDS.includes(active.id) || PC_ALL_FIELD_IDS.includes(active.id)) return true;
   if (active.closest(".attack-list")) return true;
+  if (active.closest(".armor-list")) return true;
   return false;
 }
 
