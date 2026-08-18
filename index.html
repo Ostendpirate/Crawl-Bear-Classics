@@ -1555,12 +1555,18 @@ async function placeOrReplaceTokenOnScene(name) {
   showSavedTokensStatus(`Placing "${name}"…`, false, 10000);
 
   let targetPosition;
+  let viewportError = false;
   try {
     targetPosition = await OBR.viewport.getPosition();
+    if (!targetPosition || typeof targetPosition.x !== "number" || typeof targetPosition.y !== "number") {
+      throw new Error(`unexpected viewport.getPosition() result: ${JSON.stringify(targetPosition)}`);
+    }
   } catch (err) {
     console.error("DCC sheet: viewport.getPosition failed", err);
+    viewportError = true;
     targetPosition = { x: 0, y: 0 };
   }
+  const posLabel = `(${Math.round(targetPosition.x)}, ${Math.round(targetPosition.y)})`;
 
   try {
     const existing = await OBR.scene.items.getItems(item => isCombatItem(item) && item.name === name);
@@ -1578,14 +1584,26 @@ async function placeOrReplaceTokenOnScene(name) {
           if (owner && owner.id) draft.createdUserId = owner.id;
         });
       });
-      showSavedTokensStatus(`Replaced "${name}" on this scene.`, false, 3000);
+      showSavedTokensStatus(
+        viewportError
+          ? `Replaced "${name}" - couldn't read your view, used ${posLabel}`
+          : `Replaced "${name}" at ${posLabel}`,
+        viewportError,
+        viewportError ? 6000 : 4000
+      );
     } else {
       const clone = cloneItemForTemplate(template);
       clone.id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       if (owner && owner.id) clone.createdUserId = owner.id;
       clone.position = targetPosition;
       await OBR.scene.items.addItems([clone]);
-      showSavedTokensStatus(`Added "${name}" to this scene.`, false, 3000);
+      showSavedTokensStatus(
+        viewportError
+          ? `Added "${name}" - couldn't read your view, used ${posLabel}`
+          : `Added "${name}" at ${posLabel}`,
+        viewportError,
+        viewportError ? 6000 : 4000
+      );
     }
     await refreshTokenRoster();
   } catch (err) {
