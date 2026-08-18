@@ -601,6 +601,7 @@
         <div class="token-roster" id="saved-tokens-list"></div>
         <div class="token-roster-empty" id="saved-tokens-empty" style="display:none;"></div>
       </div>
+      <div class="status" id="saved-tokens-status"></div>
     </div>
     <div class="empty" id="empty-state">
       Select a token on the map to view or edit its DCC character sheet.<br/><br/>
@@ -1522,14 +1523,31 @@ function renderSavedTokens() {
   });
 }
 
+// showTrackerStatus writes to #tracker-status, which only exists inside
+// the Tracker tab - using it from here (the Sheet tab) meant every
+// confirmation and error message was being written into a hidden part of
+// the DOM. Also can't fall back to the sheet's own #status: that element
+// lives inside #sheet, which is itself hidden whenever no token is
+// currently selected - exactly the common case when using "Add to this
+// scene" to bring in a token that isn't selected (or doesn't exist) yet.
+function showSavedTokensStatus(text, isError, duration) {
+  const el = document.getElementById("saved-tokens-status");
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = isError ? "#c97b7b" : "var(--good)";
+  clearTimeout(showSavedTokensStatus._t);
+  showSavedTokensStatus._t = setTimeout(() => { el.textContent = ""; }, duration ?? (isError ? 6000 : 3000));
+}
+
 async function placeOrReplaceTokenOnScene(name) {
   if (currentPlayerRole !== "GM") return;
   const template = roomTokenTemplates[name];
   if (!template) {
-    showTrackerStatus(`No saved template for "${name}" yet.`, true, 4000);
+    showSavedTokensStatus(`No saved template for "${name}" yet.`, true, 4000);
     return;
   }
   const owner = roomOwnerMap[name];
+  showSavedTokensStatus(`Placing "${name}"…`, false, 10000);
 
   try {
     const existing = await OBR.scene.items.getItems(item => isCombatItem(item) && item.name === name);
@@ -1544,7 +1562,7 @@ async function placeOrReplaceTokenOnScene(name) {
           if (owner && owner.id) draft.createdUserId = owner.id;
         });
       });
-      showTrackerStatus(`Replaced "${name}" on this scene.`, false, 3000);
+      showSavedTokensStatus(`Replaced "${name}" on this scene.`, false, 3000);
     } else {
       const clone = cloneItemForTemplate(template);
       clone.id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -1555,12 +1573,12 @@ async function placeOrReplaceTokenOnScene(name) {
         clone.position = { x: 0, y: 0 };
       }
       await OBR.scene.items.addItems([clone]);
-      showTrackerStatus(`Added "${name}" to this scene.`, false, 3000);
+      showSavedTokensStatus(`Added "${name}" to this scene.`, false, 3000);
     }
     await refreshTokenRoster();
   } catch (err) {
     console.error("DCC sheet: failed to place/replace token on scene", err);
-    showTrackerStatus(`Couldn't place "${name}" - see console`, true, 5000);
+    showSavedTokensStatus(`Couldn't place "${name}" - see console`, true, 5000);
   }
 }
 
