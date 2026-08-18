@@ -458,6 +458,7 @@
     align-items: stretch;
     gap: 4px;
   }
+  .attack-row.pc-attack-row.equipped { border-color: var(--good); }
   .attack-row-fields {
     display: flex;
     gap: 4px;
@@ -467,6 +468,13 @@
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+  .attack-equipped {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--good);
   }
   .attack-weapon {
     flex: 1;
@@ -1318,7 +1326,7 @@ function weaponOptionsHtml(selectedKey) {
 }
 
 function emptyAttack() {
-  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "" };
+  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false };
 }
 
 function attackRowHtml(atk, mode) {
@@ -1334,7 +1342,7 @@ function attackRowHtml(atk, mode) {
 
   const entry = dccWeaponEntry(atk.weapon);
   const badges = [];
-  if (entry.twoHanded) badges.push(`<span class="weapon-badge weapon-badge-2h" title="Two-handed weapon: uses d16 for Initiative instead of d20">2H</span>`);
+  if (entry.twoHanded) badges.push(`<span class="weapon-badge weapon-badge-2h" title="Two-handed weapon: uses d16 for Initiative instead of d20 when equipped">2H</span>`);
   if (entry.type === "ranged") badges.push(`<span class="weapon-badge weapon-badge-ranged">Ranged</span>`);
 
   const classEl = document.getElementById("pc-class");
@@ -1348,8 +1356,9 @@ function attackRowHtml(atk, mode) {
   }
 
   return `
-    <div class="attack-row pc-attack-row" data-id="${atk.id}">
+    <div class="attack-row pc-attack-row${atk.equipped ? " equipped" : ""}" data-id="${atk.id}">
       <div class="attack-weapon-line">
+        <input type="checkbox" class="attack-equipped" ${atk.equipped ? "checked" : ""} title="Currently wielded - only one weapon can be equipped at a time, and it's what determines your Initiative Die" />
         <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
         ${badges.join(" ")}
       </div>
@@ -1387,6 +1396,8 @@ function readAttacks(mode) {
     if (mode === "pc") {
       const weaponEl = row.querySelector(".attack-weapon");
       base.weapon = weaponEl ? weaponEl.value : "";
+      const equippedEl = row.querySelector(".attack-equipped");
+      base.equipped = equippedEl ? equippedEl.checked : false;
     }
     return base;
   });
@@ -1433,6 +1444,27 @@ function attachAttackRowListeners(mode) {
           applyWeaponSelection(row);
           scheduleSave();
           renderAttacks(mode, readAttacks(mode));
+          recalcPcInitiativeDie();
+        });
+      }
+      const equippedBox = row.querySelector(".attack-equipped");
+      if (equippedBox) {
+        equippedBox.addEventListener("change", () => {
+          row.classList.toggle("equipped", equippedBox.checked);
+          // Only one weapon is "in your hands" at a time - checking this
+          // one unchecks every other row, same pattern as Armor & Shields,
+          // since that's what Initiative Die actually needs to know.
+          if (equippedBox.checked) {
+            attackListEl(mode).querySelectorAll(".attack-row").forEach(other => {
+              if (other === row) return;
+              const otherBox = other.querySelector(".attack-equipped");
+              if (otherBox) {
+                otherBox.checked = false;
+                other.classList.remove("equipped");
+              }
+            });
+          }
+          scheduleSave();
           recalcPcInitiativeDie();
         });
       }
@@ -1923,18 +1955,15 @@ function recalcPcFumbleDie() {
 }
 
 // Two-handed weapons use d16 for Initiative instead of d20, per the
-// rulebook. There's no "currently wielded" concept tracked separately
-// from the attack list, so this treats "owns a listed two-handed weapon"
-// as "is using it" - a reasonable simplification, though a character who
-// lists both a two-handed weapon and a one-handed option (e.g. keeps a
-// dagger as backup) will show d16 even on rounds they'd actually be using
-// the dagger. This same value drives the Tracker's roll-initiative button
-// for this token, not just the display here.
+// rulebook - now driven by which single weapon is marked Equipped (same
+// pattern as Armor & Shields), rather than "owns any 2H weapon at all."
+// This same value drives the Tracker's roll-initiative button for this
+// token too, not just the display here.
 function recalcPcInitiativeDie() {
   const el = document.getElementById("pc-init-die");
   if (!el) return 20;
-  const hasTwoHanded = readAttacks("pc").some(atk => dccWeaponEntry(atk.weapon).twoHanded);
-  const die = hasTwoHanded ? 16 : 20;
+  const equipped = readAttacks("pc").find(atk => atk.equipped);
+  const die = (equipped && dccWeaponEntry(equipped.weapon).twoHanded) ? 16 : 20;
   el.textContent = `d${die}`;
   return die;
 }
@@ -2707,7 +2736,7 @@ function computeActiveOrder(items) {
 function trackerRowHtml(item, stats, isActive) {
   const hasAttacks = stats.attacks.length > 0;
   const expanded = hasAttacks && expandedAttackRows.has(item.id);
-  const initDie = (stats.mode === "pc" && stats.attacks.some(a => dccWeaponEntry(a.weapon).twoHanded)) ? 16 : 20;
+  const initDie = (stats.mode === "pc" && stats.attacks.some(a => a.equipped && dccWeaponEntry(a.weapon).twoHanded)) ? 16 : 20;
   return `
     <div class="tracker-row${isActive ? " active" : ""}${!stats.enabled ? " inactive" : ""}" data-id="${item.id}">
       <button class="toggle-switch${stats.enabled ? " on" : ""}" title="${stats.enabled ? "Deactivate" : "Activate"} this token" aria-pressed="${stats.enabled}"></button>
@@ -3251,7 +3280,7 @@ async function rollInitiativeFor(id) {
   if (!item) return;
   const stats = getStatsForItem(item);
   const mod = parseModifier(stats.initBonus);
-  const hasTwoHanded = stats.mode === "pc" && stats.attacks.some(a => dccWeaponEntry(a.weapon).twoHanded);
+  const hasTwoHanded = stats.mode === "pc" && stats.attacks.some(a => a.equipped && dccWeaponEntry(a.weapon).twoHanded);
   const initDie = hasTwoHanded ? 16 : 20;
   const roll = Math.floor(Math.random() * initDie) + 1 + mod;
   await OBR.scene.items.updateItems([id], items => {
