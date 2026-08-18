@@ -453,6 +453,65 @@
     border-radius: 6px;
     padding: 5px 6px;
   }
+  .attack-row.pc-attack-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+  .attack-row-fields {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+  }
+  .attack-weapon-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .attack-weapon {
+    flex: 1;
+    min-width: 0;
+    padding: 4px 6px;
+    font-size: 12px;
+  }
+  .weapon-badge {
+    flex: none;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    background: var(--border);
+    color: var(--muted);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-weight: 700;
+  }
+  .weapon-badge-2h { background: var(--accent); color: #1e1b18; }
+  .weapon-badge-ranged { background: var(--good); color: #1e1b18; }
+  .attack-row-meta {
+    font-size: 10px;
+    color: var(--muted);
+    line-height: 1.3;
+  }
+  .backstab-btn {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-size: 10px;
+    cursor: pointer;
+    padding: 0;
+    text-decoration: underline;
+    font-family: inherit;
+  }
+  .backstab-btn:hover { color: var(--text); }
+  .init-die-note {
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+  .init-die-note span#pc-init-die {
+    color: var(--accent);
+    font-weight: 700;
+  }
   .attack-row input[type=text] {
     padding: 4px 6px;
     font-size: 12px;
@@ -880,6 +939,7 @@
               <input type="text" id="pc-init" placeholder="+1" />
               <button type="button" class="derived-sync-btn" data-target="pc-init" title="Set to Agility modifier">↻</button>
             </div>
+            <div class="init-die-note">Die: <span id="pc-init-die">d20</span></div>
           </div>
           <div>
             <label>AC</label>
@@ -1204,20 +1264,104 @@ function readForm(mode) {
   return d;
 }
 
+// DCC's core weapon table - from the official Roll20 DCC compendium
+// (Table 3-1), which also independently confirmed the armor table already
+// in use here, matching on every value except one (Shield's fumble die,
+// corrected above). Weapons that are genuinely usable both as melee AND
+// thrown - Dagger, Handaxe, Javelin - get two separate entries rather
+// than one with an internal toggle, so the melee/ranged choice is just
+// "which one did you pick from the list." Dart and Sling are thrown/
+// ranged-only per the table (no separate melee entry). "strAtClose" marks
+// weapons where the rulebook's Str-modifier-to-damage note applies only
+// at close range, not medium/long - the auto-filled damage assumes close
+// range and says so in the row's info line, since a static field can't
+// track which range band an actual roll falls in.
+const DCC_WEAPONS = [
+  { key: "unarmed", label: "Unarmed", damage: "1d3", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
+  { key: "battleaxe", label: "Battleaxe (2H)", damage: "1d10", backstabDamage: null, range: "", type: "melee", twoHanded: true, strAtClose: false },
+  { key: "blackjack", label: "Blackjack (subdual)", damage: "1d3", backstabDamage: "2d6", range: "", type: "melee", twoHanded: false, strAtClose: false },
+  { key: "blowgun", label: "Blowgun", damage: "1d3", backstabDamage: "1d5", range: "20/40/60", type: "ranged", twoHanded: false, strAtClose: false },
+  { key: "club", label: "Club", damage: "1d4", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
+  { key: "crossbow", label: "Crossbow (2H)", damage: "1d6", backstabDamage: null, range: "80/160/240", type: "ranged", twoHanded: true, strAtClose: false },
+  { key: "dagger-melee", label: "Dagger (Melee)", damage: "1d4", backstabDamage: "1d10", range: "", type: "melee", twoHanded: false, strAtClose: false },
+  { key: "dagger-ranged", label: "Dagger (Thrown)", damage: "1d4", backstabDamage: "1d10", range: "10/20/30", type: "ranged", twoHanded: false, strAtClose: true },
+  { key: "dart", label: "Dart (Thrown)", damage: "1d4", backstabDamage: null, range: "20/40/60", type: "ranged", twoHanded: false, strAtClose: true },
+  { key: "flail", label: "Flail", damage: "1d6", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
+  { key: "garrote", label: "Garrote", damage: "1", backstabDamage: "3d4", range: "", type: "melee", twoHanded: false, strAtClose: false },
+  { key: "handaxe-melee", label: "Handaxe (Melee)", damage: "1d6", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
+  { key: "handaxe-ranged", label: "Handaxe (Thrown)", damage: "1d6", backstabDamage: null, range: "10/20/30", type: "ranged", twoHanded: false, strAtClose: true },
+  { key: "javelin-melee", label: "Javelin (Melee)", damage: "1d6", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
+  { key: "javelin-ranged", label: "Javelin (Thrown)", damage: "1d6", backstabDamage: null, range: "30/60/90", type: "ranged", twoHanded: false, strAtClose: true },
+  { key: "lance", label: "Lance (mounted only)", damage: "1d12", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
+  { key: "longbow", label: "Longbow (2H)", damage: "1d6", backstabDamage: null, range: "70/140/210", type: "ranged", twoHanded: true, strAtClose: false },
+  { key: "longsword", label: "Longsword", damage: "1d8", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
+  { key: "mace", label: "Mace", damage: "1d6", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
+  { key: "polearm", label: "Polearm (2H)", damage: "1d10", backstabDamage: null, range: "", type: "melee", twoHanded: true, strAtClose: false },
+  { key: "shortbow", label: "Shortbow (2H)", damage: "1d6", backstabDamage: null, range: "50/100/150", type: "ranged", twoHanded: true, strAtClose: false },
+  { key: "shortsword", label: "Short Sword", damage: "1d6", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
+  { key: "sling", label: "Sling", damage: "1d4", backstabDamage: null, range: "40/80/160", type: "ranged", twoHanded: false, strAtClose: true },
+  { key: "spear", label: "Spear", damage: "1d8", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
+  { key: "staff", label: "Staff", damage: "1d4", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
+  { key: "twohandedsword", label: "Two-Handed Sword (2H)", damage: "1d10", backstabDamage: null, range: "", type: "melee", twoHanded: true, strAtClose: false },
+  { key: "warhammer", label: "Warhammer", damage: "1d8", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
+  { key: "custom", label: "Custom / Other", damage: "", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
+];
+
+function dccWeaponEntry(key) {
+  return DCC_WEAPONS.find(w => w.key === key) || DCC_WEAPONS[DCC_WEAPONS.length - 1];
+}
+
+function weaponOptionsHtml(selectedKey) {
+  return DCC_WEAPONS.map(w =>
+    `<option value="${w.key}"${w.key === selectedKey ? " selected" : ""}>${escapeHtml(w.label)}</option>`
+  ).join("");
+}
+
 function emptyAttack() {
-  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "" };
+  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "" };
 }
 
 function attackRowHtml(atk, mode) {
-  const quickButtons = mode === "pc" ? `
-      <button type="button" class="attack-quick-btn" data-mod="str" title="Set Bonus to Str modifier">Str</button>
-      <button type="button" class="attack-quick-btn" data-mod="agi" title="Set Bonus to Agi modifier">Agi</button>` : "";
+  if (mode !== "pc") {
+    return `
+      <div class="attack-row" data-id="${atk.id}">
+        <input type="text" class="attack-name" placeholder="Claw" value="${escapeHtml(atk.name)}" />
+        <input type="text" class="attack-bonus" placeholder="+4" value="${escapeHtml(atk.bonus)}" />
+        <input type="text" class="attack-damage" placeholder="1d6" value="${escapeHtml(atk.damage)}" />
+        <button type="button" class="attack-remove-btn" title="Remove attack">×</button>
+      </div>`;
+  }
+
+  const entry = dccWeaponEntry(atk.weapon);
+  const badges = [];
+  if (entry.twoHanded) badges.push(`<span class="weapon-badge weapon-badge-2h" title="Two-handed weapon: uses d16 for Initiative instead of d20">2H</span>`);
+  if (entry.type === "ranged") badges.push(`<span class="weapon-badge weapon-badge-ranged">Ranged</span>`);
+
+  const classEl = document.getElementById("pc-class");
+  const isThief = classEl && classEl.value === "Thief";
+  const metaParts = [];
+  if (entry.range) {
+    metaParts.push(`Range: ${entry.range}${entry.strAtClose ? " (Str applies at close range only - shown damage assumes close range)" : ""}`);
+  }
+  if (entry.backstabDamage && isThief) {
+    metaParts.push(`<button type="button" class="backstab-btn" data-backstab="${escapeHtml(entry.backstabDamage)}" title="Use this weapon's backstab damage">Backstab dmg: ${escapeHtml(entry.backstabDamage)} [Use]</button>`);
+  }
+
   return `
-    <div class="attack-row" data-id="${atk.id}">
-      <input type="text" class="attack-name" placeholder="Claw" value="${escapeHtml(atk.name)}" />
-      <input type="text" class="attack-bonus" placeholder="+4" value="${escapeHtml(atk.bonus)}" />${quickButtons}
-      <input type="text" class="attack-damage" placeholder="1d6" value="${escapeHtml(atk.damage)}" />
-      <button type="button" class="attack-remove-btn" title="Remove attack">×</button>
+    <div class="attack-row pc-attack-row" data-id="${atk.id}">
+      <div class="attack-weapon-line">
+        <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
+        ${badges.join(" ")}
+      </div>
+      <div class="attack-row-fields">
+        <input type="text" class="attack-name" placeholder="Custom label (optional)" value="${escapeHtml(atk.name)}" />
+        <input type="text" class="attack-bonus" placeholder="+4" value="${escapeHtml(atk.bonus)}" />
+        <button type="button" class="attack-quick-btn" data-mod="str" title="Set Bonus to Str modifier">Str</button>
+        <button type="button" class="attack-quick-btn" data-mod="agi" title="Set Bonus to Agi modifier">Agi</button>
+        <input type="text" class="attack-damage" placeholder="1d6" value="${escapeHtml(atk.damage)}" />
+        <button type="button" class="attack-remove-btn" title="Remove attack">×</button>
+      </div>
+      ${metaParts.length ? `<div class="attack-row-meta">${metaParts.join(" · ")}</div>` : ""}
     </div>`;
 }
 
@@ -1233,12 +1377,44 @@ function renderAttacks(mode, attacks) {
 
 function readAttacks(mode) {
   const listEl = attackListEl(mode);
-  return Array.from(listEl.querySelectorAll(".attack-row")).map(row => ({
-    id: row.dataset.id,
-    name: row.querySelector(".attack-name").value,
-    bonus: row.querySelector(".attack-bonus").value,
-    damage: row.querySelector(".attack-damage").value,
-  }));
+  return Array.from(listEl.querySelectorAll(".attack-row")).map(row => {
+    const base = {
+      id: row.dataset.id,
+      name: row.querySelector(".attack-name").value,
+      bonus: row.querySelector(".attack-bonus").value,
+      damage: row.querySelector(".attack-damage").value,
+    };
+    if (mode === "pc") {
+      const weaponEl = row.querySelector(".attack-weapon");
+      base.weapon = weaponEl ? weaponEl.value : "";
+    }
+    return base;
+  });
+}
+
+// Applies a freshly-picked weapon's stats into the row: damage = weapon
+// die + the applicable ability modifier (Str for melee and for
+// close-range thrown weapons per the strAtClose rule, no modifier for
+// pure ranged weapons like bows/crossbows), and a suggested attack Bonus
+// (Str for melee, Agi for ranged) - but the Bonus suggestion only fills
+// an EMPTY field, same non-destructive pattern as Init/Saves, so it never
+// overwrites a bonus the player already customized.
+function applyWeaponSelection(row) {
+  const weaponSel = row.querySelector(".attack-weapon");
+  const nameInput = row.querySelector(".attack-name");
+  const bonusInput = row.querySelector(".attack-bonus");
+  const damageInput = row.querySelector(".attack-damage");
+  const entry = dccWeaponEntry(weaponSel.value);
+
+  if (!nameInput.value.trim()) {
+    nameInput.value = entry.label.replace(/\s*\([^)]*\)\s*/g, "").trim();
+  }
+  const damageAbilityMod = (entry.type === "melee" || entry.strAtClose) ? abilityModifierFromField("pc-str") : 0;
+  damageInput.value = entry.damage ? `${entry.damage}${damageAbilityMod ? formatSignedNumber(damageAbilityMod) : ""}` : "";
+  if (!bonusInput.value.trim()) {
+    const attackAbilitySource = entry.type === "ranged" ? "pc-agi" : "pc-str";
+    bonusInput.value = formatSignedNumber(abilityModifierFromField(attackAbilitySource));
+  }
 }
 
 function attachAttackRowListeners(mode) {
@@ -1248,8 +1424,18 @@ function attachAttackRowListeners(mode) {
       row.remove();
       scheduleSave();
       cfgRenderFromCurrentForm(mode);
+      if (mode === "pc") recalcPcInitiativeDie();
     });
     if (mode === "pc") {
+      const weaponSel = row.querySelector(".attack-weapon");
+      if (weaponSel) {
+        weaponSel.addEventListener("change", () => {
+          applyWeaponSelection(row);
+          scheduleSave();
+          renderAttacks(mode, readAttacks(mode));
+          recalcPcInitiativeDie();
+        });
+      }
       row.querySelectorAll(".attack-quick-btn").forEach(btn => {
         btn.addEventListener("click", () => {
           const sourceId = btn.dataset.mod === "agi" ? "pc-agi" : "pc-str";
@@ -1258,6 +1444,15 @@ function attachAttackRowListeners(mode) {
           cfgRenderFromCurrentForm(mode);
         });
       });
+      const backstabBtn = row.querySelector(".backstab-btn");
+      if (backstabBtn) {
+        backstabBtn.addEventListener("click", () => {
+          const strMod = abilityModifierFromField("pc-str");
+          row.querySelector(".attack-damage").value = `${backstabBtn.dataset.backstab}${strMod ? formatSignedNumber(strMod) : ""}`;
+          scheduleSave();
+          cfgRenderFromCurrentForm(mode);
+        });
+      }
     }
   });
 }
@@ -1273,6 +1468,7 @@ document.getElementById("add-attack-monster").addEventListener("click", () => {
 document.getElementById("add-attack-pc").addEventListener("click", () => {
   attackListEl("pc").insertAdjacentHTML("beforeend", attackRowHtml(emptyAttack(), "pc"));
   attachAttackRowListeners("pc");
+  recalcPcInitiativeDie();
 });
 
 function firstLine(text) {
@@ -1316,6 +1512,7 @@ function renderPcStatline(d) {
   recalcPcCheckPenalty();
   const speed = recalcPcSpeed();
   recalcPcFumbleDie();
+  recalcPcInitiativeDie();
   const hp = d.hpMax ? `${d.hpCurrent || d.hpMax}/${d.hpMax}` : (d.hpCurrent || "—");
   const classLevel = [d.class || d.occupation || null, d.level ? `Lvl ${d.level}` : null].filter(Boolean).join(" ");
   const atkSummary = formatAttacksSummary(d.attacks);
@@ -1494,7 +1691,7 @@ const DCC_ARMOR_TYPES = [
   { key: "banded", label: "Banded Mail", bonus: 6, checkPenalty: -6, speedPenalty: 10, fumbleDie: 16, slot: "armor" },
   { key: "halfplate", label: "Half-Plate", bonus: 7, checkPenalty: -7, speedPenalty: 10, fumbleDie: 16, slot: "armor" },
   { key: "fullplate", label: "Full Plate", bonus: 8, checkPenalty: -8, speedPenalty: 10, fumbleDie: 16, slot: "armor" },
-  { key: "shield", label: "Shield", bonus: 1, checkPenalty: -1, speedPenalty: 0, fumbleDie: 8, slot: "shield" },
+  { key: "shield", label: "Shield", bonus: 1, checkPenalty: -1, speedPenalty: 0, fumbleDie: 4, slot: "shield" },
   { key: "custom-armor", label: "Custom Armor", bonus: 0, checkPenalty: 0, speedPenalty: 0, fumbleDie: 4, slot: "armor" },
   { key: "custom-shield", label: "Custom Shield", bonus: 0, checkPenalty: 0, speedPenalty: 0, fumbleDie: 8, slot: "shield" },
 ];
@@ -1721,6 +1918,23 @@ function recalcPcFumbleDie() {
   const die = equipped.length
     ? Math.max(...equipped.map(item => armorTypeEntry(item.type).fumbleDie || 4))
     : 4;
+  el.textContent = `d${die}`;
+  return die;
+}
+
+// Two-handed weapons use d16 for Initiative instead of d20, per the
+// rulebook. There's no "currently wielded" concept tracked separately
+// from the attack list, so this treats "owns a listed two-handed weapon"
+// as "is using it" - a reasonable simplification, though a character who
+// lists both a two-handed weapon and a one-handed option (e.g. keeps a
+// dagger as backup) will show d16 even on rounds they'd actually be using
+// the dagger. This same value drives the Tracker's roll-initiative button
+// for this token, not just the display here.
+function recalcPcInitiativeDie() {
+  const el = document.getElementById("pc-init-die");
+  if (!el) return 20;
+  const hasTwoHanded = readAttacks("pc").some(atk => dccWeaponEntry(atk.weapon).twoHanded);
+  const die = hasTwoHanded ? 16 : 20;
   el.textContent = `d${die}`;
   return die;
 }
@@ -2493,11 +2707,12 @@ function computeActiveOrder(items) {
 function trackerRowHtml(item, stats, isActive) {
   const hasAttacks = stats.attacks.length > 0;
   const expanded = hasAttacks && expandedAttackRows.has(item.id);
+  const initDie = (stats.mode === "pc" && stats.attacks.some(a => dccWeaponEntry(a.weapon).twoHanded)) ? 16 : 20;
   return `
     <div class="tracker-row${isActive ? " active" : ""}${!stats.enabled ? " inactive" : ""}" data-id="${item.id}">
       <button class="toggle-switch${stats.enabled ? " on" : ""}" title="${stats.enabled ? "Deactivate" : "Activate"} this token" aria-pressed="${stats.enabled}"></button>
       <div class="tracker-init"><input type="number" class="init-input" value="${escapeHtml(stats.initiative)}" /></div>
-      <button class="hp-btn roll-btn" title="Roll initiative (d20${stats.initBonus ? " " + stats.initBonus : ""})">🎲</button>
+      <button class="hp-btn roll-btn" title="Roll initiative (d${initDie}${stats.initBonus ? " " + stats.initBonus : ""})">🎲</button>
       <div class="tracker-name" title="Select on map">${isActive ? "▶ " : ""}${escapeHtml(item.name || "Unnamed")}</div>
       <div class="tracker-hp">
         <button class="hp-btn hp-minus">−</button>
@@ -3036,7 +3251,9 @@ async function rollInitiativeFor(id) {
   if (!item) return;
   const stats = getStatsForItem(item);
   const mod = parseModifier(stats.initBonus);
-  const roll = Math.floor(Math.random() * 20) + 1 + mod;
+  const hasTwoHanded = stats.mode === "pc" && stats.attacks.some(a => dccWeaponEntry(a.weapon).twoHanded);
+  const initDie = hasTwoHanded ? 16 : 20;
+  const roll = Math.floor(Math.random() * initDie) + 1 + mod;
   await OBR.scene.items.updateItems([id], items => {
     items.forEach(it => {
       const combat = it.metadata[COMBAT_METADATA_KEY] || {};
@@ -3048,7 +3265,7 @@ async function rollInitiativeFor(id) {
     kind: "initiative",
     tokenName: item.name || "Token",
     mode: stats.mode,
-    text: `Initiative: ${roll}${mod ? ` (d20 ${mod >= 0 ? "+" : ""}${mod})` : ""}`,
+    text: `Initiative: ${roll}${mod ? ` (d${initDie} ${mod >= 0 ? "+" : ""}${mod})` : ` (d${initDie})`}`,
     gmOnly: stats.mode === "monster",
   });
 }
