@@ -1,11 +1,11 @@
 {
-  "name": "DCC Character Sheet",
-  "version": "1.2.0",
+  "name": "DCC Suite",
+  "version": "1.3.0",
   "manifest_version": 1,
   "author": "You",
-  "description": "A Dungeon Crawl Classics stat block editor for monster/NPC and player character tokens.",
+  "description": "A Dungeon Crawl Classics companion suite: character sheets, initiative tracker, dice roller, and session log.",
   "action": {
-    "title": "DCC Character Sheet",
+    "title": "DCC Suite",
     "icon": "https://ostendpirate.github.io/Crawl-Bear-Classics/icon.svg",
     "popover": "https://ostendpirate.github.io/Crawl-Bear-Classics/index.html",
     "height": 640,
