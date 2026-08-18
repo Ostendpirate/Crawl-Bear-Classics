@@ -1426,16 +1426,21 @@ function renderTokenRoster() {
     emptyEl.textContent = isGm
       ? "No tokens on the map yet."
       : "No tokens assigned to you yet. Ask your GM to assign one, or drop your own token onto the scene.";
-    return;
+  } else {
+    emptyEl.style.display = "none";
+    const sorted = visible.slice().sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    listEl.innerHTML = sorted.map(item => tokenRosterItemHtml(item, isGm)).join("");
+    listEl.querySelectorAll(".token-roster-item").forEach(row => {
+      row.addEventListener("click", () => OBR.player.select([row.dataset.id], true));
+    });
   }
-  emptyEl.style.display = "none";
 
-  const sorted = visible.slice().sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-  listEl.innerHTML = sorted.map(item => tokenRosterItemHtml(item, isGm)).join("");
-  listEl.querySelectorAll(".token-roster-item").forEach(row => {
-    row.addEventListener("click", () => OBR.player.select([row.dataset.id], true));
-  });
-
+  // Was previously unreachable whenever the "All Tokens" list above was
+  // empty (an early return skipped straight past this call) - meaning on
+  // any scene with zero existing tokens, the Saved Characters buttons
+  // either never got their click listeners attached or kept stale ones,
+  // so clicking "Add to this scene" silently did nothing. That's exactly
+  // the scene state this feature matters most for.
   renderSavedTokens();
 }
 
@@ -1460,11 +1465,11 @@ document.getElementById("token-roster-toggle").addEventListener("click", () => {
 // possible through the extension SDK - the popover is a separate iframe,
 // and there's no documented API for a drag gesture to cross that boundary
 // onto the canvas Owlbear itself renders. This is the closest practical
-// equivalent: a button per saved (ever-assigned) character that either
-// drops a fresh copy at the current viewport center, or - if a token with
-// that name already exists on this scene - overwrites its data in place
-// while leaving its position untouched, which is "replace the old one"
-// without the GM having to hunt down and manually delete anything first.
+// equivalent: a button per saved (ever-assigned) character that drops a
+// copy of it at the current viewport center - either as a brand new item,
+// or by overwriting an existing same-named token's data AND position if
+// one's already on this scene, which is "replace the old one" without the
+// GM having to hunt down and manually delete anything first.
 let savedTokensCollapsed = true;
 
 function applySavedTokensCollapsedState() {
@@ -1549,16 +1554,27 @@ async function placeOrReplaceTokenOnScene(name) {
   const owner = roomOwnerMap[name];
   showSavedTokensStatus(`Placing "${name}"…`, false, 10000);
 
+  let targetPosition;
+  try {
+    targetPosition = await OBR.viewport.getPosition();
+  } catch (err) {
+    console.error("DCC sheet: viewport.getPosition failed", err);
+    targetPosition = { x: 0, y: 0 };
+  }
+
   try {
     const existing = await OBR.scene.items.getItems(item => isCombatItem(item) && item.name === name);
     if (existing.length) {
-      // Overwrite in place: every field from the template except id and
-      // position, so the replaced token keeps wherever it was sitting.
+      // Overwrite in place, including position - so "replace" actually
+      // brings the token to wherever the GM is currently looking, the
+      // same as adding it fresh, rather than leaving it wherever it
+      // happened to be sitting before.
       await OBR.scene.items.updateItems(existing.map(item => item.id), draftItems => {
         draftItems.forEach(draft => {
           const clone = cloneItemForTemplate(template);
           delete clone.position;
           Object.assign(draft, clone);
+          draft.position = targetPosition;
           if (owner && owner.id) draft.createdUserId = owner.id;
         });
       });
@@ -1567,11 +1583,7 @@ async function placeOrReplaceTokenOnScene(name) {
       const clone = cloneItemForTemplate(template);
       clone.id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       if (owner && owner.id) clone.createdUserId = owner.id;
-      try {
-        clone.position = await OBR.viewport.getPosition();
-      } catch (err) {
-        clone.position = { x: 0, y: 0 };
-      }
+      clone.position = targetPosition;
       await OBR.scene.items.addItems([clone]);
       showSavedTokensStatus(`Added "${name}" to this scene.`, false, 3000);
     }
