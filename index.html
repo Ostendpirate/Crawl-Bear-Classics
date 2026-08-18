@@ -303,6 +303,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .place-token-btn { flex: none; width: 22px; height: 22px; font-size: 12px; }
   .token-roster-empty {
     text-align: center;
     color: var(--muted);
@@ -588,6 +589,17 @@
       <div class="token-roster-content" id="token-roster-content" style="display:none;">
         <div class="token-roster" id="token-roster-list"></div>
         <div class="token-roster-empty" id="token-roster-empty" style="display:none;"></div>
+      </div>
+    </div>
+    <div class="token-roster-wrap" id="saved-tokens-wrap" style="display:none;">
+      <button type="button" class="token-roster-toggle" id="saved-tokens-toggle">
+        <span>Saved Characters</span>
+        <span class="token-roster-count" id="saved-tokens-count"></span>
+        <span class="token-roster-chevron" id="saved-tokens-chevron">▸</span>
+      </button>
+      <div class="token-roster-content" id="saved-tokens-content" style="display:none;">
+        <div class="token-roster" id="saved-tokens-list"></div>
+        <div class="token-roster-empty" id="saved-tokens-empty" style="display:none;"></div>
       </div>
     </div>
     <div class="empty" id="empty-state">
@@ -1422,6 +1434,8 @@ function renderTokenRoster() {
   listEl.querySelectorAll(".token-roster-item").forEach(row => {
     row.addEventListener("click", () => OBR.player.select([row.dataset.id], true));
   });
+
+  renderSavedTokens();
 }
 
 let tokenRosterCollapsed = true;
@@ -1437,6 +1451,118 @@ document.getElementById("token-roster-toggle").addEventListener("click", () => {
   tokenRosterCollapsed = !tokenRosterCollapsed;
   applyTokenRosterCollapsedState();
 });
+
+// ---- Saved Characters (GM-only: place/replace a managed token on the
+// current scene) ----
+//
+// True drag-and-drop from this popover onto Owlbear's own map canvas isn't
+// possible through the extension SDK - the popover is a separate iframe,
+// and there's no documented API for a drag gesture to cross that boundary
+// onto the canvas Owlbear itself renders. This is the closest practical
+// equivalent: a button per saved (ever-assigned) character that either
+// drops a fresh copy at the current viewport center, or - if a token with
+// that name already exists on this scene - overwrites its data in place
+// while leaving its position untouched, which is "replace the old one"
+// without the GM having to hunt down and manually delete anything first.
+let savedTokensCollapsed = true;
+
+function applySavedTokensCollapsedState() {
+  const contentEl = document.getElementById("saved-tokens-content");
+  const chevronEl = document.getElementById("saved-tokens-chevron");
+  if (contentEl) contentEl.style.display = savedTokensCollapsed ? "none" : "block";
+  if (chevronEl) chevronEl.textContent = savedTokensCollapsed ? "▸" : "▾";
+}
+
+document.getElementById("saved-tokens-toggle").addEventListener("click", () => {
+  savedTokensCollapsed = !savedTokensCollapsed;
+  applySavedTokensCollapsedState();
+});
+
+function refreshSavedTokensRowVisibility() {
+  const wrap = document.getElementById("saved-tokens-wrap");
+  if (wrap) wrap.style.display = currentPlayerRole === "GM" ? "block" : "none";
+}
+
+function savedTokenRowHtml(name, owner) {
+  return `
+    <div class="token-roster-item" data-name="${escapeHtml(name)}">
+      <span class="token-roster-badge pc">PC</span>
+      <span class="token-roster-name">${escapeHtml(name)}</span>
+      <span class="token-roster-owner">${escapeHtml(owner.name || "")}</span>
+      <button type="button" class="hp-btn place-token-btn" title="Add to this scene, or replace the existing one">⤓</button>
+    </div>`;
+}
+
+function renderSavedTokens() {
+  const listEl = document.getElementById("saved-tokens-list");
+  const emptyEl = document.getElementById("saved-tokens-empty");
+  const countEl = document.getElementById("saved-tokens-count");
+  if (!listEl || !emptyEl) return;
+  if (currentPlayerRole !== "GM") return;
+
+  const entries = Object.entries(roomOwnerMap)
+    .filter(([name, owner]) => owner && owner.id && roomTokenTemplates[name])
+    .sort((a, b) => a[0].localeCompare(b[0]));
+  if (countEl) countEl.textContent = entries.length ? `(${entries.length})` : "";
+
+  if (!entries.length) {
+    listEl.innerHTML = "";
+    emptyEl.style.display = "block";
+    emptyEl.textContent = "No saved characters yet. Assign a token to a player to save it here.";
+    return;
+  }
+  emptyEl.style.display = "none";
+  listEl.innerHTML = entries.map(([name, owner]) => savedTokenRowHtml(name, owner)).join("");
+  listEl.querySelectorAll(".place-token-btn").forEach(btn => {
+    const name = btn.closest(".token-roster-item").dataset.name;
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      placeOrReplaceTokenOnScene(name);
+    });
+  });
+}
+
+async function placeOrReplaceTokenOnScene(name) {
+  if (currentPlayerRole !== "GM") return;
+  const template = roomTokenTemplates[name];
+  if (!template) {
+    showTrackerStatus(`No saved template for "${name}" yet.`, true, 4000);
+    return;
+  }
+  const owner = roomOwnerMap[name];
+
+  try {
+    const existing = await OBR.scene.items.getItems(item => isCombatItem(item) && item.name === name);
+    if (existing.length) {
+      // Overwrite in place: every field from the template except id and
+      // position, so the replaced token keeps wherever it was sitting.
+      await OBR.scene.items.updateItems(existing.map(item => item.id), draftItems => {
+        draftItems.forEach(draft => {
+          const clone = cloneItemForTemplate(template);
+          delete clone.position;
+          Object.assign(draft, clone);
+          if (owner && owner.id) draft.createdUserId = owner.id;
+        });
+      });
+      showTrackerStatus(`Replaced "${name}" on this scene.`, false, 3000);
+    } else {
+      const clone = cloneItemForTemplate(template);
+      clone.id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      if (owner && owner.id) clone.createdUserId = owner.id;
+      try {
+        clone.position = await OBR.viewport.getPosition();
+      } catch (err) {
+        clone.position = { x: 0, y: 0 };
+      }
+      await OBR.scene.items.addItems([clone]);
+      showTrackerStatus(`Added "${name}" to this scene.`, false, 3000);
+    }
+    await refreshTokenRoster();
+  } catch (err) {
+    console.error("DCC sheet: failed to place/replace token on scene", err);
+    showTrackerStatus(`Couldn't place "${name}" - see console`, true, 5000);
+  }
+}
 
 async function refreshTokenRoster() {
   try {
@@ -2375,6 +2501,7 @@ OBR.onReady(async () => {
   // later in this callback throws/rejects, these still get attached, so
   // clicking a token on the map always keeps working.
   applyTokenRosterCollapsedState();
+  applySavedTokensCollapsedState();
 
   OBR.player.onChange(async (player) => {
     let rosterNeedsRerender = false;
@@ -2383,6 +2510,7 @@ OBR.onReady(async () => {
       if (viewChatEl.style.display !== "none") renderChatLog();
       refreshDiceGmRowVisibility();
       refreshOwnerRowVisibility();
+      refreshSavedTokensRowVisibility();
       rosterNeedsRerender = true;
     }
     if (typeof player.id === "string" && player.id !== currentPlayerId) {
@@ -2558,6 +2686,7 @@ OBR.onReady(async () => {
     currentPlayerRole = await OBR.player.getRole();
     refreshDiceGmRowVisibility();
     refreshOwnerRowVisibility();
+    refreshSavedTokensRowVisibility();
   } catch (err) {
     console.error("DCC sheet: initial getRole failed", err);
   }
