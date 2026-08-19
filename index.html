@@ -746,6 +746,28 @@
     white-space: pre-line;
   }
   .tables-modal-empty { color: var(--muted); font-style: italic; }
+  .occ-tooltip {
+    display: none;
+    position: fixed;
+    z-index: 600;
+    width: 260px;
+    max-width: calc(100vw - 16px);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--text);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.55);
+    pointer-events: none;
+  }
+  .occ-tooltip-title { font-size: 12.5px; font-weight: 700; color: var(--accent); margin-bottom: 2px; }
+  .occ-tooltip-meta { color: var(--muted); margin-bottom: 6px; }
+  .occ-tooltip-skills-title { font-weight: 700; color: var(--text); margin-bottom: 2px; }
+  .occ-tooltip-skills { margin: 0 0 6px; padding-left: 14px; }
+  .occ-tooltip-skills li { margin-bottom: 2px; }
+  .occ-tooltip-dc-note { font-size: 10px; color: var(--muted); font-style: italic; }
   .add-attack-btn {
     width: 100%;
     background: var(--panel);
@@ -1051,7 +1073,12 @@
           </div>
           <div>
             <label>Occupation</label>
-            <input type="text" id="pc-occupation" placeholder="Ostler" />
+            <div class="field-sync-row">
+              <select id="pc-occupation-select"></select>
+              <button type="button" class="tables-btn tables-btn-icon" id="pc-occupation-info-btn" title="Hover (or tap) for suggested skill checks">ⓘ</button>
+            </div>
+            <input type="text" id="pc-occupation-custom" placeholder="Custom occupation name" style="display:none; margin-top:4px;" />
+            <input type="hidden" id="pc-occupation" />
           </div>
           <div>
             <label>Level</label>
@@ -1361,6 +1388,8 @@
     </div>
   </div>
 
+  <div id="occ-tooltip" class="occ-tooltip"></div>
+
 <script type="module">
 import OBR, { buildShape } from "https://esm.sh/@owlbear-rodeo/sdk@2";
 
@@ -1385,6 +1414,98 @@ const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-str","pc-agi","pc-sta","p
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
 const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
+
+// Table 1-3: Occupation (Reference Booklet pp.6-7, all 100 die-roll
+// entries collapsed to their 80 unique occupation names). DCC doesn't
+// define a formal skill-check subsystem for 0-level/non-Thief characters
+// - "skills" here are GM-facing flavor prompts for adjudicating requests
+// like "can my ex-blacksmith tell if this sword is well-made?" on the
+// fly, not a rules subsystem. Resolve them with the Skill Check DC
+// Guidelines from Reference Booklet p.4 (see SKILL_CHECK_DC_NOTE below):
+// roll d20 + the most relevant ability modifier vs. the GM's chosen DC.
+const SKILL_CHECK_DC_NOTE = "Skill Check DCs (Ref. Booklet p.4): Child's Play 5 · Average Deed 10 · Daring-Do 15 · Hero's/Superhuman 20. Roll d20 + the noted ability modifier.";
+const OCCUPATION_TABLE = [
+  { name: "Alchemist", weapon: "Staff", trade: "Oil, 1 flask", skills: ["Identify a potion or poison by smell (Int)", "Mix a crude remedy from herbs on hand (Int)", "Recall a basic alchemical formula (Int)"] },
+  { name: "Animal trainer", weapon: "Club", trade: "Pony", skills: ["Calm or command a domesticated animal (Per)", "Judge an animal's temperament at a glance (Per)", "Handle a spooked mount (Agi)"] },
+  { name: "Armorer", weapon: "Hammer (as club)", trade: "Iron helmet", skills: ["Judge the quality of a suit of armor (Int)", "Field-repair a dented breastplate or helm (Str)", "Spot a weak point in an opponent's armor (Int)"] },
+  { name: "Astrologer", weapon: "Dagger", trade: "Spyglass", skills: ["Read omens in the night sky (Int)", "Estimate the date or time from the stars (Int)", "Recall a portent's traditional meaning (Int)"] },
+  { name: "Barber", weapon: "Razor (as dagger)", trade: "Scissors", skills: ["Stitch or dress a minor wound (Agi)", "Pull a rotten tooth cleanly (Agi)", "Disguise someone with a shave and haircut (Per)"] },
+  { name: "Beadle", weapon: "Staff", trade: "Holy symbol", skills: ["Recall local church law or procedure (Int)", "Command a crowd's attention and order (Per)", "Recognize clerical rank or vestments (Int)"] },
+  { name: "Beekeeper", weapon: "Staff", trade: "Jar of honey", skills: ["Handle a swarm of stinging insects calmly (Agi)", "Judge the health of a hive or colony (Int)", "Track a bee back to its hive (Int)"] },
+  { name: "Blacksmith", weapon: "Hammer (as club)", trade: "Steel tongs", skills: ["Judge the quality of metalwork (Int)", "Forge or repair a simple iron item (Str)", "Identify what a scrap of metal used to be (Int)"] },
+  { name: "Butcher", weapon: "Cleaver (as axe)", trade: "Side of beef", skills: ["Judge the freshness of meat (Int)", "Field-dress a carcass quickly (Agi)", "Identify an animal from its remains (Int)"] },
+  { name: "Caravan guard", weapon: "Short sword", trade: "Linen, 1 yard", skills: ["Spot an ambush position along a road (Int)", "Judge a stranger's intentions on the trail (Per)", "Estimate distance and travel time (Int)"] },
+  { name: "Cheesemaker", weapon: "Cudgel (as staff)", trade: "Stinky cheese", skills: ["Judge whether food has spoiled (Int)", "Identify a cheese or dairy product by smell (Int)", "Haggle over market goods (Per)"] },
+  { name: "Cobbler", weapon: "Awl (as dagger)", trade: "Shoehorn", skills: ["Repair worn or torn footwear (Agi)", "Judge a person's trade by their shoes (Int)", "Craft a quick improvised strap or binding (Agi)"] },
+  { name: "Confidence artist", weapon: "Dagger", trade: "Quality cloak", skills: ["Spin a convincing lie under pressure (Per)", "Spot another con artist's tell (Int)", "Talk your way past a suspicious guard (Per)"] },
+  { name: "Cooper", weapon: "Crowbar (as club)", trade: "Barrel", skills: ["Build or patch a barrel or cask (Str)", "Judge whether a container will hold liquid (Int)", "Pry open a crate or barrel quickly (Str)"] },
+  { name: "Costermonger", weapon: "Knife (as dagger)", trade: "Fruit", skills: ["Haggle a better price at market (Per)", "Judge the freshness of fruit or produce (Int)", "Hawk goods to a skeptical crowd (Per)"] },
+  { name: "Cutpurse", weapon: "Dagger", trade: "Small chest", skills: ["Lift a coin purse unnoticed (Agi)", "Spot a mark worth robbing (Int)", "Slip away through a crowd (Agi)"] },
+  { name: "Ditch digger", weapon: "Shovel (as staff)", trade: "Fine dirt, 1 lb.", skills: ["Judge how long a dig will take (Int)", "Spot disturbed or loose earth (Int)", "Dig a trench or hole quickly (Str)"] },
+  { name: "Dock worker", weapon: "Pole (as staff)", trade: "1 late RPG book", skills: ["Judge the weight of a load before lifting it (Str)", "Lash cargo securely for transport (Agi)", "Spot smuggled goods in a shipment (Int)"] },
+  { name: "Dwarven apothecarist", weapon: "Cudgel (as staff)", trade: "Steel vial", skills: ["Identify a mineral or tincture by taste (Int)", "Mix a crude remedy from stone-lore ingredients (Int)", "Recall a dwarven cure for a common ailment (Int)"] },
+  { name: "Dwarven blacksmith", weapon: "Hammer (as club)", trade: "Mithril, 1 oz.", skills: ["Judge the quality of dwarven metalwork (Int)", "Recognize a rare or precious metal (Int)", "Forge or repair a simple metal item (Str)"] },
+  { name: "Dwarven chest-maker", weapon: "Chisel (as dagger)", trade: "Wood, 10 lbs.", skills: ["Spot a hidden compartment or trap on a chest (Int)", "Judge the craftsmanship of woodwork (Int)", "Pick or jimmy a simple lock (Agi)"] },
+  { name: "Dwarven herder", weapon: "Staff", trade: "Sow", skills: ["Calm or drive a herd of animals (Per)", "Judge an animal's health (Int)", "Track livestock through rough terrain (Int)"] },
+  { name: "Dwarven miner", weapon: "Pick (as club)", trade: "Lantern", skills: ["Judge the stability of a tunnel or cave (Int)", "Spot a vein of ore in rock (Int)", "Navigate underground without getting lost (Int)"] },
+  { name: "Dwarven mushroom-farmer", weapon: "Shovel (as staff)", trade: "Sack", skills: ["Identify an edible vs. poisonous fungus (Int)", "Judge underground soil for cultivation (Int)", "Cultivate fungus in poor light (Int)"] },
+  { name: "Dwarven rat-catcher", weapon: "Club", trade: "Net", skills: ["Track vermin through tunnels or walls (Int)", "Set a snare or trap (Agi)", "Judge how many rats infest an area (Int)"] },
+  { name: "Dwarven stonemason", weapon: "Hammer", trade: "Fine stone, 10 lbs.", skills: ["Judge the soundness of stonework or a wall (Int)", "Spot a weak point to collapse a structure (Int)", "Carve or dress stone by hand (Str)"] },
+  { name: "Elven artisan", weapon: "Staff", trade: "Clay, 1 lb.", skills: ["Judge the quality of fine craftsmanship (Int)", "Recall elven artistic tradition or style (Int)", "Sculpt or shape a material by hand (Agi)"] },
+  { name: "Elven barrister", weapon: "Quill (as dart)", trade: "Book", skills: ["Recall a point of law or precedent (Int)", "Argue a case persuasively (Per)", "Spot a lie or contradiction in testimony (Int)"] },
+  { name: "Elven chandler", weapon: "Scissors (as dagger)", trade: "Candles, 20", skills: ["Judge how long a candle will burn (Int)", "Craft a candle from scavenged wax and tallow (Agi)", "Work steadily by dim light (Per)"] },
+  { name: "Elven falconer", weapon: "Dagger", trade: "Falcon", skills: ["Call or command a trained bird (Per)", "Spot movement at a distance (Int)", "Judge a bird of prey's mood (Per)"] },
+  { name: "Elven forester", weapon: "Staff", trade: "Herbs, 1 lb.", skills: ["Navigate or track through deep woods (Int)", "Identify a plant, herb, or berry (Int)", "Move quietly through undergrowth (Agi)"] },
+  { name: "Elven glassblower", weapon: "Hammer (as club)", trade: "Glass beads", skills: ["Judge the quality of glasswork (Int)", "Shape hot glass without shattering it (Agi)", "Spot a hairline crack before it breaks (Int)"] },
+  { name: "Elven navigator", weapon: "Shortbow", trade: "Spyglass", skills: ["Chart a course by stars or landmarks (Int)", "Estimate distance and heading (Int)", "Spot a ship or landmark at a distance (Int)"] },
+  { name: "Elven sage", weapon: "Dagger", trade: "Parchment and quill pen", skills: ["Recall obscure lore or history (Int)", "Translate or decipher an old text (Int)", "Research a topic given time and a library (Int)"] },
+  { name: "Farmer", weapon: "Pitchfork (as spear)", trade: "Hen", skills: ["Judge weather and growing conditions (Int)", "Tend or calm livestock (Per)", "Identify a crop, blight, or pest (Int)"] },
+  { name: "Fortune-teller", weapon: "Dagger", trade: "Tarot deck", skills: ["Read a convincing fortune from cards or palms (Per)", "Spot a gullible mark (Int)", "Cold-read a stranger's situation (Per)"] },
+  { name: "Gambler", weapon: "Club", trade: "Dice", skills: ["Spot a rigged game or a cheat (Int)", "Read an opponent's tell (Per)", "Judge the odds on a wager (Int)"] },
+  { name: "Gongfarmer", weapon: "Trowel (as dagger)", trade: "Sack of night soil", skills: ["Work in foul conditions without flinching (Sta)", "Navigate a sewer or cesspit (Int)", "Spot something valuable dropped in refuse (Int)"] },
+  { name: "Grave digger", weapon: "Shovel (as staff)", trade: "Trowel", skills: ["Judge how recently ground was disturbed (Int)", "Dig a grave-sized hole quickly (Str)", "Keep composure around the dead (Per)"] },
+  { name: "Guild beggar", weapon: "Sling", trade: "Crutches", skills: ["Read a crowd for sympathy or threat (Per)", "Fake an injury or ailment convincingly (Per)", "Know which streets and alleys are safe (Int)"] },
+  { name: "Halfling chicken butcher", weapon: "Handaxe", trade: "Chicken meat, 5 lbs.", skills: ["Judge the freshness of poultry (Int)", "Field-dress fowl quickly (Agi)", "Catch a loose or panicked animal (Agi)"] },
+  { name: "Halfling dyer", weapon: "Staff", trade: "Fabric, 3 yards", skills: ["Judge the quality or origin of a dye or fabric (Int)", "Mix a dye from local plants (Int)", "Match a color or pattern from memory (Per)"] },
+  { name: "Halfling glovemaker", weapon: "Awl (as dagger)", trade: "Gloves, 4 pairs", skills: ["Judge hand size and fit at a glance (Per)", "Stitch or repair leather goods (Agi)", "Craft a small leather item quickly (Agi)"] },
+  { name: "Halfling wanderer", weapon: "Sling", trade: "Hex doll", skills: ["Recall the layout of a road or region (Int)", "Forage for food on the road (Int)", "Read the local mood toward strangers (Per)"] },
+  { name: "Halfling haberdasher", weapon: "Scissors (as dagger)", trade: "Fine suits, 3 sets", skills: ["Judge a person's status by their clothes (Per)", "Alter or mend fine clothing quickly (Agi)", "Spot a counterfeit fine fabric (Int)"] },
+  { name: "Halfling mariner", weapon: "Knife (as dagger)", trade: "Sailcloth, 2 yards", skills: ["Read wind and current (Int)", "Tie a proper knot under pressure (Agi)", "Keep footing on unstable ground or deck (Agi)"] },
+  { name: "Halfling moneylender", weapon: "Short sword", trade: "5 gp, 10 sp, 200 cp", skills: ["Judge whether a debtor can pay (Per)", "Spot counterfeit or clipped coin (Int)", "Recall the terms of a past deal (Int)"] },
+  { name: "Halfling trader", weapon: "Short sword", trade: "20 sp", skills: ["Haggle for a better price (Per)", "Judge the true value of goods (Int)", "Spot a scam or bad deal (Int)"] },
+  { name: "Halfling vagrant", weapon: "Club", trade: "Begging bowl", skills: ["Find shelter or scraps in a strange place (Int)", "Read a stranger's likely generosity (Per)", "Slip away from unwanted attention (Agi)"] },
+  { name: "Healer", weapon: "Club", trade: "Holy water, 1 vial", skills: ["Stabilize a dying companion (Int)", "Diagnose an illness or poison (Int)", "Treat a wound to reduce infection risk (Int)"] },
+  { name: "Herbalist", weapon: "Club", trade: "Herbs, 1 lb.", skills: ["Identify a plant's use or toxicity (Int)", "Prepare a poultice or crude remedy (Int)", "Forage useful herbs in the wild (Int)"] },
+  { name: "Herder", weapon: "Staff", trade: "Herding dog", skills: ["Drive or calm a herd of animals (Per)", "Command a working dog (Per)", "Judge weather that threatens livestock (Int)"] },
+  { name: "Hunter", weapon: "Shortbow", trade: "Deer pelt", skills: ["Track an animal or person through terrain (Int)", "Move silently while stalking prey (Agi)", "Field-dress game cleanly (Agi)"] },
+  { name: "Indentured servant", weapon: "Staff", trade: "Locket", skills: ["Anticipate a master's wishes (Per)", "Move unseen while performing chores (Agi)", "Recall household routines and layout (Int)"] },
+  { name: "Jester", weapon: "Dart", trade: "Silk clothes", skills: ["Defuse tension with a joke or trick (Per)", "Juggle, tumble, or perform a stunt (Agi)", "Read a noble's mood before speaking (Per)"] },
+  { name: "Jeweler", weapon: "Dagger", trade: "Gem worth 20 gp", skills: ["Appraise a gem or piece of jewelry (Int)", "Spot a fake or paste gem (Int)", "Cut or set a stone precisely (Agi)"] },
+  { name: "Locksmith", weapon: "Dagger", trade: "Fine tools", skills: ["Pick a simple lock (Agi)", "Judge how a lock or mechanism works (Int)", "Spot a trapped or reinforced lock (Int)"] },
+  { name: "Mendicant", weapon: "Club", trade: "Cheese dip", skills: ["Talk your way into food or shelter (Per)", "Recall which local temples give alms (Int)", "Endure hardship on the road (Sta)"] },
+  { name: "Mercenary", weapon: "Longsword", trade: "Hide armor", skills: ["Size up an enemy force's strength (Int)", "Negotiate terms of payment or parley (Per)", "Recall past battles or tactics (Int)"] },
+  { name: "Merchant", weapon: "Dagger", trade: "4 gp, 14 sp, 27 cp", skills: ["Haggle a favorable price (Per)", "Judge the going rate for goods (Int)", "Spot a bad deal or swindle (Int)"] },
+  { name: "Miller/baker", weapon: "Club", trade: "Flour, 1 lb.", skills: ["Judge the quality of grain or flour (Int)", "Bake a passable meal from meager rations (Int)", "Spot spoiled or tainted food (Int)"] },
+  { name: "Minstrel", weapon: "Dagger", trade: "Ukulele", skills: ["Perform a song or story to sway a crowd (Per)", "Recall a relevant local legend or rumor (Int)", "Gather gossip in a tavern (Per)"] },
+  { name: "Noble", weapon: "Longsword", trade: "Gold ring worth 10 gp", skills: ["Recall points of etiquette and heraldry (Int)", "Command respect or obedience (Per)", "Recognize a rival noble house's sigil (Int)"] },
+  { name: "Orphan", weapon: "Club", trade: "Rag doll", skills: ["Find a hiding spot or shortcut in a city (Agi)", "Read an adult's mood for danger (Per)", "Scrounge food or scraps unnoticed (Agi)"] },
+  { name: "Ostler", weapon: "Staff", trade: "Bridle", skills: ["Calm, saddle, or handle a mount (Agi)", "Judge a horse's health or temperament (Int)", "Spot a lame or stolen animal (Int)"] },
+  { name: "Outlaw", weapon: "Short sword", trade: "Leather armor", skills: ["Spot a lawman or informant in a crowd (Per)", "Find a hideout or escape route (Int)", "Move stealthily through settled land (Agi)"] },
+  { name: "Rope maker", weapon: "Knife (as dagger)", trade: "Rope, 100'", skills: ["Judge whether a rope or knot will hold (Int)", "Tie a rope quickly and securely (Agi)", "Splice or repair frayed rope (Agi)"] },
+  { name: "Scribe", weapon: "Dart", trade: "Parchment, 10 sheets", skills: ["Recall the exact wording of a document (Int)", "Forge a passable copy of handwriting (Agi)", "Spot an error or forgery in text (Int)"] },
+  { name: "Shaman", weapon: "Mace", trade: "Herbs, 1 lb.", skills: ["Interpret an omen or spirit sign (Per)", "Prepare a ritual remedy or ward (Int)", "Commune with or calm a restless spirit (Per)"] },
+  { name: "Slave", weapon: "Club", trade: "Strange-looking rock", skills: ["Endure harsh labor or punishment (Sta)", "Read a captor's mood to avoid trouble (Per)", "Work quietly without drawing notice (Agi)"] },
+  { name: "Smuggler", weapon: "Sling", trade: "Waterproof sack", skills: ["Hide contraband from a search (Agi)", "Talk past a customs check (Per)", "Find a discreet smuggling route (Int)"] },
+  { name: "Soldier", weapon: "Spear", trade: "Shield", skills: ["Hold formation and discipline under fire (Sta)", "Read enemy troop movements (Int)", "Follow a chain-of-command order under stress (Per)"] },
+  { name: "Squire", weapon: "Longsword", trade: "Steel helmet", skills: ["Maintain and ready a knight's arms and armor (Int)", "Recall points of chivalry and etiquette (Int)", "Assist in mounting or arming quickly (Agi)"] },
+  { name: "Tax collector", weapon: "Longsword", trade: "100 cp", skills: ["Spot hidden or undeclared wealth (Int)", "Intimidate a reluctant payer (Per)", "Tally accounts accurately (Int)"] },
+  { name: "Trapper", weapon: "Sling", trade: "Badger pelt", skills: ["Set or spot a trap or snare (Agi)", "Track an animal to its den (Int)", "Skin and preserve a pelt (Agi)"] },
+  { name: "Urchin", weapon: "Stick (as club)", trade: "Begging bowl", skills: ["Slip through a crowd or tight space unseen (Agi)", "Spot an easy mark or an easy meal (Int)", "Know which alleys and rooftops are safe (Int)"] },
+  { name: "Wainwright", weapon: "Club", trade: "Pushcart", skills: ["Judge whether a wagon or wheel will hold (Int)", "Repair a broken wheel or axle (Str)", "Load a cart for balance and speed (Int)"] },
+  { name: "Weaver", weapon: "Dagger", trade: "Fine suit of clothes", skills: ["Judge the quality of woven cloth (Int)", "Mend or patch fabric quickly (Agi)", "Recall a pattern or design from memory (Int)"] },
+  { name: "Wizard's apprentice", weapon: "Dagger", trade: "Black grimoire", skills: ["Recall a scrap of arcane lore (Int)", "Recognize a magical effect or ward in progress (Int)", "Decipher a fragment of a spell or ritual (Int)"] },
+  { name: "Woodcutter", weapon: "Handaxe", trade: "Bundle of wood", skills: ["Judge the best angle to fell a tree (Str)", "Navigate or blaze a trail through forest (Int)", "Spot good timber or a hidden deadfall (Int)"] },
+];
 
 const pcKey = id => id.replace(/^pc-/, "");
 
@@ -1453,6 +1574,11 @@ function fillForm(mode, data) {
       const el = document.getElementById(fieldId);
       if (el) el.dataset.autoSynced = autoFlags[fieldId] ? "1" : "0";
     });
+    // Re-derives the visible Occupation <select> (and the Custom text
+    // field, if the saved value isn't one of the 80 canonical
+    // occupations) from the hidden pc-occupation field this loop just
+    // populated from saved data.
+    syncOccupationControlsFromValue(document.getElementById("pc-occupation").value);
   }
   // Same "still auto-managed?" restoration as above, for the monster
   // Crit field's Monster Type + HD auto-fill.
@@ -3154,6 +3280,148 @@ function syncArmorIntoEquipment() {
     ? (lines.length ? [...autoLines, "", ...lines].join("\n") : autoLines.join("\n"))
     : lines.join("\n");
   scheduleSave();
+}
+
+// Occupation dropdown (Table 1-3) + hover tooltip with suggested skill
+// checks. The actual saved value still lives in the hidden #pc-occupation
+// field so the rest of the save/load pipeline (PC_TEXT_FIELD_IDS,
+// readForm/fillForm, the statline's class||occupation fallback) doesn't
+// need to know this is now a compound widget. Picking a canonical
+// occupation from the <select> writes its name straight into the hidden
+// field; picking "Custom / Other..." reveals a free-text field instead,
+// so homebrew occupations (or anything already saved that predates this
+// dropdown) still work exactly as before.
+function occupationByName(name) {
+  const needle = String(name || "").trim().toLowerCase();
+  if (!needle) return null;
+  return OCCUPATION_TABLE.find(o => o.name.toLowerCase() === needle) || null;
+}
+
+function populateOccupationSelect() {
+  const select = document.getElementById("pc-occupation-select");
+  if (!select) return;
+  const options = ['<option value="">— Select occupation —</option>']
+    .concat(OCCUPATION_TABLE.map(o => `<option value="${escapeHtml(o.name)}">${escapeHtml(o.name)}</option>`))
+    .concat(['<option value="__custom__">Custom / Other…</option>']);
+  select.innerHTML = options.join("");
+}
+populateOccupationSelect();
+
+function syncOccupationControlsFromValue(value) {
+  const select = document.getElementById("pc-occupation-select");
+  const customEl = document.getElementById("pc-occupation-custom");
+  if (!select || !customEl) return;
+  const match = occupationByName(value);
+  if (!value) {
+    select.value = "";
+    customEl.style.display = "none";
+    customEl.value = "";
+  } else if (match) {
+    select.value = match.name;
+    customEl.style.display = "none";
+    customEl.value = "";
+  } else {
+    select.value = "__custom__";
+    customEl.style.display = "block";
+    customEl.value = value;
+  }
+  updateOccupationTooltipContent(value);
+}
+
+// Builds (but doesn't show) the tooltip's HTML for whatever occupation
+// value is current, so it's ready the instant the mouse enters.
+function updateOccupationTooltipContent(value) {
+  const tip = document.getElementById("occ-tooltip");
+  if (!tip) return;
+  const match = occupationByName(value);
+  if (!match) {
+    const label = value ? escapeHtml(value) : "No occupation set";
+    tip.innerHTML = `<div class="occ-tooltip-title">${label}</div><div class="occ-tooltip-meta">Custom/homebrew occupation - no suggested checks on file. Improvise based on the name and the GM's judgment.</div><div class="occ-tooltip-dc-note">${escapeHtml(SKILL_CHECK_DC_NOTE)}</div>`;
+    return;
+  }
+  const skillsHtml = match.skills.map(s => `<li>${escapeHtml(s)}</li>`).join("");
+  tip.innerHTML = `<div class="occ-tooltip-title">${escapeHtml(match.name)}</div><div class="occ-tooltip-meta">Trained Weapon: ${escapeHtml(match.weapon)} · Trade Goods: ${escapeHtml(match.trade)}</div><div class="occ-tooltip-skills-title">Possible skill checks</div><ul class="occ-tooltip-skills">${skillsHtml}</ul><div class="occ-tooltip-dc-note">${escapeHtml(SKILL_CHECK_DC_NOTE)}</div>`;
+}
+
+function showOccupationTooltip(anchorEl) {
+  const tip = document.getElementById("occ-tooltip");
+  if (!tip || !anchorEl) return;
+  tip.style.display = "block";
+  const anchorRect = anchorEl.getBoundingClientRect();
+  const tipRect = tip.getBoundingClientRect();
+  const margin = 8;
+  let left = anchorRect.left;
+  left = Math.min(left, window.innerWidth - tipRect.width - margin);
+  left = Math.max(left, margin);
+  let top = anchorRect.bottom + 6;
+  if (top + tipRect.height > window.innerHeight - margin) {
+    top = anchorRect.top - tipRect.height - 6;
+  }
+  top = Math.max(top, margin);
+  tip.style.left = `${left}px`;
+  tip.style.top = `${top}px`;
+}
+
+function hideOccupationTooltip() {
+  const tip = document.getElementById("occ-tooltip");
+  if (tip) tip.style.display = "none";
+}
+
+const occSelectEl = document.getElementById("pc-occupation-select");
+const occCustomEl = document.getElementById("pc-occupation-custom");
+const occHiddenEl = document.getElementById("pc-occupation");
+const occInfoBtn = document.getElementById("pc-occupation-info-btn");
+
+if (occSelectEl && occCustomEl && occHiddenEl) {
+  occSelectEl.addEventListener("change", () => {
+    if (occSelectEl.value === "__custom__") {
+      occCustomEl.style.display = "block";
+      occCustomEl.value = "";
+      occHiddenEl.value = "";
+      occCustomEl.focus();
+    } else {
+      occCustomEl.style.display = "none";
+      occCustomEl.value = "";
+      occHiddenEl.value = occSelectEl.value;
+    }
+    updateOccupationTooltipContent(occHiddenEl.value);
+    scheduleSave();
+    cfgRenderFromCurrentForm("pc");
+  });
+  occCustomEl.addEventListener("input", () => {
+    occHiddenEl.value = occCustomEl.value;
+    updateOccupationTooltipContent(occHiddenEl.value);
+    scheduleSave();
+    cfgRenderFromCurrentForm("pc");
+  });
+}
+
+// Mouseover (and tap-to-toggle, for touch/no-hover devices) on either the
+// select itself or the info icon next to it - both show the same
+// suggested-skill-checks tooltip for whatever occupation is selected.
+[occSelectEl, occInfoBtn].forEach(el => {
+  if (!el) return;
+  el.addEventListener("mouseenter", () => {
+    updateOccupationTooltipContent(occHiddenEl ? occHiddenEl.value : "");
+    showOccupationTooltip(el);
+  });
+  el.addEventListener("mouseleave", hideOccupationTooltip);
+  el.addEventListener("focus", () => {
+    updateOccupationTooltipContent(occHiddenEl ? occHiddenEl.value : "");
+    showOccupationTooltip(el);
+  });
+  el.addEventListener("blur", hideOccupationTooltip);
+});
+if (occInfoBtn) {
+  occInfoBtn.addEventListener("click", () => {
+    const tip = document.getElementById("occ-tooltip");
+    if (tip && tip.style.display === "block") {
+      hideOccupationTooltip();
+    } else {
+      updateOccupationTooltipContent(occHiddenEl ? occHiddenEl.value : "");
+      showOccupationTooltip(occInfoBtn);
+    }
+  });
 }
 
 document.getElementById("pc-ac-misc").addEventListener("input", () => {
