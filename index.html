@@ -121,14 +121,14 @@
   }
   .saves {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 6px;
     margin-bottom: 10px;
   }
-  .saves.pc-saves { grid-template-columns: repeat(3, 1fr); }
+  .saves.pc-saves { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .ability-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
   }
   .save-box {
@@ -137,6 +137,7 @@
     border-radius: 6px;
     text-align: center;
     padding: 5px 2px;
+    min-width: 0;
   }
   .save-box label { margin-bottom: 2px; }
   .save-box input, .save-box select {
@@ -203,6 +204,7 @@
     margin-top: 4px;
   }
   .status { font-size: 11px; color: var(--good); min-height: 14px; }
+  .roll-total { font-size: 1.3em; font-weight: 800; }
 
   .main-nav {
     position: sticky;
@@ -2573,6 +2575,21 @@ function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// Dice-roll result strings (toasts + log entries) mark their headline total
+// by wrapping it in ROLL_TOTAL_MARK delimiters, e.g. markRollTotal("14 to hit").
+// rollTextToHtml() then renders those marked segments bigger/bold while the
+// rest of the breakdown stays normal weight, and everything is still escaped.
+const ROLL_TOTAL_MARK = "\u0001";
+function markRollTotal(str) {
+  return `${ROLL_TOTAL_MARK}${str}${ROLL_TOTAL_MARK}`;
+}
+function rollTextToHtml(text) {
+  return String(text ?? "")
+    .split(ROLL_TOTAL_MARK)
+    .map((part, i) => (i % 2 === 1 ? `<b class="roll-total">${escapeHtml(part)}</b>` : escapeHtml(part)))
+    .join("");
+}
+
 function parseModifier(str) {
   if (!str) return 0;
   const m = String(str).match(/-?\d+/);
@@ -3294,10 +3311,10 @@ async function rollAttackFor(itemId, attackId) {
   const toHit = d20Roll + atkMod + (deed ? deed.total : 0);
   const dmg = rollDamage(atk.damage);
   const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)})` : "";
-  const toHitText = `${toHit} to hit (d20 ${d20Roll}${formatModifier(atkMod)}${deedText})`;
+  const toHitText = `${markRollTotal(`${toHit} to hit`)} (d20 ${d20Roll}${formatModifier(atkMod)}${deedText})`;
   const dmgTotal = dmg !== null ? dmg.total + (deed ? deed.total : 0) : null;
   const dmgText = dmg !== null
-    ? `, ${dmgTotal} dmg (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText})`
+    ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText})`
     : "";
   const text = `${atk.name || "Attack"}: ${toHitText}${dmgText}`;
   showTrackerStatus(`${item.name || "Token"} — ${text}`, false, 5000);
@@ -3390,10 +3407,10 @@ async function applyTrackerUpdate(id, field, value) {
 function showTrackerStatus(text, isError, duration) {
   const el = document.getElementById("tracker-status");
   if (!el) return;
-  el.textContent = text;
+  el.innerHTML = rollTextToHtml(text);
   el.style.color = isError ? "#c97b7b" : "var(--good)";
   clearTimeout(showTrackerStatus._t);
-  showTrackerStatus._t = setTimeout(() => { el.textContent = ""; }, duration ?? (isError ? 6000 : 1500));
+  showTrackerStatus._t = setTimeout(() => { el.innerHTML = ""; }, duration ?? (isError ? 6000 : 1500));
 }
 
 function makeLogId() {
@@ -3427,7 +3444,7 @@ function chatEntryHtml(entry) {
         </div>
         <span class="chat-entry-time">${time}</span>
       </div>
-      <div class="chat-entry-text">${escapeHtml(entry.text)}</div>
+      <div class="chat-entry-text">${rollTextToHtml(entry.text)}</div>
     </div>`;
 }
 
@@ -3524,10 +3541,10 @@ function parseCustomNotation(str) {
 function showDiceStatus(text, isError) {
   const el = document.getElementById("dice-status");
   if (!el) return;
-  el.textContent = text;
+  el.innerHTML = rollTextToHtml(text);
   el.style.color = isError ? "#c97b7b" : "var(--good)";
   clearTimeout(showDiceStatus._t);
-  showDiceStatus._t = setTimeout(() => { el.textContent = ""; }, isError ? 6000 : 5000);
+  showDiceStatus._t = setTimeout(() => { el.innerHTML = ""; }, isError ? 6000 : 5000);
 }
 
 function refreshDiceGmRowVisibility() {
@@ -3635,7 +3652,7 @@ async function executeDiceRoll(count, sides, modifier) {
   const modText = result.modifier ? (result.modifier > 0 ? ` +${result.modifier}` : ` ${result.modifier}`) : "";
   const breakdown = `[${result.dice.map(d => d.value).join(", ")}]`;
 
-  showDiceStatus(`${result.notation}${modText}: ${breakdown} = ${result.total}${isPrivate ? " (private)" : ""}`, false);
+  showDiceStatus(`${result.notation}${modText}: ${breakdown} = ${markRollTotal(String(result.total))}${isPrivate ? " (private)" : ""}`, false);
   playLocalMiniRoll(result);
   playLocalRollSound(result.dice.length);
 
@@ -3657,7 +3674,7 @@ async function executeDiceRoll(count, sides, modifier) {
   await appendChatLog({
     kind: "dice",
     tokenName: rollerName,
-    text: `Rolled ${result.notation}${modText}: ${breakdown} = ${result.total}`,
+    text: `Rolled ${result.notation}${modText}: ${breakdown} = ${markRollTotal(String(result.total))}`,
     gmOnly: isPrivate,
   });
 }
@@ -3800,7 +3817,7 @@ async function rollInitiativeFor(id) {
     kind: "initiative",
     tokenName: item.name || "Token",
     mode: stats.mode,
-    text: `Initiative: ${roll}${mod ? ` (d${initDie} ${mod >= 0 ? "+" : ""}${mod})` : ` (d${initDie})`}`,
+    text: `Initiative: ${markRollTotal(String(roll))}${mod ? ` (d${initDie} ${mod >= 0 ? "+" : ""}${mod})` : ` (d${initDie})`}`,
     gmOnly: stats.mode === "monster",
   });
 }
