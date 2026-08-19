@@ -1018,21 +1018,21 @@
             <label>Fort</label>
             <div class="field-sync-row">
               <input type="text" id="pc-fort" placeholder="+0"/>
-              <button type="button" class="derived-sync-btn" data-target="pc-fort" title="Set to Stamina modifier">↻</button>
+              <button type="button" class="derived-sync-btn" data-target="pc-fort" title="Set to Stamina modifier + class/level save bonus">↻</button>
             </div>
           </div>
           <div class="save-box">
             <label>Ref</label>
             <div class="field-sync-row">
               <input type="text" id="pc-ref" placeholder="+0"/>
-              <button type="button" class="derived-sync-btn" data-target="pc-ref" title="Set to Agility modifier">↻</button>
+              <button type="button" class="derived-sync-btn" data-target="pc-ref" title="Set to Agility modifier + class/level save bonus">↻</button>
             </div>
           </div>
           <div class="save-box">
             <label>Will</label>
             <div class="field-sync-row">
               <input type="text" id="pc-will" placeholder="+0"/>
-              <button type="button" class="derived-sync-btn" data-target="pc-will" title="Set to Personality modifier">↻</button>
+              <button type="button" class="derived-sync-btn" data-target="pc-will" title="Set to Personality modifier + class/level save bonus">↻</button>
             </div>
           </div>
         </div>
@@ -1315,6 +1315,171 @@ const DCC_WEAPONS = [
   { key: "custom", label: "Custom / Other", damage: "", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
 ];
 
+// DCC per-class, per-level Attack bonus and Saving Throw progressions
+// (Reference Booklet Tables 1-5 Cleric, 1-7 Thief, 1-10 Warrior, 1-12
+// Wizard, 1-14 Dwarf, 1-16 Elf, 1-18 Halfling). This is the class/level
+// "base" that combines with an ability modifier to make a save or attack
+// total - previously this app could only supply the ability-mod half,
+// since it had no copy of these tables to look up the class half from.
+// Warrior and Dwarf don't have a flat numeric Attack bonus - their melee/
+// missile attacks (and damage) get a separately-rolled Deed Die on top of
+// the ability modifier (Mighty Deeds of Arms), so `attack` is a die-chain
+// string like "d3" for those two instead of a number; everyone else's
+// `attack` is the flat integer straight off the table.
+const DCC_CLASS_TABLES = {
+  Cleric: {
+    levels: {
+      1: { attack: 0, fort: 1, ref: 0, will: 1 },
+      2: { attack: 1, fort: 1, ref: 0, will: 1 },
+      3: { attack: 2, fort: 1, ref: 1, will: 2 },
+      4: { attack: 2, fort: 2, ref: 1, will: 2 },
+      5: { attack: 3, fort: 2, ref: 1, will: 3 },
+      6: { attack: 4, fort: 2, ref: 2, will: 4 },
+      7: { attack: 5, fort: 3, ref: 2, will: 4 },
+      8: { attack: 5, fort: 3, ref: 2, will: 5 },
+      9: { attack: 6, fort: 3, ref: 3, will: 5 },
+      10: { attack: 7, fort: 4, ref: 3, will: 6 },
+    },
+  },
+  Thief: {
+    levels: {
+      1: { attack: 0, fort: 1, ref: 1, will: 0 },
+      2: { attack: 1, fort: 1, ref: 1, will: 0 },
+      3: { attack: 2, fort: 1, ref: 2, will: 1 },
+      4: { attack: 2, fort: 2, ref: 2, will: 1 },
+      5: { attack: 3, fort: 2, ref: 3, will: 1 },
+      6: { attack: 4, fort: 2, ref: 4, will: 2 },
+      7: { attack: 5, fort: 3, ref: 4, will: 2 },
+      8: { attack: 5, fort: 3, ref: 5, will: 2 },
+      9: { attack: 6, fort: 3, ref: 5, will: 3 },
+      10: { attack: 7, fort: 4, ref: 6, will: 3 },
+    },
+  },
+  Halfling: {
+    levels: {
+      1: { attack: 1, fort: 1, ref: 1, will: 1 },
+      2: { attack: 2, fort: 1, ref: 1, will: 1 },
+      3: { attack: 2, fort: 1, ref: 2, will: 2 },
+      4: { attack: 3, fort: 2, ref: 2, will: 2 },
+      5: { attack: 4, fort: 2, ref: 3, will: 3 },
+      6: { attack: 5, fort: 2, ref: 4, will: 4 },
+      7: { attack: 5, fort: 3, ref: 4, will: 4 },
+      8: { attack: 6, fort: 3, ref: 5, will: 5 },
+      9: { attack: 7, fort: 3, ref: 5, will: 5 },
+      10: { attack: 8, fort: 4, ref: 6, will: 6 },
+    },
+  },
+  Wizard: {
+    levels: {
+      1: { attack: 0, fort: 0, ref: 1, will: 1 },
+      2: { attack: 1, fort: 0, ref: 1, will: 1 },
+      3: { attack: 1, fort: 1, ref: 1, will: 2 },
+      4: { attack: 1, fort: 1, ref: 2, will: 2 },
+      5: { attack: 2, fort: 1, ref: 2, will: 3 },
+      6: { attack: 2, fort: 2, ref: 2, will: 4 },
+      7: { attack: 3, fort: 2, ref: 3, will: 4 },
+      8: { attack: 3, fort: 2, ref: 3, will: 5 },
+      9: { attack: 4, fort: 3, ref: 3, will: 5 },
+      10: { attack: 4, fort: 3, ref: 4, will: 6 },
+    },
+  },
+  Elf: {
+    levels: {
+      1: { attack: 1, fort: 1, ref: 1, will: 1 },
+      2: { attack: 1, fort: 1, ref: 1, will: 1 },
+      3: { attack: 2, fort: 1, ref: 1, will: 2 },
+      4: { attack: 2, fort: 2, ref: 2, will: 2 },
+      5: { attack: 3, fort: 2, ref: 2, will: 3 },
+      6: { attack: 3, fort: 2, ref: 2, will: 4 },
+      7: { attack: 4, fort: 3, ref: 3, will: 4 },
+      8: { attack: 4, fort: 3, ref: 3, will: 5 },
+      9: { attack: 5, fort: 3, ref: 3, will: 5 },
+      10: { attack: 5, fort: 4, ref: 4, will: 6 },
+    },
+  },
+  Warrior: {
+    deedDie: true,
+    levels: {
+      1: { attack: "d3", fort: 1, ref: 1, will: 0 },
+      2: { attack: "d4", fort: 1, ref: 1, will: 0 },
+      3: { attack: "d5", fort: 2, ref: 1, will: 1 },
+      4: { attack: "d6", fort: 2, ref: 2, will: 1 },
+      5: { attack: "d7", fort: 3, ref: 2, will: 1 },
+      6: { attack: "d8", fort: 4, ref: 2, will: 2 },
+      7: { attack: "d10+1", fort: 4, ref: 3, will: 2 },
+      8: { attack: "d10+2", fort: 5, ref: 3, will: 2 },
+      9: { attack: "d10+3", fort: 5, ref: 3, will: 3 },
+      10: { attack: "d10+4", fort: 6, ref: 4, will: 3 },
+    },
+  },
+  Dwarf: {
+    deedDie: true,
+    levels: {
+      1: { attack: "d3", fort: 1, ref: 1, will: 1 },
+      2: { attack: "d4", fort: 1, ref: 1, will: 1 },
+      3: { attack: "d5", fort: 2, ref: 1, will: 1 },
+      4: { attack: "d6", fort: 2, ref: 2, will: 2 },
+      5: { attack: "d7", fort: 3, ref: 2, will: 2 },
+      6: { attack: "d8", fort: 4, ref: 2, will: 2 },
+      7: { attack: "d10+1", fort: 4, ref: 3, will: 3 },
+      8: { attack: "d10+2", fort: 5, ref: 3, will: 3 },
+      9: { attack: "d10+3", fort: 5, ref: 3, will: 3 },
+      10: { attack: "d10+4", fort: 6, ref: 4, will: 4 },
+    },
+  },
+};
+
+function parseLevelNumber(raw) {
+  const m = String(raw || "").match(/-?\d+/);
+  return m ? parseInt(m[0], 10) : null;
+}
+
+// Looks up this PC's class/level row in DCC_CLASS_TABLES, clamped to the
+// table's 1-10 range (this booklet doesn't publish beyond level 10, so a
+// higher-level sheet just keeps using the level 10 row rather than
+// looking up nothing). Returns null for 0-level characters, "Other /
+// Homebrew", or an unset class - those have no class table to draw from,
+// so save/attack automation falls back to ability-modifier-only, same as
+// before this table existed.
+function currentClassLevelEntry() {
+  const classEl = document.getElementById("pc-class");
+  const levelEl = document.getElementById("pc-level");
+  const cls = classEl ? classEl.value : "";
+  const table = DCC_CLASS_TABLES[cls];
+  if (!table) return null;
+  const level = parseLevelNumber(levelEl ? levelEl.value : "");
+  if (level === null || level < 1) return null;
+  const clamped = Math.min(10, level);
+  return table.levels[clamped] || null;
+}
+
+function classSaveBonus(saveKey) {
+  const entry = currentClassLevelEntry();
+  return entry ? (entry[saveKey] || 0) : 0;
+}
+
+// Combines an ability modifier with this class/level's Attack bonus into
+// the text that goes in an attack row's Bonus field. Cleric/Thief/
+// Halfling/Wizard/Elf have a flat numeric Attack bonus that adds straight
+// in. Warrior/Dwarf instead roll a Deed Die on top of the ability
+// modifier (Mighty Deeds of Arms) - that die isn't a fixed number, so it
+// can't be folded into the numeric total; it's appended as a readable
+// annotation instead, and the numeric part (still parsed by
+// parseModifier() elsewhere for actually rolling the attack) stays just
+// the ability modifier until Deed Die rolling is its own feature.
+function composedAttackBonusText(abilityFieldId) {
+  const abilityMod = abilityModifierFromField(abilityFieldId);
+  const entry = currentClassLevelEntry();
+  if (!entry) return formatSignedNumber(abilityMod);
+  if (typeof entry.attack === "number") {
+    return formatSignedNumber(abilityMod + entry.attack);
+  }
+  if (typeof entry.attack === "string") {
+    return `${formatSignedNumber(abilityMod)} (+${entry.attack} Deed Die)`;
+  }
+  return formatSignedNumber(abilityMod);
+}
+
 function dccWeaponEntry(key) {
   return DCC_WEAPONS.find(w => w.key === key) || DCC_WEAPONS[DCC_WEAPONS.length - 1];
 }
@@ -1365,8 +1530,8 @@ function attackRowHtml(atk, mode) {
       <div class="attack-row-fields">
         <input type="text" class="attack-name" placeholder="Custom label (optional)" value="${escapeHtml(atk.name)}" />
         <input type="text" class="attack-bonus" placeholder="+4" value="${escapeHtml(atk.bonus)}" />
-        <button type="button" class="attack-quick-btn" data-mod="str" title="Set Bonus to Str modifier">Str</button>
-        <button type="button" class="attack-quick-btn" data-mod="agi" title="Set Bonus to Agi modifier">Agi</button>
+        <button type="button" class="attack-quick-btn" data-mod="str" title="Set Bonus to Str modifier + class/level Attack bonus">Str</button>
+        <button type="button" class="attack-quick-btn" data-mod="agi" title="Set Bonus to Agi modifier + class/level Attack bonus">Agi</button>
         <input type="text" class="attack-damage" placeholder="1d6" value="${escapeHtml(atk.damage)}" />
         <button type="button" class="attack-remove-btn" title="Remove attack">×</button>
       </div>
@@ -1419,9 +1584,11 @@ function isAutoGeneratedWeaponName(name) {
 // die + the applicable ability modifier (Str for melee and for
 // close-range thrown weapons per the strAtClose rule, no modifier for
 // pure ranged weapons like bows/crossbows), and a suggested attack Bonus
-// (Str for melee, Agi for ranged) - but the Bonus suggestion only fills
-// an EMPTY field, same non-destructive pattern as Init/Saves, so it never
-// overwrites a bonus the player already customized.
+// (Str modifier for melee, Agi modifier for ranged, PLUS this character's
+// class/level Attack bonus from DCC_CLASS_TABLES) - but the Bonus
+// suggestion only fills an EMPTY field, same non-destructive pattern as
+// Init/Saves, so it never overwrites a bonus the player already
+// customized.
 function applyWeaponSelection(row) {
   const weaponSel = row.querySelector(".attack-weapon");
   const nameInput = row.querySelector(".attack-name");
@@ -1436,7 +1603,7 @@ function applyWeaponSelection(row) {
   damageInput.value = entry.damage ? `${entry.damage}${damageAbilityMod ? formatSignedNumber(damageAbilityMod) : ""}` : "";
   if (!bonusInput.value.trim()) {
     const attackAbilitySource = entry.type === "ranged" ? "pc-agi" : "pc-str";
-    bonusInput.value = formatSignedNumber(abilityModifierFromField(attackAbilitySource));
+    bonusInput.value = composedAttackBonusText(attackAbilitySource);
   }
 }
 
@@ -1483,7 +1650,7 @@ function attachAttackRowListeners(mode) {
       row.querySelectorAll(".attack-quick-btn").forEach(btn => {
         btn.addEventListener("click", () => {
           const sourceId = btn.dataset.mod === "agi" ? "pc-agi" : "pc-str";
-          row.querySelector(".attack-bonus").value = formatSignedNumber(abilityModifierFromField(sourceId));
+          row.querySelector(".attack-bonus").value = composedAttackBonusText(sourceId);
           scheduleSave();
           cfgRenderFromCurrentForm(mode);
         });
@@ -1688,27 +1855,45 @@ PC_ABILITY_FIELD_IDS.forEach(id => {
   });
 });
 
-// Maps each derived field to the ability field that feeds it.
+// Maps each derived field to the ability field that feeds it, and (for
+// the three saves) the matching key into a DCC_CLASS_TABLES level row.
+// Init has no class/level base in the reference tables - only Fort/Ref/
+// Will do - so it stays ability-mod-only.
 const PC_DERIVED_FIELD_SOURCES = {
   "pc-init": "pc-agi",
   "pc-fort": "pc-sta",
   "pc-ref": "pc-agi",
   "pc-will": "pc-per",
 };
+const PC_SAVE_FIELD_KEYS = {
+  "pc-fort": "fort",
+  "pc-ref": "ref",
+  "pc-will": "will",
+};
 
-// Passive half of the automation: whenever an ability score is edited,
-// fill in any of Init/Fort/Ref/Will that are still blank with that
-// ability's modifier. Never touches a field that already has something in
-// it - DCC saves and Init are class/level base PLUS the ability modifier,
-// and there's no way to know a character's class base from here, so this
-// only ever provides the ability-mod half as a starting point, not a
-// silent overwrite of whatever the player already entered (which might
-// already include their class base).
+// Computes what a derived field (Init/Fort/Ref/Will) SHOULD read: the
+// linked ability's modifier, plus - for Fort/Ref/Will only - this
+// character's class/level save bonus from DCC_CLASS_TABLES (0-level,
+// "Other/Homebrew", or an unset class fall back to just the ability
+// modifier, since there's no class table row to add).
+function derivedPcFieldValue(fieldId, sourceId) {
+  const abilityMod = abilityModifierFromField(sourceId);
+  const saveKey = PC_SAVE_FIELD_KEYS[fieldId];
+  if (!saveKey) return formatSignedNumber(abilityMod);
+  return formatSignedNumber(abilityMod + classSaveBonus(saveKey));
+}
+
+// Passive half of the automation: whenever an ability score, Class, or
+// Level is edited, fill in any of Init/Fort/Ref/Will that are still blank
+// with their full derived value (ability modifier, plus class/level save
+// bonus for Fort/Ref/Will). Never touches a field that already has
+// something in it, so this only ever provides a starting point, not a
+// silent overwrite of whatever the player already entered.
 function refreshDerivedPcFields() {
   Object.entries(PC_DERIVED_FIELD_SOURCES).forEach(([fieldId, sourceId]) => {
     const el = document.getElementById(fieldId);
     if (!el || el.value.trim() !== "") return;
-    el.value = formatSignedNumber(abilityModifierFromField(sourceId));
+    el.value = derivedPcFieldValue(fieldId, sourceId);
   });
   recalcPcAC();
   scheduleSave();
@@ -2018,20 +2203,35 @@ document.getElementById("pc-ac-misc").addEventListener("input", () => {
 document.getElementById("pc-class").addEventListener("change", () => {
   recalcPcCheckPenalty();
   recalcPcSpeed();
+  // A new Class means Fort/Ref/Will (and any still-blank attack Bonus
+  // fields) may now have a class/level base to draw from - refresh
+  // whichever of those are still blank. Never overwrites a value the
+  // player already entered; use the ↻ buttons (or the Str/Agi attack
+  // buttons) to resync a field that's already filled.
+  refreshDerivedPcFields();
+  cfgRenderFromCurrentForm("pc");
   scheduleSave();
 });
 
-// Active half: an explicit click always sets the field to exactly the
-// linked ability's current modifier, overwriting whatever was there. This
-// is the tool for resyncing after an ability score changes (e.g. a level-
-// up ability increase) - the player re-adds their class base on top of
-// the fresh modifier afterward if the field is meant to hold a total.
+document.getElementById("pc-level").addEventListener("input", () => {
+  // Same non-destructive refresh as the Class handler above - leveling up
+  // fills in blank saves with the new class/level base, but resyncing an
+  // already-filled save after a level-up is what the ↻ button is for.
+  refreshDerivedPcFields();
+  cfgRenderFromCurrentForm("pc");
+});
+
+// Active half: an explicit click always sets the field to exactly its
+// full derived value - the linked ability's current modifier, plus (for
+// Fort/Ref/Will) this character's class/level save bonus - overwriting
+// whatever was there. This is the tool for resyncing after an ability
+// score changes, or after leveling up changes the class/level base.
 function syncDerivedPcField(fieldId) {
   const sourceId = PC_DERIVED_FIELD_SOURCES[fieldId];
   if (!sourceId) return;
   const el = document.getElementById(fieldId);
   if (!el) return;
-  el.value = formatSignedNumber(abilityModifierFromField(sourceId));
+  el.value = derivedPcFieldValue(fieldId, sourceId);
   scheduleSave();
   cfgRenderFromCurrentForm("pc");
 }
