@@ -1570,6 +1570,19 @@ function attackRowHtml(atk, mode) {
     metaParts.push(`<button type="button" class="backstab-btn" data-backstab="${escapeHtml(entry.backstabDamage)}" title="Use this weapon's backstab damage">Backstab dmg: ${escapeHtml(entry.backstabDamage)} [Use]</button>`);
   }
 
+  // Weapon selection already auto-picks the right ability for Bonus (Str
+  // for melee, Agi for ranged) and keeps it live-synced - so for a normal
+  // weapon this button is rarely needed. It still earns its keep for
+  // "Custom / Other" (no weapon type to infer from) and for opting a
+  // manually-edited Bonus back into auto-sync. One button now covers
+  // both directions: its label is always the ability NOT currently in
+  // use, i.e. "the other option" - click applies it and the label flips
+  // to offer switching back.
+  const currentSource = atk.bonusSource || (entry.type === "ranged" ? "pc-agi" : "pc-str");
+  const toggleMod = currentSource === "pc-agi" ? "str" : "agi";
+  const toggleLabel = toggleMod === "agi" ? "Agi" : "Str";
+  const currentLabel = currentSource === "pc-agi" ? "Agi" : "Str";
+
   return `
     <div class="attack-row pc-attack-row${atk.equipped ? " equipped" : ""}" data-id="${atk.id}">
       <div class="attack-weapon-line">
@@ -1580,8 +1593,7 @@ function attackRowHtml(atk, mode) {
       <div class="attack-row-fields">
         <input type="text" class="attack-name" placeholder="Custom label (optional)" value="${escapeHtml(atk.name)}" />
         <input type="text" class="attack-bonus" placeholder="+4" value="${escapeHtml(atk.bonus)}" data-auto-synced="${atk.bonusAuto ? "1" : "0"}" data-bonus-source="${escapeHtml(atk.bonusSource || "")}" />
-        <button type="button" class="attack-quick-btn" data-mod="str" title="Set Bonus to Str modifier + class/level Attack bonus">Str</button>
-        <button type="button" class="attack-quick-btn" data-mod="agi" title="Set Bonus to Agi modifier + class/level Attack bonus">Agi</button>
+        <button type="button" class="attack-quick-btn ability-toggle-btn" data-mod="${toggleMod}" title="Bonus currently uses ${currentLabel} modifier + class/level Attack bonus - click to switch to ${toggleLabel}">${toggleLabel}</button>
         <input type="text" class="attack-damage" placeholder="1d6" value="${escapeHtml(atk.damage)}" data-auto-synced="${atk.damageAuto ? "1" : "0"}" data-damage-base="${escapeHtml(atk.damageBase || "")}" data-damage-str-applies="${atk.damageStrApplies ? "1" : "0"}" />
         <button type="button" class="attack-remove-btn" title="Remove attack">×</button>
       </div>
@@ -1742,20 +1754,30 @@ function attachAttackRowListeners(mode) {
           recalcPcInitiativeDie();
         });
       }
-      row.querySelectorAll(".attack-quick-btn").forEach(btn => {
-        btn.addEventListener("click", () => {
-          const sourceId = btn.dataset.mod === "agi" ? "pc-agi" : "pc-str";
+      const abilityToggleBtn = row.querySelector(".ability-toggle-btn");
+      if (abilityToggleBtn) {
+        abilityToggleBtn.addEventListener("click", () => {
+          const sourceId = abilityToggleBtn.dataset.mod === "agi" ? "pc-agi" : "pc-str";
           const bonusEl = row.querySelector(".attack-bonus");
           bonusEl.value = composedAttackBonusText(sourceId);
-          // A quick-button click opts this row back into staying in sync -
-          // same as clicking a save's ↻ button - so later class/level/
-          // ability changes keep updating it until the player types over it.
+          // A click opts this row back into staying in sync - same as
+          // clicking a save's ↻ button - so later class/level/ability
+          // changes keep updating it until the player types over it.
           bonusEl.dataset.autoSynced = "1";
           bonusEl.dataset.bonusSource = sourceId;
+          // Flip the button in place to offer the OTHER ability next,
+          // instead of a full row rebuild - same "always shows the
+          // alternative" contract as the initial render in attackRowHtml.
+          const nextMod = sourceId === "pc-agi" ? "str" : "agi";
+          const nextLabel = nextMod === "agi" ? "Agi" : "Str";
+          const appliedLabel = sourceId === "pc-agi" ? "Agi" : "Str";
+          abilityToggleBtn.dataset.mod = nextMod;
+          abilityToggleBtn.textContent = nextLabel;
+          abilityToggleBtn.title = `Bonus currently uses ${appliedLabel} modifier + class/level Attack bonus - click to switch to ${nextLabel}`;
           scheduleSave();
           cfgRenderFromCurrentForm(mode);
         });
-      });
+      }
       const backstabBtn = row.querySelector(".backstab-btn");
       if (backstabBtn) {
         backstabBtn.addEventListener("click", () => {
