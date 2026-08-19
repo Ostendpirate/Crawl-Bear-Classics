@@ -2612,11 +2612,14 @@ function scheduleSave() {
 });
 nameEl.addEventListener("input", scheduleSave);
 
-// Monster Type -> Crit auto-fill wiring. Picking a type is a deliberate
-// "compute this for me" action, so it always overwrites Crit and opts
-// the field back into auto-sync (force=true); typing directly into Crit
-// opts back out (same contract as the PC attack Bonus/Damage fields), and
-// HD changing on its own only updates Crit if it's still auto-synced.
+// Monster Type -> Crit auto-fill wiring. Picking a type, editing HD, or
+// clicking the sync button are all deliberate "compute this for me"
+// actions, so each one always overwrites Crit and opts the field back
+// into auto-sync (force=true). Typing directly into Crit opts back out
+// (same contract as the PC attack Bonus/Damage fields). Only the passive
+// re-render inside renderMonsterStatline (recalcMonsterCrit(false)) still
+// respects the auto-synced gate, so unrelated field edits (Notes, AC,
+// etc.) don't clobber a manual Crit override.
 const montypeEl = document.getElementById("montype");
 if (montypeEl) {
   montypeEl.addEventListener("change", () => {
@@ -2627,7 +2630,11 @@ if (montypeEl) {
 }
 const monsterHdEl = document.getElementById("hd");
 if (monsterHdEl) {
-  monsterHdEl.addEventListener("input", () => recalcMonsterCrit(false));
+  monsterHdEl.addEventListener("input", () => {
+    recalcMonsterCrit(true);
+    scheduleSave();
+    cfgRenderFromCurrentForm("monster");
+  });
 }
 const monsterCritEl = document.getElementById("crit");
 if (monsterCritEl) {
