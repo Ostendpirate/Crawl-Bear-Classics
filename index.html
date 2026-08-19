@@ -205,6 +205,20 @@
   }
   .status { font-size: 11px; color: var(--good); min-height: 14px; }
   .roll-total { font-size: 1.3em; font-weight: 800; }
+  .roll-crit-alert {
+    display: inline-block;
+    font-size: 1.05em;
+    font-weight: 800;
+    color: #f0c060;
+    text-shadow: 0 0 6px rgba(240, 192, 96, 0.5);
+  }
+  .roll-fumble-alert {
+    display: inline-block;
+    font-size: 1.05em;
+    font-weight: 800;
+    color: #e0665a;
+    text-shadow: 0 0 6px rgba(224, 102, 90, 0.4);
+  }
 
   .main-nav {
     position: sticky;
@@ -635,6 +649,103 @@
   .fumble-die-note {
     font-size: 10px;
   }
+  .tables-btn {
+    background: var(--border);
+    border: none;
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 10.5px;
+    padding: 3px 6px;
+    cursor: pointer;
+    line-height: 1.2;
+  }
+  .tables-btn:hover { background: var(--accent); color: #1e1b18; }
+  .tables-btn-icon {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    font-size: 12px;
+  }
+  .tables-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 8, 6, 0.72);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 500;
+    padding: 12px;
+  }
+  .tables-modal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    width: 100%;
+    max-width: 100%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+  .tables-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tables-modal-title { font-size: 14px; font-weight: 700; color: var(--text); }
+  .tables-modal-subtitle { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .tables-modal-close {
+    flex: none;
+    width: 24px;
+    height: 24px;
+    background: var(--border);
+    border: none;
+    border-radius: 5px;
+    color: var(--text);
+    font-size: 14px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .tables-modal-close:hover { background: var(--accent); color: #1e1b18; }
+  .tables-modal-body {
+    overflow-y: auto;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .tables-modal-section-title {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--accent);
+    margin: 10px 0 4px;
+  }
+  .tables-modal-section-title:first-child { margin-top: 0; }
+  .tables-modal-row {
+    display: flex;
+    gap: 6px;
+    padding: 3px 0;
+    border-bottom: 1px solid rgba(69, 57, 46, 0.5);
+  }
+  .tables-modal-row:last-child { border-bottom: none; }
+  .tables-modal-roll {
+    flex: none;
+    width: 30px;
+    color: var(--accent);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .tables-modal-text { flex: 1; color: var(--text); }
+  .tables-modal-footnotes {
+    font-size: 10.5px;
+    color: var(--muted);
+    margin-top: 8px;
+    white-space: pre-line;
+  }
+  .tables-modal-empty { color: var(--muted); font-style: italic; }
   .add-attack-btn {
     width: 100%;
     background: var(--panel);
@@ -836,7 +947,10 @@
           </div>
           <div>
             <label>Crit</label>
-            <input type="text" id="crit" placeholder="M/d10" />
+            <div class="field-sync-row">
+              <input type="text" id="crit" placeholder="M/d10" />
+              <button type="button" class="tables-btn tables-btn-icon" id="monster-tables-btn" title="View this monster's Crit and Fumble tables">📖</button>
+            </div>
           </div>
         </div>
 
@@ -1068,7 +1182,7 @@
 
         <fieldset>
           <legend>Attacks</legend>
-          <div class="fumble-die-line">Fumble Die: <span id="pc-fumble-die">d4</span> <span class="fumble-die-note">(based on equipped armor/shield)</span></div>
+          <div class="fumble-die-line">Fumble Die: <span id="pc-fumble-die">d4</span> <span class="fumble-die-note">(based on equipped armor/shield)</span> <button type="button" class="tables-btn" id="pc-tables-btn" title="View this character's Crit and Fumble tables">📖 Crit/Fumble Tables</button></div>
           <div class="attack-list" id="attack-list-pc"></div>
           <button type="button" class="add-attack-btn" id="add-attack-pc">+ Add Attack</button>
         </fieldset>
@@ -1190,6 +1304,19 @@
         </label>
       </div>
 
+      <fieldset class="gm-only-row" id="gm-force-roll-row" style="display:none;">
+        <legend>GM Testing</legend>
+        <div class="row">
+          <div>
+            <label>Force next attack's d20</label>
+            <input type="number" id="gm-force-d20" placeholder="e.g. 20 or 1" min="1" max="20" />
+          </div>
+        </div>
+        <div class="fumble-die-note" style="margin-top:4px;">
+          Set 1-20 and the next attack roll (Sheet or Tracker) uses that number instead of a random roll - handy for testing crit/fumble outcomes on demand. Clears itself after one use.
+        </div>
+      </fieldset>
+
       <div class="status" id="dice-status"></div>
     </div>
 
@@ -1201,6 +1328,19 @@
         No rolls yet.<br/><br/>
         Attack and initiative rolls from the Tracker will show up here.
       </div>
+    </div>
+  </div>
+
+  <div id="tables-modal-backdrop" class="tables-modal-backdrop" style="display:none">
+    <div class="tables-modal">
+      <div class="tables-modal-header">
+        <div>
+          <div class="tables-modal-title" id="tables-modal-title">Crit &amp; Fumble Tables</div>
+          <div class="tables-modal-subtitle" id="tables-modal-subtitle"></div>
+        </div>
+        <button type="button" class="tables-modal-close" id="tables-modal-close" title="Close">×</button>
+      </div>
+      <div class="tables-modal-body" id="tables-modal-body"></div>
     </div>
   </div>
 
@@ -1377,105 +1517,371 @@ const DCC_WEAPONS = [
 const DCC_CLASS_TABLES = {
   Cleric: {
     levels: {
-      1: { attack: 0, fort: 1, ref: 0, will: 1 },
-      2: { attack: 1, fort: 1, ref: 0, will: 1 },
-      3: { attack: 2, fort: 1, ref: 1, will: 2 },
-      4: { attack: 2, fort: 2, ref: 1, will: 2 },
-      5: { attack: 3, fort: 2, ref: 1, will: 3 },
-      6: { attack: 4, fort: 2, ref: 2, will: 4 },
-      7: { attack: 5, fort: 3, ref: 2, will: 4 },
-      8: { attack: 5, fort: 3, ref: 2, will: 5 },
-      9: { attack: 6, fort: 3, ref: 3, will: 5 },
-      10: { attack: 7, fort: 4, ref: 3, will: 6 },
+      1: { attack: 0, fort: 1, ref: 0, will: 1, critDie: "1d8", critTable: "III" },
+      2: { attack: 1, fort: 1, ref: 0, will: 1, critDie: "1d8", critTable: "III" },
+      3: { attack: 2, fort: 1, ref: 1, will: 2, critDie: "1d10", critTable: "III" },
+      4: { attack: 2, fort: 2, ref: 1, will: 2, critDie: "1d10", critTable: "III" },
+      5: { attack: 3, fort: 2, ref: 1, will: 3, critDie: "1d12", critTable: "III" },
+      6: { attack: 4, fort: 2, ref: 2, will: 4, critDie: "1d12", critTable: "III" },
+      7: { attack: 5, fort: 3, ref: 2, will: 4, critDie: "1d14", critTable: "III" },
+      8: { attack: 5, fort: 3, ref: 2, will: 5, critDie: "1d14", critTable: "III" },
+      9: { attack: 6, fort: 3, ref: 3, will: 5, critDie: "1d16", critTable: "III" },
+      10: { attack: 7, fort: 4, ref: 3, will: 6, critDie: "1d16", critTable: "III" },
     },
   },
   Thief: {
     levels: {
-      1: { attack: 0, fort: 1, ref: 1, will: 0 },
-      2: { attack: 1, fort: 1, ref: 1, will: 0 },
-      3: { attack: 2, fort: 1, ref: 2, will: 1 },
-      4: { attack: 2, fort: 2, ref: 2, will: 1 },
-      5: { attack: 3, fort: 2, ref: 3, will: 1 },
-      6: { attack: 4, fort: 2, ref: 4, will: 2 },
-      7: { attack: 5, fort: 3, ref: 4, will: 2 },
-      8: { attack: 5, fort: 3, ref: 5, will: 2 },
-      9: { attack: 6, fort: 3, ref: 5, will: 3 },
-      10: { attack: 7, fort: 4, ref: 6, will: 3 },
+      1: { attack: 0, fort: 1, ref: 1, will: 0, critDie: "1d10", critTable: "II" },
+      2: { attack: 1, fort: 1, ref: 1, will: 0, critDie: "1d12", critTable: "II" },
+      3: { attack: 2, fort: 1, ref: 2, will: 1, critDie: "1d14", critTable: "II" },
+      4: { attack: 2, fort: 2, ref: 2, will: 1, critDie: "1d16", critTable: "II" },
+      5: { attack: 3, fort: 2, ref: 3, will: 1, critDie: "1d20", critTable: "II" },
+      6: { attack: 4, fort: 2, ref: 4, will: 2, critDie: "1d24", critTable: "II" },
+      7: { attack: 5, fort: 3, ref: 4, will: 2, critDie: "1d30", critTable: "II" },
+      8: { attack: 5, fort: 3, ref: 5, will: 2, critDie: "1d30+2", critTable: "II" },
+      9: { attack: 6, fort: 3, ref: 5, will: 3, critDie: "1d30+4", critTable: "II" },
+      10: { attack: 7, fort: 4, ref: 6, will: 3, critDie: "1d30+6", critTable: "II" },
     },
   },
   Halfling: {
     levels: {
-      1: { attack: 1, fort: 1, ref: 1, will: 1 },
-      2: { attack: 2, fort: 1, ref: 1, will: 1 },
-      3: { attack: 2, fort: 1, ref: 2, will: 2 },
-      4: { attack: 3, fort: 2, ref: 2, will: 2 },
-      5: { attack: 4, fort: 2, ref: 3, will: 3 },
-      6: { attack: 5, fort: 2, ref: 4, will: 4 },
-      7: { attack: 5, fort: 3, ref: 4, will: 4 },
-      8: { attack: 6, fort: 3, ref: 5, will: 5 },
-      9: { attack: 7, fort: 3, ref: 5, will: 5 },
-      10: { attack: 8, fort: 4, ref: 6, will: 6 },
+      1: { attack: 1, fort: 1, ref: 1, will: 1, critDie: "1d8", critTable: "III" },
+      2: { attack: 2, fort: 1, ref: 1, will: 1, critDie: "1d8", critTable: "III" },
+      3: { attack: 2, fort: 1, ref: 2, will: 2, critDie: "1d10", critTable: "III" },
+      4: { attack: 3, fort: 2, ref: 2, will: 2, critDie: "1d10", critTable: "III" },
+      5: { attack: 4, fort: 2, ref: 3, will: 3, critDie: "1d12", critTable: "III" },
+      6: { attack: 5, fort: 2, ref: 4, will: 4, critDie: "1d12", critTable: "III" },
+      7: { attack: 5, fort: 3, ref: 4, will: 4, critDie: "1d14", critTable: "III" },
+      8: { attack: 6, fort: 3, ref: 5, will: 5, critDie: "1d14", critTable: "III" },
+      9: { attack: 7, fort: 3, ref: 5, will: 5, critDie: "1d16", critTable: "III" },
+      10: { attack: 8, fort: 4, ref: 6, will: 6, critDie: "1d16", critTable: "III" },
     },
   },
   Wizard: {
     levels: {
-      1: { attack: 0, fort: 0, ref: 1, will: 1 },
-      2: { attack: 1, fort: 0, ref: 1, will: 1 },
-      3: { attack: 1, fort: 1, ref: 1, will: 2 },
-      4: { attack: 1, fort: 1, ref: 2, will: 2 },
-      5: { attack: 2, fort: 1, ref: 2, will: 3 },
-      6: { attack: 2, fort: 2, ref: 2, will: 4 },
-      7: { attack: 3, fort: 2, ref: 3, will: 4 },
-      8: { attack: 3, fort: 2, ref: 3, will: 5 },
-      9: { attack: 4, fort: 3, ref: 3, will: 5 },
-      10: { attack: 4, fort: 3, ref: 4, will: 6 },
+      1: { attack: 0, fort: 0, ref: 1, will: 1, critDie: "1d6", critTable: "I" },
+      2: { attack: 1, fort: 0, ref: 1, will: 1, critDie: "1d6", critTable: "I" },
+      3: { attack: 1, fort: 1, ref: 1, will: 2, critDie: "1d8", critTable: "I" },
+      4: { attack: 1, fort: 1, ref: 2, will: 2, critDie: "1d8", critTable: "I" },
+      5: { attack: 2, fort: 1, ref: 2, will: 3, critDie: "1d10", critTable: "I" },
+      6: { attack: 2, fort: 2, ref: 2, will: 4, critDie: "1d10", critTable: "I" },
+      7: { attack: 3, fort: 2, ref: 3, will: 4, critDie: "1d12", critTable: "I" },
+      8: { attack: 3, fort: 2, ref: 3, will: 5, critDie: "1d12", critTable: "I" },
+      9: { attack: 4, fort: 3, ref: 3, will: 5, critDie: "1d14", critTable: "I" },
+      10: { attack: 4, fort: 3, ref: 4, will: 6, critDie: "1d14", critTable: "I" },
     },
   },
   Elf: {
     levels: {
-      1: { attack: 1, fort: 1, ref: 1, will: 1 },
-      2: { attack: 1, fort: 1, ref: 1, will: 1 },
-      3: { attack: 2, fort: 1, ref: 1, will: 2 },
-      4: { attack: 2, fort: 2, ref: 2, will: 2 },
-      5: { attack: 3, fort: 2, ref: 2, will: 3 },
-      6: { attack: 3, fort: 2, ref: 2, will: 4 },
-      7: { attack: 4, fort: 3, ref: 3, will: 4 },
-      8: { attack: 4, fort: 3, ref: 3, will: 5 },
-      9: { attack: 5, fort: 3, ref: 3, will: 5 },
-      10: { attack: 5, fort: 4, ref: 4, will: 6 },
+      1: { attack: 1, fort: 1, ref: 1, will: 1, critDie: "1d6", critTable: "II" },
+      2: { attack: 1, fort: 1, ref: 1, will: 1, critDie: "1d8", critTable: "II" },
+      3: { attack: 2, fort: 1, ref: 1, will: 2, critDie: "1d8", critTable: "II" },
+      4: { attack: 2, fort: 2, ref: 2, will: 2, critDie: "1d10", critTable: "II" },
+      5: { attack: 3, fort: 2, ref: 2, will: 3, critDie: "1d10", critTable: "II" },
+      6: { attack: 3, fort: 2, ref: 2, will: 4, critDie: "1d12", critTable: "II" },
+      7: { attack: 4, fort: 3, ref: 3, will: 4, critDie: "1d12", critTable: "II" },
+      8: { attack: 4, fort: 3, ref: 3, will: 5, critDie: "1d14", critTable: "II" },
+      9: { attack: 5, fort: 3, ref: 3, will: 5, critDie: "1d14", critTable: "II" },
+      10: { attack: 5, fort: 4, ref: 4, will: 6, critDie: "1d16", critTable: "II" },
     },
   },
+  // Warriors are the only class with an expanded critical threat range
+  // (Table 1-10's "Threat Range" column) - a roll within that range is
+  // BOTH a critical hit AND an automatic hit (Table 4-3's footnote on the
+  // two-handed penalty case - "no automatic hit" - only makes sense if a
+  // normal crit threat roll otherwise grants one). Every other class only
+  // threatens a crit on a natural 20.
   Warrior: {
     deedDie: true,
     levels: {
-      1: { attack: "d3", fort: 1, ref: 1, will: 0 },
-      2: { attack: "d4", fort: 1, ref: 1, will: 0 },
-      3: { attack: "d5", fort: 2, ref: 1, will: 1 },
-      4: { attack: "d6", fort: 2, ref: 2, will: 1 },
-      5: { attack: "d7", fort: 3, ref: 2, will: 1 },
-      6: { attack: "d8", fort: 4, ref: 2, will: 2 },
-      7: { attack: "d10+1", fort: 4, ref: 3, will: 2 },
-      8: { attack: "d10+2", fort: 5, ref: 3, will: 2 },
-      9: { attack: "d10+3", fort: 5, ref: 3, will: 3 },
-      10: { attack: "d10+4", fort: 6, ref: 4, will: 3 },
+      1: { attack: "d3", fort: 1, ref: 1, will: 0, critDie: "1d12", critTable: "III", threatRange: 19 },
+      2: { attack: "d4", fort: 1, ref: 1, will: 0, critDie: "1d14", critTable: "III", threatRange: 19 },
+      3: { attack: "d5", fort: 2, ref: 1, will: 1, critDie: "1d16", critTable: "IV", threatRange: 19 },
+      4: { attack: "d6", fort: 2, ref: 2, will: 1, critDie: "1d20", critTable: "IV", threatRange: 19 },
+      5: { attack: "d7", fort: 3, ref: 2, will: 1, critDie: "1d24", critTable: "V", threatRange: 18 },
+      6: { attack: "d8", fort: 4, ref: 2, will: 2, critDie: "1d30", critTable: "V", threatRange: 18 },
+      7: { attack: "d10+1", fort: 4, ref: 3, will: 2, critDie: "1d30", critTable: "V", threatRange: 18 },
+      8: { attack: "d10+2", fort: 5, ref: 3, will: 2, critDie: "2d20", critTable: "V", threatRange: 18 },
+      9: { attack: "d10+3", fort: 5, ref: 3, will: 3, critDie: "2d20", critTable: "V", threatRange: 17 },
+      10: { attack: "d10+4", fort: 6, ref: 4, will: 3, critDie: "2d20", critTable: "V", threatRange: 17 },
     },
   },
   Dwarf: {
     deedDie: true,
     levels: {
-      1: { attack: "d3", fort: 1, ref: 1, will: 1 },
-      2: { attack: "d4", fort: 1, ref: 1, will: 1 },
-      3: { attack: "d5", fort: 2, ref: 1, will: 1 },
-      4: { attack: "d6", fort: 2, ref: 2, will: 2 },
-      5: { attack: "d7", fort: 3, ref: 2, will: 2 },
-      6: { attack: "d8", fort: 4, ref: 2, will: 2 },
-      7: { attack: "d10+1", fort: 4, ref: 3, will: 3 },
-      8: { attack: "d10+2", fort: 5, ref: 3, will: 3 },
-      9: { attack: "d10+3", fort: 5, ref: 3, will: 3 },
-      10: { attack: "d10+4", fort: 6, ref: 4, will: 4 },
+      1: { attack: "d3", fort: 1, ref: 1, will: 1, critDie: "1d10", critTable: "III" },
+      2: { attack: "d4", fort: 1, ref: 1, will: 1, critDie: "1d12", critTable: "III" },
+      3: { attack: "d5", fort: 2, ref: 1, will: 1, critDie: "1d14", critTable: "III" },
+      4: { attack: "d6", fort: 2, ref: 2, will: 2, critDie: "1d16", critTable: "IV" },
+      5: { attack: "d7", fort: 3, ref: 2, will: 2, critDie: "1d20", critTable: "IV" },
+      6: { attack: "d8", fort: 4, ref: 2, will: 2, critDie: "1d24", critTable: "V" },
+      7: { attack: "d10+1", fort: 4, ref: 3, will: 3, critDie: "1d30", critTable: "V" },
+      8: { attack: "d10+2", fort: 5, ref: 3, will: 3, critDie: "1d30", critTable: "V" },
+      9: { attack: "d10+3", fort: 5, ref: 3, will: 3, critDie: "2d20", critTable: "V" },
+      10: { attack: "d10+4", fort: 6, ref: 4, will: 4, critDie: "2d20", critTable: "V" },
     },
   },
 };
+
+// Critical Hit tables (Reference Booklet Crit Tables I-V, page 20-24) and
+// the generic Fumbles table (Table 4-2, page 19). Each table is a list of
+// rows sorted ascending by `max` (the top of that row's roll range); the
+// final row always has max: Infinity so any roll at/above the table's
+// last named step still resolves. A "0 or less"/"1 or less" opening row
+// is represented as max: 0 / max: 1 respectively. lookupTableRow() below
+// does the range lookup.
+//
+// Only Crit Tables I-V (used by all seven PC classes, see critTable on
+// DCC_CLASS_TABLES above) and Crit Table M ("Monsters" - Table 9-10's
+// generic "All Other" column, and the fallback for anything not
+// covered below) are transcribed in full. Table 9-10 also maps
+// Humanoids w/ Weapons to Table III (already included) by monster HD.
+// The three most elaborate monster-specific tables - DR (Dragons), DN
+// (Demons & Devils), G (Giants), and U (Un-dead) - run to dozens of
+// paragraph-length entries each and aren't reproduced here; a monster
+// whose Crit field names one of those (e.g. "DR/d20") still gets a
+// correctly-sized die roll and a clear crit alert, just without the
+// flavor-text lookup - lookupCritTable() returns null and the caller
+// falls back to a "consult the Reference Booklet" note.
+const CRIT_TABLES = {
+  I: {
+    label: "Crit Table I — 0-level characters & Wizards",
+    rows: [
+      { max: 0, text: "Force of blow shivers your weapon free of your grasp. Inflict +1d6 damage with this strike and you are disarmed." },
+      { max: 1, text: "Opportunistic strike. Inflict +1d3 damage with this strike." },
+      { max: 2, text: "Foe jabbed in the eye! Ugly bruising and inflict +1d4 damage with this strike." },
+      { max: 3, text: "Stunning crack to forehead. Inflict +1d3 damage with this strike, and the foe falls to the bottom of the initiative count next round." },
+      { max: 4, text: "Strike to foe's kneecap. Inflict +1d4 damage with this strike and the foe suffers a -10' penalty to speed until healed." },
+      { max: 5, text: "Solid strike to torso. Inflict +1d6 damage with this strike." },
+      { max: 6, text: "Lucky strike disarms foe. You gain a free attack if the enemy stoops to retrieve their weapon." },
+      { max: 7, text: "Smash foe's hand. Inflict +2d3 damage with this strike. You break two of the enemy's fingers." },
+      { max: 8, text: "Numbing strike! Cursing in agony, the foe is unable to attack next round." },
+      { max: 9, text: "Smash foe's nose. Inflict +2d4 damage with this strike and blood streams down the enemy's face." },
+      { max: 10, text: "Foe trips on their own feet and falls prone for the remainder of the round." },
+      { max: 11, text: "Piercing strike. Inflict +2d4 damage with this strike." },
+      { max: 12, text: "Strike to groin. The foe must make a DC 15 Fort save or spend the next two rounds retching." },
+      { max: 13, text: "Blow smashes foe's ankle; their movement speed is reduced by half." },
+      { max: 14, text: "Strike grazes temple; blood blinds the foe for 1d3 rounds." },
+      { max: 15, text: "Stab enemy's weapon hand. The weapon is lost and knocked 1d10+5 feet away." },
+      { max: 16, text: "Narrowly avoid foe's counterstrike! Inflict normal damage and make another attack roll. If the second attack hits, you inflict an additional +1d6 damage." },
+      { max: 17, text: "Blow to throat. Foe staggers around for 2 rounds and is unable to speak, cast spells, or attack." },
+      { max: 18, text: "Foe falls into your attack. They take +2d6 damage from the strike and curses your luck." },
+      { max: 19, text: "Miracle strike. The foe must make a DC 20 Fort save or fall unconscious." },
+      { max: Infinity, text: "Lucky blow dents foe's skull! Inflict +2d6 damage with this strike. If the foe has no helm, they suffer a permanent loss of 1d4 Int." },
+    ],
+  },
+  II: {
+    label: "Crit Table II — Thieves & Elves",
+    rows: [
+      { max: 0, text: "Miss! Hesitation costs you the perfect strike!" },
+      { max: 1, text: "Strike misses critical organs. Inflict a paltry +2d3 damage with this strike." },
+      { max: 2, text: "Slashes to head removes foe's ear. Inflict +1d6 damage with this strike and leave the enemy with a nasty scar." },
+      { max: 3, text: "Clean strike to back. Inflict +2d6 damage with this strike." },
+      { max: 4, text: "Blow to chest staggers foe. You can make an immediate free attack." },
+      { max: 5, text: "Blow pierces foe's kidneys. Inflict +3d3 damage with this strike, and the foe is stunned for 1 round." },
+      { max: 6, text: "Foe dazed by ferocious attack; their speed and actions are reduced by half." },
+      { max: 7, text: "Strike to chest grazes vital organ. Inflict +3d4 damage with this strike." },
+      { max: 8, text: "Strike cuts a line down foe's face. They are blinded by blood for 1d4 rounds." },
+      { max: 9, text: "Foe stumbles over their own limbs, falling prone. Make another attack." },
+      { max: 10, text: "Masterful strike! Inflict +2d6 damage with this strike." },
+      { max: 11, text: "Strike severs larynx. Foe is reduced to making wet fish noises." },
+      { max: 12, text: "Savage strike! Foe must succeed on a Fort save (DC 10 + PC level) or faint from the pain." },
+      { max: 13, text: "Foe disoriented by quick strikes. Foe suffers a -4 penalty to attack rolls for 1d4 rounds." },
+      { max: 14, text: "Strike to head. Foe must make a Fort save (DC 10 + PC level) or fall unconscious." },
+      { max: 15, text: "Blow drives foe to ground. Inflict +2d6 damage with this strike, and the enemy is knocked prone." },
+      { max: 16, text: "Lightning-fast shot to the face pops the foe's eye like a grape. Foe is permanently blinded in one eye and can take no actions for 1d3 rounds." },
+      { max: 17, text: "Strike pierces lung. Inflict +2d6 damage with this strike, and the foe can take only one action on their next turn." },
+      { max: 18, text: "Devastating strike to back of head. Inflict +1d8 damage with this strike, and the foe must make a Fort save (DC 10 + PC level) or fall unconscious." },
+      { max: 19, text: "Attack severs major artery. Inflict +1d10 damage with this strike, and the foe must make a Fort save (DC 10 + PC level) or fall unconscious from shock and massive blood loss." },
+      { max: 20, text: "Throat slashed! Inflict +2d6 damage with this strike, and the foe must make a Fort save (DC 13 + PC level) or die in 1d4 rounds." },
+      { max: 21, text: "Strike pierces spinal column. Inflict +3d6 damage with this strike, and the foe must make a Fort save (DC 15 + PC level) or suffer paralysis." },
+      { max: 22, text: "Chest skewered, spearing a variety of organs. Inflict +2d6 damage with this strike, and the foe must make a Fort save (DC 13 + PC level) or die in 1d4 rounds." },
+      { max: 23, text: "Strike through ear canal enters the brain. Ear wax instantly removed, and the foe must make a Fort save (DC 15 + PC level) or die instantly. Inflict an extra +2d6 damage on successful save." },
+      { max: Infinity, text: "Strike through heart! Inflict +3d6 damage with this strike, and the foe must make a Fort save (DC 20 + PC level) or die instantly." },
+    ],
+  },
+  III: {
+    label: "Crit Table III — Clerics, Halflings, level 1–2 Warriors, level 1–3 Dwarves",
+    rows: [
+      { max: 0, text: "Battle rage makes friend and foe indistinguishable. Foe is hit for +1d12 damage, and the ally nearest him is also hit by a rebounding blow for 1d4 damage.**" },
+      { max: 1, text: "Savage attack! Inflict +1d6 damage with this strike." },
+      { max: 2, text: "Attack sweeps foe off their feet. Next round, the enemy is prone." },
+      { max: 3, text: "Foe steps into attack. Inflict +1d8 damage with this strike." },
+      { max: 4, text: "Powerful strike hammers foe to their knees. Make another attack." },
+      { max: 5, text: "Smash foe's nose in an explosion of blood. Inflict +1d6 damage with this strike, and the foe loses their sense of smell for 1d4 hours." },
+      { max: 6, text: "Brutal strike to torso. Inflict +1d8 damage with this strike, and the foe suffers multiple broken ribs." },
+      { max: 7, text: "Strike to hand knocks weapon into the air. The weapon lands 1d20+5' away." },
+      { max: 8, text: "Blow caroms off skull, deafening foe for 1d6 days. Inflict +1d6 damage with this strike." },
+      { max: 9, text: "Strike to leg splinters femur. Inflict +2d6 damage with this strike and foe loses 10' of movement until healed." },
+      { max: 10, text: "Sunder foe's weapon! Shards of metal fill the air.*" },
+      { max: 11, text: "Strike hammers foe's belly causing massive internal bleeding. Unless they receive magical healing, the foe dies in 1d5 hours." },
+      { max: 12, text: "Blow to cranium staggers foe. The foe must make a Fort save (10 + PC level) or sink to floor, unconscious." },
+      { max: 13, text: "Strike breaks foe's jaw. Blood and shattered teeth ooze down the foe's face. Inflict +1d8 damage with this strike." },
+      { max: 14, text: "Attack hammers foe's torso. Inflict +2d8 damage with this strike." },
+      { max: 15, text: "Strike dislocates shoulder! Inflict +1d8 damage and shield arm hangs loosely by muscle and skin; no AC bonus from shield." },
+      { max: 16, text: "Attack reduces foe's attack hand to formless tissue; -4 penalty to future attacks." },
+      { max: 17, text: "Furious blows hammer target prone. Make another attack." },
+      { max: 18, text: "Blow hammers shards of bone into foe's forebrain; gray matter oozes out. Inflict +1d8 damage with this strike, and the foe suffers 1d4 points of Int and Per loss." },
+      { max: 19, text: "Devastating strike to the chest. Inflict +2d8 damage with this strike." },
+      { max: 20, text: "Chest strike stuns foe for 1d3 rounds. Inflict +1d8 damage with this strike." },
+      { max: 21, text: "Strike to leg shatters femur, knocking foe to the ground. Foe's movement drops by half. Inflict +2d8 damage with this strike and make another attack." },
+      { max: 22, text: "Weapon arm sundered by strike. The weapon is lost along with any chance of making an attack with this arm." },
+      { max: 23, text: "Blow craters skull. Inflict +2d8 damage with this strike, and the target permanently loses 1d4 Int and Per." },
+      { max: 24, text: "Masterful strike to throat. Inflict +2d8 damage with this strike and the foe staggers about gasping for air for 1d4 rounds." },
+      { max: 25, text: "Attack punches shattered ribs through lungs. Foe loses 50% of their remaining hit points and vomits copious amounts of blood." },
+      { max: 26, text: "Attack shatters foe's face, destroying both eyes. Inflict +2d8 damage with this strike, and the foe is permanently blinded." },
+      { max: 27, text: "Crushing blow hammers chest. Inflict +3d8 damage with this strike, and the foe must make a Fort save (DC 15 + PC level) or be knocked unconscious." },
+      { max: Infinity, text: "Blow destroys spinal column. Inflict +3d8 damage with this strike, and the foe must make a Fort save (DC 15 + PC level) or suffer paralysis." },
+    ],
+    footnotes: "* Magical weapons never break due to critical fumbles. The target is disarmed instead, the weapon landing 1d10+5 feet away.\n** A PC overcome by battle rage may temporarily expend points of their Personality or Intelligence score to enhance the damage on their critical hit. For every ability point they expend, they add +1d12 to their damage roll. Ability scores lost this way return as the warrior heals.",
+  },
+  IV: {
+    label: "Crit Table IV — level 3–4 Warriors, level 4–5 Dwarves",
+    rows: [
+      { max: 0, text: "Battle rage makes friend and foe indistinguishable. Foe is hit for +2d8 damage, and the ally nearest him is also hit by a rebounding blow for 1d4 damage.**" },
+      { max: 1, text: "Herculean blow. Inflict +2d12 damage with this strike." },
+      { max: 2, text: "Ferocious strike leaves foe's weapon hand dangling from the stump of a wrist. Inflict +1d12 damage with this strike." },
+      { max: 3, text: "Strike sweeps foe to the ground. Inflict +1d12 damage with this strike and make another attack on prone enemy." },
+      { max: 4, text: "Hammering blow drives nose cartilage into brain. Inflict +1d12 damage with this strike, and the foe suffers 1d6 Int loss." },
+      { max: 5, text: "Foe's weapon shattered.* If the foe has no weapon, inflict +2d12 damage with this strike." },
+      { max: 6, text: "Strike shatters foe's breastbone. The foe must make a Fort save (DC 15 + PC level) or fall unconscious as their internal organs collapse." },
+      { max: 7, text: "Foe driven back by furious assault. Inflict +2d12 damage with this strike, and the foe forgoes their next attack." },
+      { max: 8, text: "Concussive strike leaves foe dazed. Inflict +1d8 damage with this strike and make a second attack." },
+      { max: 9, text: "Blow to throat carries through to spinal column, reducing everything in between to pasty mush. Inflict +2d12 damage with this strike, and the foe loses speech for 1d4 weeks." },
+      { max: 10, text: "Blow craters temple. The foe must make a Fort save (DC 15 + PC level) or be blinded by pain and blood for 1d4 rounds." },
+      { max: 11, text: "Strike reduces face to a formless mass of flesh and bone fragments. Inflict +2d12 damage with this strike, and the foe has trouble making hard consonants." },
+      { max: 12, text: "You see red! Inflict +1d12 damage with this strike as you are overcome by battle rage!**" },
+      { max: 13, text: "Hammering strike to torso crushes lesser organs into paste. Inflict +2d12 damage with this strike." },
+      { max: 14, text: "Blow to spinal column numbs lower limbs. The foe suffers a -4 penalty to AC as they learn to walk again." },
+      { max: 15, text: "Fearsome strike drives enemy to the blood-splattered floor. Foe cowers in fear, prone, for 1d4 rounds." },
+      { max: 16, text: "Blow shatters shield. Inflict +2d12 damage with this strike. If the foe has no shield, they are stunned by pain for 1d4 rounds." },
+      { max: 17, text: "Foe's kneecap explodes into red mist. Foe's movement drops to 0', and you make another attack." },
+      { max: 18, text: "Frontal lobotomy. Inflict +1d12 damage with this strike, and the foe must make a Fort save (DC 15 + PC level) or suffer amnesia. The foe is stunned for 1d4 rounds, regardless." },
+      { max: 19, text: "Strike to weapon arm. Foe takes triple damage from their own weapon as it is hammered into their face. Foe drops weapon in dumbfounded awe." },
+      { max: 20, text: "Blow crushes spinal cord. Inflict +3d12 damage with this strike, and the foe must make a Fort save (DC 15 + PC level) or suffer permanent paralysis." },
+      { max: 21, text: "Blow reduces internal organs to jelly. Death is inevitable in 1d8 rounds." },
+      { max: 22, text: "Target is disemboweled, spilling their entrails onto the ground. The foe dies of shock in 1d6 rounds." },
+      { max: Infinity, text: "Strike to chest explodes heart. (Reference Booklet p.25 continues rows 23-28+ with an instant-kill result at the top of the range - consult your rulebook for the exact wording.)" },
+    ],
+    footnotes: "* Magical weapons never break due to critical fumbles. The target is disarmed instead, the weapon landing 1d10+5 feet away.\n** A PC overcome by battle rage may temporarily expend points of their Personality or Intelligence score to enhance the damage on their critical hit. For every ability point they expend, they add +1d12 to their damage roll. Ability scores lost this way return as the warrior heals.",
+  },
+  V: {
+    label: "Crit Table V — level 5+ Warriors, level 6+ Dwarves",
+    rows: [
+      { max: 0, text: "Battle rage makes friend and foe indistinguishable.** Foe is hit for +3d8 damage, and the ally nearest him is also hit by a rebounding blow for 1d4 damage." },
+      { max: 1, text: "Foe's weapon shattered.* If the foe has no weapon, inflict +3d12 damage with this strike." },
+      { max: 2, text: "Furious assault hurls foe back 1d10'. Any adjacent foes accidentally strike the target for damage." },
+      { max: 3, text: "Blow to skull destroys ear. Inflict +1d12 damage with this strike, and the foe suffers permanent deafness." },
+      { max: 4, text: "Strike to gut! The foe must make a Fort save (DC 20 + PC level) or spend the next 2 rounds retching bile from a ruptured stomach." },
+      { max: 5, text: "Foe casts weapon away and wails for mercy. Inflict +1d12 damage with this strike and make another attack." },
+      { max: 6, text: "Strike scalps foe. Blood courses down their face, and the foe is effectively blinded until healed." },
+      { max: 7, text: "Foe entangled on your weapon, reducing their AC by -6 while caught. Make another attack." },
+      { max: 12, text: "You see red! Inflict +1d12 damage with this strike as you are overcome by battle rage!** (rows 8-12)" },
+      { max: 14, text: "Strike to weapon arm. Foe takes quadruple damage from their own weapon as it is hammered into their face. Foe drops weapon in dumbfounded awe. (rows 13-14)" },
+      { max: 15, text: "Blow sunders shield. Inflict +2d12 damage with this strike. If the foe has no shield, they must make a Fort save (DC 20 + PC level) or be knocked unconscious from the pain." },
+      { max: 16, text: "Strike to top of skull shortens spinal column, shortening foe by 6\". Resulting nerve damage reduces foe's AC by -4." },
+      { max: 17, text: "Target is disemboweled, spilling their entrails onto the ground. Foe dies instantly of shock." },
+      { max: 18, text: "Blow destroys target's face. Foe is immediately rendered blind and deaf and is now capable of only wet, gurgling sounds." },
+      { max: 19, text: "Strike removes crown of target's skull. Foe dies from exposed brain matter in 3d3 rounds." },
+      { max: 20, text: "Blow severs shield arm. Inflict +2d12 damage with this strike. Foe's hopes of two-handed weapon mastery dashed." },
+      { max: 21, text: "Godly attack. Inflict +3d12 damage with this strike. If the target dies, move up to 10' and make another attack on any foe within 10'." },
+      { max: 22, text: "Blow severs leg. Inflict +2d12 damage with this strike, and the foe's movement drops to zero. Foe does nothing but wail in agony for 1d4 rounds." },
+      { max: 23, text: "Strike to skull stuns foe for 1d4+1 rounds and permanently reduces Int by 1d12. Make another attack on your inert foe." },
+      { max: 24, text: "Strike severs weapon arm. Inflict +2d12 damage with this strike, and the foe is disarmed, literally and figuratively." },
+      { max: 25, text: "Devastating strike to torso voids foe's bowels and crushes organs into paste. Foe loses 50% of current hit points and all dignity." },
+      { max: 26, text: "Strike crushes throat. Foe begins drowning in their own blood and expires in 1d4 rounds." },
+      { max: 27, text: "Crippling blow to spine. Inflict +4d12 damage with this strike, and the foe suffers permanent paralysis." },
+      { max: Infinity, text: "Foe decapitated with a single strike. You are Death incarnate. Continue to make attacks against any foes within 10' until you miss." },
+    ],
+    footnotes: "* Magical weapons never break due to critical fumbles. The target is disarmed instead, the weapon landing 1d10+5 feet away.\n** A PC overcome by battle rage may temporarily expend points of their Personality or Intelligence score to enhance the damage on their critical hit. For every ability point they expend, they add +1d12 to their damage roll. Ability scores lost this way return as the warrior heals.",
+  },
+  M: {
+    label: "Crit Table M — Monsters (generic \"All Other\" column of Table 9-10)",
+    rows: [
+      { max: 1, text: "Strike to chest, breaking ribs. This attack inflicts +1d6 damage." },
+      { max: 2, text: "Stunning blow! The PC falls to the bottom of the initiative count for the remainder of the battle." },
+      { max: 3, text: "Legs knocked out from beneath the character, knocking them prone." },
+      { max: 4, text: "PC disarmed. Weapon lands 1d12+5' away." },
+      { max: 5, text: "Blow to shield arm! If no shield, this attack inflicts +1d6 damage." },
+      { max: 6, text: "Weapon lodged in PC's chest! This attack inflicts +2d6 damage and an additional 1d6 damage next round." },
+      { max: 7, text: "Blow to jaw! The PC loses 1d8 hp and the same number of teeth." },
+      { max: 8, text: "Blow shatters PC's forearm. This attack inflicts +1d6 damage, and the arm is useless until healed." },
+      { max: 9, text: "Strike to helm! If no helmet, this attack inflicts +1d8 damage and forces a Fort save (DC 10 + HD). On a failed save, the PC falls unconscious." },
+      { max: 10, text: "Stunning blow! The world spins as the fell monster makes a second attack!" },
+      { max: 11, text: "Strike to throat! The PC can't speak until healed and spends the next round struggling to breathe." },
+      { max: 12, text: "Blow smashes PC's kneecap. The character's movement is cut by half and this attack inflicts +1d10 damage." },
+      { max: 13, text: "Crushing blow! This attack inflicts +1d12 damage." },
+      { max: 14, text: "PC's weapon sundered in the violent assault.*" },
+      { max: 15, text: "Strike to torso crushes internal organs. This attack inflicts +1d12 damage, and forces the PC to make a Fort save (DC 15 + HD) to remain conscious through the pain." },
+      { max: 16, text: "Devastating strike! This attack inflicts +1d16 damage." },
+      { max: 17, text: "PC's Achilles tendon is torn, snapping back into their calf. The character's movement drops to 5' and the screaming can be heard for leagues." },
+      { max: 18, text: "Monster seizes PC by the neck. This attack inflicts +1d12 damage and the monster makes a second attack at +4 to hit." },
+      { max: 19, text: "Blow to cranium! This attack inflicts +1d16 damage and the PC must make a Fort save (DC 15 + HD) or fall unconscious." },
+      { max: 20, text: "Terrifying blow pierces several important organs. The PC spends the next 1d4 days dying a slow, painful death. Powerful magic (healing by a cleric of level 3 or higher) can arrest the dying." },
+      { max: 21, text: "Strike crushes skull, destroying the optic nerve and resulting in instant, permanent blindness." },
+      { max: 22, text: "PC's leg is shorn from their body. The character cannot move. This attack inflicts +2d12 damage." },
+      { max: 23, text: "Both the PC's arms are torn from their body. This attack inflicts +3d12 damage. Exceptionally cruel monsters may proceed to use the PC's arms as weapons." },
+      { max: 24, text: "PC is disemboweled. Bloody guts spill to the ground. The PC spends the next 8 rounds dying as they futilely try to feed the spooling intestines back into their body." },
+      { max: 25, text: "Attack craters PC's skull. This attack inflicts 1d8 Intelligence and Personality damage and puts the PC into an instant coma." },
+      { max: 26, text: "Strike crushes throat. The PC drowns in their own blood for 6 rounds." },
+      { max: 27, text: "Attack snaps the PC's spinal column like a twig. The attack causes permanent paralysis, and the PC watches the remainder of the battle from the floor." },
+      { max: 28, text: "Throat torn asunder. The panicked PC gargles wetly as blood gouts down their chest. They die in 4 rounds." },
+      { max: 29, text: "Terrible blow to the chest explodes the PC's heart. Immediate and instantaneous death." },
+      { max: Infinity, text: "Attack rends the PC's head from their torso. Blood gouts from the collapsing body, and the monster moves on to the next foe, making attacks until it misses." },
+    ],
+    footnotes: "* Magical weapons never break due to critical fumbles. The target is disarmed instead, the weapon landing 1d10+5 feet away.",
+  },
+};
+
+// The generic Fumbles table (Reference Booklet Table 4-2, page 19) - used
+// for both PCs (rolling their armor-based Fumble Die, already computed by
+// recalcPcFumbleDie) and monsters (defaulted to a d4, since monster armor
+// isn't tracked by this sheet the way PC armor is).
+const FUMBLE_TABLE = {
+  label: "Fumbles — Table 4-2",
+  rows: [
+    { max: 0, text: "You miss wildly but miraculously cause no other damage." },
+    { max: 1, text: "Your incompetent blow makes you the laughingstock of the party but otherwise causes no damage." },
+    { max: 2, text: "You trip but may recover with a DC 10 Ref save; otherwise, you must spend the next round prone." },
+    { max: 3, text: "Your weapon comes loose in your hand. You quickly grab it, but your grip is disrupted. You take a -2 penalty on your next attack roll." },
+    { max: 4, text: "Your weapon is damaged: a bowstring breaks, a sword hilt falls off, or a crossbow firing mechanism jams. The weapon can be repaired with 10 minutes of work but is useless for now." },
+    { max: 5, text: "You trip and fall, wasting this action. You are prone and must use an action to stand next round." },
+    { max: 6, text: "Your weapon becomes entangled in your armor. You must spend your next round untangling them. In addition, your armor bonus is reduced by 1 until you spend 10 minutes refitting the tangled buckles and straps." },
+    { max: 7, text: "You drop your weapon. You must retrieve it or draw a new one on your next action." },
+    { max: 8, text: "You accidentally smash your weapon against a solid, unyielding object (a rock, a wall, even the ground). Mundane weapons are ruined; magical weapons are not affected." },
+    { max: 9, text: "You stumble and leave yourself wide open to attack. The next enemy that attacks you receives a +2 bonus on its attack roll." },
+    { max: 10, text: "You should have maintained your armor! The joints of your armor seize up, freezing you in place. You cannot move or make an attack for 1d3 rounds. Unarmored characters are not affected." },
+    { max: 11, text: "Your wild swing leaves you off balance. You take a -4 penalty to your next attack roll." },
+    { max: 12, text: "You inadvertently swing at one randomly determined ally within range. Make an attack roll against that ally using the same attack die you just attempted to use." },
+    { max: 13, text: "You trip badly. You fall hard, suffering 1d3 damage in the process. You are prone and must use your next round to stand." },
+    { max: 14, text: "Like a turtle on its back, you slip and land upside down, flailing about and unable to right yourself. You must fight from a prone position for the next round before you can recover your balance and rise." },
+    { max: 15, text: "You somehow manage to wound yourself, taking normal damage." },
+    { max: Infinity, text: "You accidentally strike yourself for normal damage plus an extra 1 point. In addition, you fall on your back and are unable to right yourself until you make a DC 16 Agility check." },
+  ],
+};
+
+// Range-bucketed table lookup shared by crit and fumble tables: rows are
+// sorted ascending by `max`, so the first row whose max the roll doesn't
+// exceed is the match; a roll past every named row falls through to the
+// last (max: Infinity) row.
+function lookupTableRow(table, roll) {
+  if (!table) return null;
+  const rows = table.rows || [];
+  for (const row of rows) {
+    if (roll <= row.max) return row;
+  }
+  return rows.length ? rows[rows.length - 1] : null;
+}
+
+// Parses a monster's free-text Crit field (e.g. "M/d10", "III/d8",
+// "DR/2d14") into { table: "M", die: "d10" }. Returns null if the field
+// doesn't look like a "<table>/<die>" pair - most likely because the
+// sheet hasn't had a Crit value filled in yet.
+function parseMonsterCritField(raw) {
+  const m = String(raw || "").trim().match(/^([A-Za-z]+)\s*\/\s*(\d*d\d+(?:\s*[+-]\s*\d+)?)$/);
+  if (!m) return null;
+  return { table: m[1].toUpperCase(), die: m[2].replace(/\s+/g, "") };
+}
 
 function parseLevelNumber(raw) {
   const m = String(raw || "").match(/-?\d+/);
@@ -1489,16 +1895,24 @@ function parseLevelNumber(raw) {
 // Homebrew", or an unset class - those have no class table to draw from,
 // so save/attack automation falls back to ability-modifier-only, same as
 // before this table existed.
-function currentClassLevelEntry() {
-  const classEl = document.getElementById("pc-class");
-  const levelEl = document.getElementById("pc-level");
-  const cls = classEl ? classEl.value : "";
+// Data-driven core behind currentClassLevelEntry() below - takes a class
+// name and raw level string directly instead of reading the live Sheet
+// form, so callers working from a token's saved metadata (e.g. the
+// Tracker rolling an attack for whichever token isn't necessarily the one
+// currently open in the Sheet tab) can look up the same class/level row.
+function classLevelEntryFor(cls, levelRaw) {
   const table = DCC_CLASS_TABLES[cls];
   if (!table) return null;
-  const level = parseLevelNumber(levelEl ? levelEl.value : "");
+  const level = parseLevelNumber(levelRaw);
   if (level === null || level < 1) return null;
   const clamped = Math.min(10, level);
   return table.levels[clamped] || null;
+}
+
+function currentClassLevelEntry() {
+  const classEl = document.getElementById("pc-class");
+  const levelEl = document.getElementById("pc-level");
+  return classLevelEntryFor(classEl ? classEl.value : "", levelEl ? levelEl.value : "");
 }
 
 function classSaveBonus(saveKey) {
@@ -1567,6 +1981,7 @@ function attackRowHtml(atk, mode) {
         <input type="text" class="attack-name" placeholder="Claw" value="${escapeHtml(atk.name)}" />
         <input type="text" class="attack-bonus" placeholder="+4" value="${escapeHtml(atk.bonus)}" />
         <input type="text" class="attack-damage" placeholder="1d6" value="${escapeHtml(atk.damage)}" />
+        <button type="button" class="hp-btn attack-roll-btn" title="Roll this attack">🎲</button>
         <button type="button" class="attack-remove-btn" title="Remove attack">×</button>
       </div>`;
   }
@@ -1611,6 +2026,7 @@ function attackRowHtml(atk, mode) {
         <input type="text" class="attack-bonus" placeholder="+4" value="${escapeHtml(atk.bonus)}" data-auto-synced="${atk.bonusAuto ? "1" : "0"}" data-bonus-source="${escapeHtml(atk.bonusSource || "")}" />
         <button type="button" class="attack-quick-btn ability-toggle-btn" data-mod="${toggleMod}" title="Bonus currently uses ${currentLabel} modifier + class/level Attack bonus - click to switch to ${toggleLabel}">${toggleLabel}</button>
         <input type="text" class="attack-damage" placeholder="1d6" value="${escapeHtml(atk.damage)}" data-auto-synced="${atk.damageAuto ? "1" : "0"}" data-damage-base="${escapeHtml(atk.damageBase || "")}" data-damage-str-applies="${atk.damageStrApplies ? "1" : "0"}" />
+        <button type="button" class="hp-btn attack-roll-btn" title="Roll this attack">🎲</button>
         <button type="button" class="attack-remove-btn" title="Remove attack">×</button>
       </div>
       ${metaParts.length ? `<div class="attack-row-meta">${metaParts.join(" · ")}</div>` : ""}
@@ -1739,6 +2155,22 @@ function attachAttackRowListeners(mode) {
       cfgRenderFromCurrentForm(mode);
       if (mode === "pc") recalcPcInitiativeDie();
     });
+    const rollBtn = row.querySelector(".attack-roll-btn");
+    if (rollBtn) {
+      rollBtn.addEventListener("click", async () => {
+        if (!currentItemId) {
+          showStatus("Open this character/monster on a token first to roll its attack.", true);
+          return;
+        }
+        // Rolling from the Sheet edits live, unsaved changes to the row
+        // (e.g. a just-typed Bonus) - flush any pending debounced save so
+        // the roll uses what's on screen rather than the last-saved
+        // snapshot on the token.
+        clearTimeout(saveTimeout);
+        await saveCurrent();
+        rollAttackFor(currentItemId, row.dataset.id);
+      });
+    }
     if (mode === "pc") {
       const weaponSel = row.querySelector(".attack-weapon");
       if (weaponSel) {
@@ -2508,6 +2940,79 @@ function rollPcHpLevelUp() {
 
 document.getElementById("pc-roll-hp").addEventListener("click", rollPcHpLevelUp);
 
+// "View applicable table" reference modal - lets a player check the full
+// Crit/Fumble table text for whoever's currently open in the Sheet, for
+// manual/non-automated rolling (rather than only ever seeing the single
+// row the automated roller happened to land on).
+function tableRowsHtml(table) {
+  if (!table || !table.rows || !table.rows.length) {
+    return `<div class="tables-modal-empty">No table data available.</div>`;
+  }
+  let prevMax = -1;
+  const rowsHtml = table.rows.map(row => {
+    const lo = prevMax + 1;
+    const hi = row.max;
+    const label = hi === Infinity ? `${lo}+` : (lo === hi ? `${lo}` : `${lo}-${hi}`);
+    prevMax = hi;
+    return `<div class="tables-modal-row"><div class="tables-modal-roll">${escapeHtml(label)}</div><div class="tables-modal-text">${escapeHtml(row.text)}</div></div>`;
+  }).join("");
+  const footnotes = table.footnotes ? `<div class="tables-modal-footnotes">${escapeHtml(table.footnotes)}</div>` : "";
+  return rowsHtml + footnotes;
+}
+
+function renderTablesModal(subtitle, sections) {
+  document.getElementById("tables-modal-subtitle").textContent = subtitle;
+  const body = document.getElementById("tables-modal-body");
+  body.innerHTML = sections.map(sec => `
+    <div class="tables-modal-section-title">${escapeHtml(sec.title)}</div>
+    ${tableRowsHtml(sec.table)}
+  `).join("");
+  document.getElementById("tables-modal-backdrop").style.display = "flex";
+}
+
+function closeTablesModal() {
+  document.getElementById("tables-modal-backdrop").style.display = "none";
+}
+
+function openTablesModalForPc() {
+  const classEl = document.getElementById("pc-class");
+  const className = classEl && classEl.value ? classEl.value : "Character";
+  const entry = currentClassLevelEntry();
+  const critTableKey = entry && entry.critTable ? entry.critTable : "I";
+  const critTable = CRIT_TABLES[critTableKey] || null;
+  const critDie = entry && entry.critDie ? entry.critDie : "1d6";
+  const threatRange = entry && entry.threatRange ? entry.threatRange : 20;
+  const threatText = threatRange < 20 ? `, Crit on ${threatRange}-20` : "";
+  const fumbleDie = recalcPcFumbleDie();
+  renderTablesModal(
+    `${className} — Crit Die ${critDie}${threatText} · Fumble Die d${fumbleDie}`,
+    [
+      { title: critTable ? critTable.label : `Crit Table ${critTableKey}`, table: critTable },
+      { title: FUMBLE_TABLE.label, table: FUMBLE_TABLE },
+    ]
+  );
+}
+
+function openTablesModalForMonster() {
+  const critEl = document.getElementById("crit");
+  const parsed = parseMonsterCritField(critEl ? critEl.value : "");
+  const critTable = parsed ? CRIT_TABLES[parsed.table] : null;
+  const subtitle = parsed
+    ? `Crit Die ${parsed.die}${critTable ? "" : ` (Crit Table ${parsed.table} isn't preloaded - check your Reference Booklet)`} · Fumble Die d4`
+    : `No Crit field set (try e.g. "M/d8") · Fumble Die d4`;
+  renderTablesModal(subtitle, [
+    { title: critTable ? critTable.label : (parsed ? `Crit Table ${parsed.table}` : "Crit Table"), table: critTable },
+    { title: FUMBLE_TABLE.label, table: FUMBLE_TABLE },
+  ]);
+}
+
+document.getElementById("pc-tables-btn").addEventListener("click", openTablesModalForPc);
+document.getElementById("monster-tables-btn").addEventListener("click", openTablesModalForMonster);
+document.getElementById("tables-modal-close").addEventListener("click", closeTablesModal);
+document.getElementById("tables-modal-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "tables-modal-backdrop") closeTablesModal();
+});
+
 function isEditingSheetField() {
   const active = document.activeElement;
   if (!active) return false;
@@ -2583,19 +3088,44 @@ function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-// Dice-roll result strings (toasts + log entries) mark their headline total
-// by wrapping it in ROLL_TOTAL_MARK delimiters, e.g. markRollTotal("14 to hit").
-// rollTextToHtml() then renders those marked segments bigger/bold while the
-// rest of the breakdown stays normal weight, and everything is still escaped.
+// Dice-roll result strings (toasts + log entries) mark up pieces that need
+// visual emphasis by wrapping them in one of three delimiter characters -
+// markRollTotal() for the headline number ("14 to hit"), markCritAlert()
+// for a "CRITICAL HIT!" banner, markFumbleAlert() for a "FUMBLE!" banner.
+// rollTextToHtml() renders each marked segment with its own CSS class
+// while the rest of the breakdown stays normal weight; everything (marked
+// or not) still goes through escapeHtml, so this is still injection-safe.
 const ROLL_TOTAL_MARK = "\u0001";
+const ROLL_CRIT_MARK = "\u0002";
+const ROLL_FUMBLE_MARK = "\u0003";
+const ROLL_MARK_CLASSES = {
+  [ROLL_TOTAL_MARK]: "roll-total",
+  [ROLL_CRIT_MARK]: "roll-crit-alert",
+  [ROLL_FUMBLE_MARK]: "roll-fumble-alert",
+};
 function markRollTotal(str) {
   return `${ROLL_TOTAL_MARK}${str}${ROLL_TOTAL_MARK}`;
 }
+function markCritAlert(str) {
+  return `${ROLL_CRIT_MARK}${str}${ROLL_CRIT_MARK}`;
+}
+function markFumbleAlert(str) {
+  return `${ROLL_FUMBLE_MARK}${str}${ROLL_FUMBLE_MARK}`;
+}
 function rollTextToHtml(text) {
-  return String(text ?? "")
-    .split(ROLL_TOTAL_MARK)
-    .map((part, i) => (i % 2 === 1 ? `<b class="roll-total">${escapeHtml(part)}</b>` : escapeHtml(part)))
-    .join("");
+  const str = String(text ?? "");
+  const pattern = /([\u0001\u0002\u0003])([\s\S]*?)\1/g;
+  let html = "";
+  let lastIndex = 0;
+  let m;
+  while ((m = pattern.exec(str))) {
+    html += escapeHtml(str.slice(lastIndex, m.index));
+    const cls = ROLL_MARK_CLASSES[m[1]] || "roll-total";
+    html += `<b class="${cls}">${escapeHtml(m[2])}</b>`;
+    lastIndex = pattern.lastIndex;
+  }
+  html += escapeHtml(str.slice(lastIndex));
+  return html;
 }
 
 function parseModifier(str) {
@@ -3312,25 +3842,145 @@ function renderTrackerRows(items) {
 // now shown alongside the bonus that got added, so the bonus applied is
 // visible in both the Tracker toast and the persisted Log entry, not
 // just the number it produced.
+// Determines an attack's critical threat range and which Crit Table/die
+// applies, from the TOKEN'S SAVED STATS rather than the live Sheet form -
+// the Tracker can roll for a token that isn't the one currently open on
+// the Sheet tab. PCs pull class/level's crit die/table off
+// DCC_CLASS_TABLES (only Warriors have an expanded threat range below 20,
+// per Table 1-10's Threat Range column); monsters always threaten only on
+// a natural 20 and use their own free-text Crit field ("<table>/<die>",
+// e.g. "M/d10", same format most published stat blocks already use).
+function critProfileForStats(stats) {
+  if (stats.mode === "pc") {
+    const entry = classLevelEntryFor(stats.data.class, stats.data.level);
+    if (entry && entry.critDie) {
+      return { threatRange: entry.threatRange || 20, critDie: entry.critDie, critTable: entry.critTable };
+    }
+    // 0-level / unset-class / "Other" PCs default to Crit Table I with a
+    // plain d6, matching the Reference Booklet's 0-level entry.
+    return { threatRange: 20, critDie: "1d6", critTable: "I" };
+  }
+  const parsed = parseMonsterCritField(stats.data.crit);
+  return { threatRange: 20, critDie: parsed ? parsed.die : "1d6", critTable: parsed ? parsed.table : null };
+}
+
+// Monster armor isn't tracked by this sheet the way PC armor/Fumble Die
+// is, so a monster fumbling defaults to a d4 (same as an unarmored PC).
+function fumbleDieForStats(stats) {
+  if (stats.mode !== "pc") return 4;
+  const equipped = (stats.data.armorItems || []).filter(item => item.equipped);
+  return equipped.length
+    ? Math.max(...equipped.map(item => armorTypeEntry(item.type).fumbleDie || 4))
+    : 4;
+}
+
+// GM-only testing aid (Dice tab > "GM Testing") - lets the GM dictate the
+// next attack's d20 result instead of leaving it to Math.random(), so crit/
+// fumble outcomes (and the table lookups/alerts they trigger) can be
+// checked on demand rather than waiting on real 1-in-20 luck. One-shot: the
+// field clears itself the moment it's read, so a forced roll never
+// silently keeps affecting later, "real" rolls. Only ever consulted for GMs
+// - players never see the field (refreshDiceGmRowVisibility hides it), and
+// this also guards the read itself in case of a stale role check.
+function consumeForcedD20() {
+  if (currentPlayerRole !== "GM") return null;
+  const el = document.getElementById("gm-force-d20");
+  if (!el) return null;
+  const raw = el.value.trim();
+  if (!raw) return null;
+  el.value = "";
+  const n = parseInt(raw, 10);
+  if (!Number.isInteger(n) || n < 1 || n > 20) return null;
+  return n;
+}
+
+// A natural 20 is BOTH an automatic hit and a critical hit in DCC RAW
+// (Table 4-3's two-handed-penalty footnote - "scores a critical hit...
+// that also beats target's AC (no automatic hit)" - only makes sense if a
+// crit threat normally grants one); a natural 1 is always an automatic
+// miss requiring a Fumble Die roll (Table 4-2). This resolves both,
+// including rolling the appropriate Crit Table (or Fumble Table) row and
+// any "+NdM" bonus damage a crit result calls for, and builds a clearly
+// marked alert into both the Tracker toast and the persisted Log entry.
 async function rollAttackFor(itemId, attackId) {
   const [item] = await OBR.scene.items.getItems([itemId]);
   if (!item) return;
   const stats = getStatsForItem(item);
   const atk = stats.attacks.find(a => a.id === attackId);
   if (!atk) return;
+
   const atkMod = parseModifier(atk.bonus);
-  const deed = rollDeedDieFromAttack(atk);
-  const d20Roll = Math.floor(Math.random() * 20) + 1;
-  const toHit = d20Roll + atkMod + (deed ? deed.total : 0);
-  const dmg = rollDamage(atk.damage);
-  const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)})` : "";
-  const toHitText = `${markRollTotal(`${toHit} to hit`)} (d20 ${d20Roll}${formatModifier(atkMod)}${deedText})`;
-  const dmgTotal = dmg !== null ? dmg.total + (deed ? deed.total : 0) : null;
-  const dmgText = dmg !== null
-    ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText})`
-    : "";
-  const text = `${atk.name || "Attack"}: ${toHitText}${dmgText}`;
-  showTrackerStatus(`${item.name || "Token"} — ${text}`, false, 6500);
+  const forcedD20 = consumeForcedD20();
+  const d20Roll = forcedD20 ?? (Math.floor(Math.random() * 20) + 1);
+  const wasForced = forcedD20 !== null;
+  const profile = critProfileForStats(stats);
+  const isCrit = d20Roll >= profile.threatRange;
+  const isFumble = d20Roll === 1;
+  const rollDice = [{ sides: 20, value: d20Roll }];
+  let text, label;
+
+  if (isFumble) {
+    // Automatic miss - no damage is rolled at all, just the Fumble Die.
+    const fumbleDie = fumbleDieForStats(stats);
+    const fumbleRoll = rollDamage(`1d${fumbleDie}`);
+    const fumbleRow = fumbleRoll ? lookupTableRow(FUMBLE_TABLE, fumbleRoll.total) : null;
+    if (fumbleRoll) rollDice.push(...fumbleRoll.dice);
+    const rowText = fumbleRow ? fumbleRow.text : "";
+    text = `${atk.name || "Attack"}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${wasForced ? " (GM-forced)" : ""} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}). ${rowText}`;
+    label = "💀 FUMBLE! Natural 1 — automatic miss";
+  } else {
+    const deed = rollDeedDieFromAttack(atk);
+    const toHit = d20Roll + atkMod + (deed ? deed.total : 0);
+    const dmg = rollDamage(atk.damage);
+    const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)})` : "";
+    if (deed) rollDice.push({ sides: deed.sides, value: deed.roll });
+    if (dmg) rollDice.push(...dmg.dice);
+
+    let dmgTotal = dmg !== null ? dmg.total + (deed ? deed.total : 0) : null;
+    let critLine = "";
+    if (isCrit) {
+      const critDieRoll = rollDamage(profile.critDie);
+      const table = profile.critTable ? CRIT_TABLES[profile.critTable] : null;
+      const row = critDieRoll && table ? lookupTableRow(table, critDieRoll.total) : null;
+      let bonusDamage = null;
+      if (row) {
+        const bm = row.text.match(/\+(\d*d\d+)/i);
+        if (bm) bonusDamage = rollDamage(bm[1]);
+      }
+      if (critDieRoll) rollDice.push(...critDieRoll.dice);
+      if (bonusDamage) {
+        rollDice.push(...bonusDamage.dice);
+        dmgTotal = (dmgTotal ?? 0) + bonusDamage.total;
+      }
+      const critDieText = critDieRoll
+        ? `${table ? table.label : profile.critTable ? `Crit Table ${profile.critTable}` : "Crit die"}: rolled ${critDieRoll.total} (${profile.critDie})`
+        : "";
+      const rowText = row
+        ? row.text
+        : profile.critTable
+          ? `Crit Table ${profile.critTable} isn't preloaded in this app — check your Reference Booklet for the ${profile.critDie} result.`
+          : `No Crit field set for this monster (try e.g. "M/d8") — rolled a plain ${profile.critDie} crit die.`;
+      critLine = ` ${markCritAlert("💥 CRITICAL HIT!")} Natural ${d20Roll}${wasForced ? " (GM-forced)" : ""} — automatic hit. ${critDieText ? `${critDieText} — ` : ""}${rowText}`;
+    }
+
+    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d20 ${d20Roll}${wasForced ? " forced" : ""}${formatModifier(atkMod)}${deedText})`;
+    const dmgText = dmg !== null
+      ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${isCrit ? " +crit" : ""})`
+      : "";
+    text = `${atk.name || "Attack"}: ${toHitText}${dmgText}${critLine}`;
+    label = isCrit
+      ? `💥 CRITICAL HIT! ${toHit} to hit${dmg !== null ? `, ${dmgTotal} dmg` : ""}`
+      : (dmg !== null ? `${toHit} to hit, ${dmgTotal} dmg` : `${toHit} to hit`);
+  }
+
+  // Attacks can be rolled from either the Sheet's own roll button or the
+  // Tracker's - show the result in both status areas rather than just the
+  // Tracker's, since whoever clicked it is looking at whichever one they
+  // triggered it from (and the other stays harmlessly unseen until they
+  // switch tabs, same duration window either way).
+  const rollDuration = (isCrit || isFumble) ? 9000 : 6500;
+  showTrackerStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
+  showStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
   await appendChatLog({
     kind: "attack",
     tokenName: item.name || "Token",
@@ -3339,13 +3989,10 @@ async function rollAttackFor(itemId, attackId) {
     gmOnly: stats.mode === "monster",
   });
 
-  const rollDice = [{ sides: 20, value: d20Roll }];
-  if (deed) rollDice.push({ sides: deed.sides, value: deed.roll });
-  if (dmg) rollDice.push(...dmg.dice);
   broadcastDiceRoll({
     rollerName: item.name || "Token",
     dice: rollDice,
-    label: dmg !== null ? `${toHit} to hit, ${dmgTotal} dmg` : `${toHit} to hit`,
+    label,
   });
 }
 
@@ -3595,6 +4242,8 @@ function showDiceStatus(text, isError) {
 function refreshDiceGmRowVisibility() {
   const row = document.getElementById("dice-gm-row");
   if (row) row.style.display = currentPlayerRole === "GM" ? "flex" : "none";
+  const forceRow = document.getElementById("gm-force-roll-row");
+  if (forceRow) forceRow.style.display = currentPlayerRole === "GM" ? "block" : "none";
 }
 
 // Small in-popover animation, separate from the full-screen overlay. It's
