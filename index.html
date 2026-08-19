@@ -1908,11 +1908,11 @@ async function saveCurrent() {
   showStatus("Saved");
 }
 
-function showStatus(text, isError) {
-  statusEl.textContent = text;
+function showStatus(text, isError, duration) {
+  statusEl.innerHTML = rollTextToHtml(text);
   statusEl.style.color = isError ? "#c97b7b" : "var(--good)";
   clearTimeout(showStatus._t);
-  showStatus._t = setTimeout(() => statusEl.textContent = "", isError ? 4000 : 1500);
+  showStatus._t = setTimeout(() => statusEl.innerHTML = "", duration ?? (isError ? 4000 : 1500));
 }
 
 function scheduleSave() {
@@ -2494,8 +2494,16 @@ function rollPcHpLevelUp() {
   maxEl.value = (Number(maxEl.value) || 0) + gained;
   curEl.value = (Number(curEl.value) || 0) + gained;
   scheduleSave();
-  showStatus(`Rolled d${dieSides} (${rolled}) ${formatSignedNumber(staMod)} Sta = +${gained} HP`);
+  showStatus(`Rolled d${dieSides} (${rolled}) ${formatSignedNumber(staMod)} Sta = ${markRollTotal(`+${gained} HP`)}`, false, 4000);
   cfgRenderFromCurrentForm("pc");
+  broadcastDiceRoll({
+    rollerName: (nameEl && nameEl.value.trim()) || currentPlayerName || "Character",
+    dice: [{ sides: dieSides, value: rolled }],
+    modifier: staMod,
+    notation: `d${dieSides}`,
+    total: gained,
+    label: `+${gained} HP`,
+  });
 }
 
 document.getElementById("pc-roll-hp").addEventListener("click", rollPcHpLevelUp);
@@ -2607,9 +2615,14 @@ function rollDamage(diceStr) {
   const count = parseInt(m[1] || "1", 10) || 1;
   const sides = parseInt(m[2], 10);
   const mod = m[3] ? parseInt(m[3].replace(/\s+/g, ""), 10) : 0;
+  const dice = [];
   let dieTotal = 0;
-  for (let i = 0; i < count; i++) dieTotal += Math.floor(Math.random() * sides) + 1;
-  return { notation: `${count}d${sides}`, dieTotal, mod, total: dieTotal + mod };
+  for (let i = 0; i < count; i++) {
+    const value = Math.floor(Math.random() * sides) + 1;
+    dice.push({ sides, value });
+    dieTotal += value;
+  }
+  return { notation: `${count}d${sides}`, dieTotal, mod, total: dieTotal + mod, dice };
 }
 
 // A Warrior/Dwarf's attack row carries a "(+dX Deed Die)" annotation in
@@ -2632,7 +2645,7 @@ function rollDeedDieFromAttack(atk) {
   const sides = parseInt(m[1], 10);
   const mod = m[2] ? parseInt(m[2].replace(/\s+/g, ""), 10) : 0;
   const roll = Math.floor(Math.random() * sides) + 1;
-  return { notation: `d${sides}`, roll, mod, total: roll + mod };
+  return { notation: `d${sides}`, sides, roll, mod, total: roll + mod };
 }
 
 function getStatsForItem(item) {
@@ -3317,13 +3330,22 @@ async function rollAttackFor(itemId, attackId) {
     ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText})`
     : "";
   const text = `${atk.name || "Attack"}: ${toHitText}${dmgText}`;
-  showTrackerStatus(`${item.name || "Token"} — ${text}`, false, 5000);
+  showTrackerStatus(`${item.name || "Token"} — ${text}`, false, 6500);
   await appendChatLog({
     kind: "attack",
     tokenName: item.name || "Token",
     mode: stats.mode,
     text,
     gmOnly: stats.mode === "monster",
+  });
+
+  const rollDice = [{ sides: 20, value: d20Roll }];
+  if (deed) rollDice.push({ sides: deed.sides, value: deed.roll });
+  if (dmg) rollDice.push(...dmg.dice);
+  broadcastDiceRoll({
+    rollerName: item.name || "Token",
+    dice: rollDice,
+    label: dmg !== null ? `${toHit} to hit, ${dmgTotal} dmg` : `${toHit} to hit`,
   });
 }
 
@@ -3469,6 +3491,29 @@ function renderChatLog() {
 // and plays the big tumbling animation + sound for everyone at the table.
 const DICE_ROLL_CHANNEL = "com.claude.monster-sheet/dice-roll";
 
+// Shared by every roll trigger in the app (Dice tab, HP roll, Tracker
+// initiative, Tracker attacks) so the tumbling-dice overlay plays no
+// matter where a roll comes from, not just the manual Dice tab roller.
+// `dice` can mix sides freely (e.g. a d20 alongside a damage die and a
+// Deed Die) - overlay.html/dice-modal.html render each die by its own
+// `sides`, they don't assume the batch is uniform.
+async function broadcastDiceRoll({ rollerName, dice, modifier = 0, notation = "", total, label }) {
+  if (!Array.isArray(dice) || !dice.length) return;
+  try {
+    await OBR.broadcast.sendMessage(DICE_ROLL_CHANNEL, {
+      rollerName: rollerName || "Someone",
+      notation,
+      dice,
+      modifier,
+      total: total ?? dice.reduce((s, d) => s + d.value, 0) + modifier,
+      label: label || "",
+      ts: Date.now(),
+    }, { destination: "ALL" });
+  } catch (err) {
+    console.error("DCC sheet: failed to broadcast dice roll", err);
+  }
+}
+
 let currentPlayerName = "";
 
 // Same shape/size table as dice-modal.html, kept in sync by hand since
@@ -3544,7 +3589,7 @@ function showDiceStatus(text, isError) {
   el.innerHTML = rollTextToHtml(text);
   el.style.color = isError ? "#c97b7b" : "var(--good)";
   clearTimeout(showDiceStatus._t);
-  showDiceStatus._t = setTimeout(() => { el.innerHTML = ""; }, isError ? 6000 : 5000);
+  showDiceStatus._t = setTimeout(() => { el.innerHTML = ""; }, isError ? 7000 : 6500);
 }
 
 function refreshDiceGmRowVisibility() {
@@ -3805,7 +3850,8 @@ async function rollInitiativeFor(id) {
   const mod = parseModifier(stats.initBonus);
   const hasTwoHanded = stats.mode === "pc" && stats.attacks.some(a => a.equipped && dccWeaponEntry(a.weapon).twoHanded);
   const initDie = hasTwoHanded ? 16 : 20;
-  const roll = Math.floor(Math.random() * initDie) + 1 + mod;
+  const dieValue = Math.floor(Math.random() * initDie) + 1;
+  const roll = dieValue + mod;
   await OBR.scene.items.updateItems([id], items => {
     items.forEach(it => {
       const combat = it.metadata[COMBAT_METADATA_KEY] || {};
@@ -3819,6 +3865,14 @@ async function rollInitiativeFor(id) {
     mode: stats.mode,
     text: `Initiative: ${markRollTotal(String(roll))}${mod ? ` (d${initDie} ${mod >= 0 ? "+" : ""}${mod})` : ` (d${initDie})`}`,
     gmOnly: stats.mode === "monster",
+  });
+  broadcastDiceRoll({
+    rollerName: item.name || "Token",
+    dice: [{ sides: initDie, value: dieValue }],
+    modifier: mod,
+    notation: `d${initDie}`,
+    total: roll,
+    label: `Initiative ${roll}`,
   });
 }
 

@@ -24,14 +24,18 @@ function openDiceModal(payload) {
   const dice = Array.isArray(payload.dice) ? payload.dice : [];
   if (!dice.length) return;
 
+  // Each die keeps its own sides (a d20 attack roll, a damage die, and a
+  // Deed Die can all ride in the same roll) - encoded as "sides:value"
+  // pairs rather than a single shared "sides" so dice-modal.html can draw
+  // each one with its own shape instead of assuming a uniform batch.
   const params = new URLSearchParams({
     roller: payload.rollerName || "Someone",
     notation: payload.notation || "",
     modifier: String(payload.modifier || 0),
     total: String(payload.total ?? ""),
-    sides: String(dice[0].sides),
-    values: dice.map(d => d.value).join(","),
+    dice: dice.map(d => `${d.sides}:${d.value}`).join(","),
   });
+  if (payload.label) params.set("label", payload.label);
 
   OBR.modal.open({
     id: DICE_MODAL_ID,
@@ -46,7 +50,7 @@ function openDiceModal(payload) {
   // fires for some reason (backgrounded tab throttling timers, etc).
   setTimeout(() => {
     OBR.modal.close(DICE_MODAL_ID).catch(() => {});
-  }, 6000);
+  }, 6500);
 }
 
 OBR.onReady(() => {

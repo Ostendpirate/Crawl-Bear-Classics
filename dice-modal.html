@@ -229,20 +229,29 @@ function playThud(ctx, time) {
   } catch (err) { /* best effort */ }
 }
 
+// `dice` arrives as "sides:value" pairs (e.g. "20:14,6:5,6:3") so a single
+// roll can mix die shapes - an attack's d20, its damage die(s), and a
+// Warrior/Dwarf Deed Die can all tumble together instead of only ever
+// showing one uniform die type.
 function parsePayloadFromUrl() {
   const params = new URLSearchParams(window.location.search);
-  const sides = parseInt(params.get("sides") || "6", 10);
-  const values = (params.get("values") || "")
+  const dice = (params.get("dice") || "")
     .split(",")
     .filter(Boolean)
-    .map(v => parseInt(v, 10))
-    .filter(v => !Number.isNaN(v));
+    .map(pair => {
+      const [sidesStr, valueStr] = pair.split(":");
+      const sides = parseInt(sidesStr, 10);
+      const value = parseInt(valueStr, 10);
+      return (Number.isNaN(sides) || Number.isNaN(value)) ? null : { sides, value };
+    })
+    .filter(Boolean);
   return {
     rollerName: params.get("roller") || "Someone",
     notation: params.get("notation") || "",
     modifier: parseInt(params.get("modifier") || "0", 10),
     total: parseInt(params.get("total") || "0", 10),
-    dice: values.map(v => ({ sides, value: v })),
+    label: params.get("label") || "",
+    dice,
   };
 }
 
@@ -286,11 +295,19 @@ function spawnRoll(payload) {
     setTimeout(() => el.classList.add("fading"), 2400 + i * 60);
   });
 
-  const modText = payload.modifier ? (payload.modifier > 0 ? ` +${payload.modifier}` : ` ${payload.modifier}`) : "";
+  // A custom label (e.g. "17 to hit, 9 dmg") replaces the generic
+  // "rolls NdX +mod: total" phrasing for rolls that combine more than one
+  // kind of result (attack + damage, HP gained) where a single notation/
+  // modifier/total triple can't describe what happened.
   const banner = document.createElement("div");
   banner.className = "roll-banner";
   banner.style.top = `${centerY - 70}px`;
-  banner.innerHTML = `${escapeHtml(payload.rollerName)} rolls ${escapeHtml(payload.notation)}${modText}: <span class="accent">${payload.total}</span>`;
+  if (payload.label) {
+    banner.innerHTML = `${escapeHtml(payload.rollerName)} — <span class="accent">${escapeHtml(payload.label)}</span>`;
+  } else {
+    const modText = payload.modifier ? (payload.modifier > 0 ? ` +${payload.modifier}` : ` ${payload.modifier}`) : "";
+    banner.innerHTML = `${escapeHtml(payload.rollerName)} rolls ${escapeHtml(payload.notation)}${modText}: <span class="accent">${payload.total}</span>`;
+  }
   stage.appendChild(banner);
 
   playRollSound(dice.length);
