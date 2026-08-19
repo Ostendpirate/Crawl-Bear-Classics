@@ -1963,18 +1963,30 @@ function refreshDerivedPcFields() {
 }
 
 // Same auto-synced contract, applied to every PC weapon row's Bonus field:
-// resync any row whose Bonus is still tagged auto-managed to the current
-// ability modifier + class/level Attack bonus, using whichever ability
-// (Str or Agi) that row was last computed from. Rows the player has typed
-// a custom Bonus into are skipped, same as the save fields above.
+// resync any row whose Bonus is either still tagged auto-managed OR still
+// blank (a freshly-added row whose weapon was never changed away from its
+// default and whose Str/Agi quick button was never clicked - the same
+// "still blank counts as eligible" rule refreshDerivedPcFields uses for
+// Init/Fort/Ref/Will above) to the current ability modifier + class/level
+// Attack bonus. Rows the player has typed a custom Bonus into are
+// skipped, same as the save fields.
 function refreshAutoSyncedAttackBonuses() {
   const listEl = attackListEl("pc");
   if (!listEl) return;
   listEl.querySelectorAll(".attack-row").forEach(row => {
     const bonusInput = row.querySelector(".attack-bonus");
-    if (!bonusInput || bonusInput.dataset.autoSynced !== "1") return;
-    const source = bonusInput.dataset.bonusSource || "pc-str";
+    if (!bonusInput) return;
+    const isBlank = bonusInput.value.trim() === "";
+    if (!isBlank && bonusInput.dataset.autoSynced !== "1") return;
+    let source = bonusInput.dataset.bonusSource;
+    if (!source) {
+      const weaponSel = row.querySelector(".attack-weapon");
+      const entry = weaponSel ? dccWeaponEntry(weaponSel.value) : null;
+      source = (entry && entry.type === "ranged") ? "pc-agi" : "pc-str";
+    }
     bonusInput.value = composedAttackBonusText(source);
+    bonusInput.dataset.autoSynced = "1";
+    bonusInput.dataset.bonusSource = source;
   });
 }
 
