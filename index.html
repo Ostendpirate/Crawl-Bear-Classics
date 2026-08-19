@@ -527,6 +527,8 @@
   .weapon-badge-ranged { background: var(--good); color: #1e1b18; }
   .weapon-badge-tw { background: #c96f3c; color: #1e1b18; }
   .weapon-badge-die { background: var(--border); color: var(--text); font-weight: 700; }
+  .weapon-badge-deed { background: #6a4fa0; color: #fff; font-weight: 700; }
+  .weapon-badge-untrained { background: #a3402f; color: #fff; font-weight: 700; }
   .attack-tw-role {
     flex: none;
     width: 96px;
@@ -1235,6 +1237,23 @@
 
         <div class="row">
           <div>
+            <label>Deed Die</label>
+            <div class="field-sync-row">
+              <input type="text" id="pc-deed-die" placeholder="— (Warrior/Dwarf only)" title="Mighty Deeds of Arms (Table 1-10/1-14) - Warrior/Dwarf only. Rolled fresh with every attack and added to both that attack's to-hit and damage roll." />
+              <button type="button" class="derived-sync-btn" id="pc-deed-die-sync-btn" title="Set to this Class/Level's Deed Die (Table 1-10/1-14)">↻</button>
+            </div>
+          </div>
+          <div>
+            <label>Trained Weapon</label>
+            <div class="field-sync-row">
+              <input type="text" id="pc-trained-weapon" placeholder="e.g. Dagger, or Hammer (as club)" title="Table 1-3's Occupation grants training in one weapon. Attacking with anything else takes Table 4-1's untrained penalty (-1 die step to the attack roll) - Warriors are trained in the use of all weapons and never take it." />
+              <button type="button" class="derived-sync-btn" id="pc-trained-weapon-sync-btn" title="Set to this Occupation's Trained Weapon (Table 1-3)">↻</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
             <label>Hit Points</label>
             <div class="hp-row">
               <button class="hp-btn" id="pc-hp-minus">−</button>
@@ -1470,7 +1489,7 @@ const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al", "montype"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-actdice","pc-fort","pc-ref","pc-will","pc-equipment","pc-spells","pc-languages","pc-notes","pc-ac-misc"];
+const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-actdice","pc-fort","pc-ref","pc-will","pc-equipment","pc-spells","pc-languages","pc-notes","pc-ac-misc"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
 const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
@@ -1647,6 +1666,14 @@ function fillForm(mode, data) {
     // auto-fill (Table 1-4).
     const pcLevelRestoreEl = document.getElementById("pc-level");
     if (pcLevelRestoreEl) pcLevelRestoreEl.dataset.autoSynced = d.pcLevelAutoSynced ? "1" : "0";
+    // Same "still auto-managed?" restoration, for the Deed Die field's
+    // Class/Level auto-fill.
+    const pcDeedDieRestoreEl = document.getElementById("pc-deed-die");
+    if (pcDeedDieRestoreEl) pcDeedDieRestoreEl.dataset.autoSynced = d.pcDeedDieAutoSynced ? "1" : "0";
+    // Same "still auto-managed?" restoration, for the Trained Weapon
+    // field's Occupation auto-fill.
+    const pcTrainedWeaponRestoreEl = document.getElementById("pc-trained-weapon");
+    if (pcTrainedWeaponRestoreEl) pcTrainedWeaponRestoreEl.dataset.autoSynced = d.pcTrainedWeaponAutoSynced ? "1" : "0";
   }
   // Same "still auto-managed?" restoration as above, for the monster
   // Crit field's Monster Type + HD auto-fill.
@@ -1677,6 +1704,10 @@ function readForm(mode) {
     d.pcCritAutoSynced = pcCritSaveEl ? pcCritSaveEl.dataset.autoSynced === "1" : false;
     const pcLevelSaveEl = document.getElementById("pc-level");
     d.pcLevelAutoSynced = pcLevelSaveEl ? pcLevelSaveEl.dataset.autoSynced === "1" : false;
+    const pcDeedDieSaveEl = document.getElementById("pc-deed-die");
+    d.pcDeedDieAutoSynced = pcDeedDieSaveEl ? pcDeedDieSaveEl.dataset.autoSynced === "1" : false;
+    const pcTrainedWeaponSaveEl = document.getElementById("pc-trained-weapon");
+    d.pcTrainedWeaponAutoSynced = pcTrainedWeaponSaveEl ? pcTrainedWeaponSaveEl.dataset.autoSynced === "1" : false;
   }
   if (mode === "monster") {
     const critEl = document.getElementById("crit");
@@ -2558,44 +2589,176 @@ function recalcPcLevelFromXp(force) {
   return levelEl.value;
 }
 
+// What the Deed Die field SHOULD read for the current Class + Level
+// (Table 1-10 Warrior / Table 1-14 Dwarf, flagged via DCC_CLASS_TABLES'
+// deedDie marker) - blank for every class without one (Cleric, Thief,
+// Wizard, Elf, Halfling, 0-level/unset/"Other"), since Mighty Deeds of
+// Arms is a Warrior/Dwarf-only ability. This used to be folded into the
+// attack row's Bonus/Damage text as a "(+dX Deed Die)" annotation instead
+// of living in its own field - fragile, since it broke the moment a
+// player hand-edited either field, and made those fields' numeric part
+// harder to read at a glance. Now Bonus/Damage stay clean formulas
+// (composedAttackBonusText/composedDamageText below) and this is the one
+// place the die itself lives.
+function computePcDeedDieText() {
+  const classEl = document.getElementById("pc-class");
+  const table = DCC_CLASS_TABLES[classEl ? classEl.value : ""];
+  if (!table || !table.deedDie) return "";
+  const entry = currentClassLevelEntry();
+  return entry && typeof entry.attack === "string" ? `+${entry.attack}` : "";
+}
+
+// Keeps the Deed Die field synced to Class + Level, same "manual edit
+// wins" contract as Crit Die/Table (recalcPcCrit): `force` (a Class/Level
+// change, or the ↻ button) always overwrites the field and re-opts it
+// into auto-sync; without it, only a still-auto-synced field is touched,
+// so a hand-typed override (a house-ruled die, or a Judge-granted deed
+// die for a class that wouldn't normally get one) is never silently
+// clobbered by an unrelated re-render.
+function recalcPcDeedDie(force) {
+  const el = document.getElementById("pc-deed-die");
+  if (!el) return "";
+  if (force || el.dataset.autoSynced === "1") {
+    el.value = computePcDeedDieText();
+    el.dataset.autoSynced = "1";
+  }
+  return el.value;
+}
+
+// Does this character's current class roll a Deed Die at all right now
+// (live Sheet form) - gates whether an attack row offers the Mighty Deed
+// declaration UI (see attackRowHtml). A Deed Die is a character-wide
+// thing, not a per-weapon one ("with each attack" per Table 1-10's note
+// applies to ANY weapon this character swings), so this only needs to
+// check Class, not the specific row.
+function pcClassHasDeedDieLive() {
+  const classEl = document.getElementById("pc-class");
+  const table = DCC_CLASS_TABLES[classEl ? classEl.value : ""];
+  return !!(table && table.deedDie);
+}
+
+// What the Trained Weapon field SHOULD read: this character's current
+// Occupation's Trained Weapon (Table 1-3) - e.g. "Hammer (as club)" for
+// a Blacksmith. Blank for no occupation, a custom/homebrew occupation
+// (not on file, so there's nothing to look up), or an occupation somehow
+// not found in OCCUPATION_TABLE.
+function computePcTrainedWeaponText() {
+  const occEl = document.getElementById("pc-occupation");
+  const match = occupationByName(occEl ? occEl.value : "");
+  return match ? match.weapon : "";
+}
+
+// Keeps the Trained Weapon field synced to Occupation, same "manual edit
+// wins" contract as Crit Die/Table and Deed Die: `force` (picking a
+// canonical Occupation, or the ↻ button) always overwrites the field and
+// re-opts it into auto-sync; without it, only a still-auto-synced field
+// is touched - so a player who's hand-corrected this (a Judge granting
+// training in something else, or filling it in for a custom occupation
+// this app has no entry for) never has it silently overwritten by an
+// unrelated re-render.
+function recalcPcTrainedWeapon(force) {
+  const el = document.getElementById("pc-trained-weapon");
+  if (!el) return "";
+  if (force || el.dataset.autoSynced === "1") {
+    el.value = computePcTrainedWeaponText();
+    el.dataset.autoSynced = "1";
+  }
+  return el.value;
+}
+
+// A handful of Table 1-3 "Trained Weapon" flavor names don't map to a
+// weapon-table category by their own text alone even after stripping an
+// "(as X)" annotation - "axe" (e.g. Butcher's "Cleaver (as axe)") has no
+// dedicated one-handed-axe entry in this app's weapon table (only
+// Battleaxe (2H) and Handaxe), so it's aliased to Handaxe as the closest
+// one-handed analog; "hammer" (Dwarven stonemason's plain "Hammer", the
+// one Table 1-3 row missing its own "(as club)" tag that every other
+// smithing-hammer occupation carries) is aliased to Club to match those
+// siblings rather than the much heavier Warhammer.
+const WEAPON_TRAINING_ALIASES = { "axe": "handaxe", "hammer": "club" };
+
+// Strips ANY parenthetical - a DCC_WEAPONS label's "(Melee)"/"(Thrown)"/
+// "(2H)" tag, or (once occupationTrainedWeaponKey has already pulled an
+// "(as X)" annotation's contents out on its own) any leftover parens in
+// that - and lowercases, so e.g. "Dagger (Melee)" and "Dagger (Thrown)"
+// both normalize to the same training key as a Table 1-3 "Dagger" entry.
+function weaponTrainingKeyFromLabel(text) {
+  return String(text || "").replace(/\s*\([^)]*\)\s*/g, "").trim().toLowerCase();
+}
+
+// A Table 1-3 "Trained Weapon" entry names what the character is actually
+// trained to use - either directly ("Dagger", "Staff") or, for flavorful
+// starting gear with no weapon-table entry of its own, via an explicit
+// "(as X)" annotation ("Hammer (as club)" -> trained in Club; "Cudgel (as
+// staff)" -> trained in Staff). This pulls out whichever form applies and
+// normalizes it to the same key dccWeaponTrainingKey() produces for an
+// actual DCC_WEAPONS entry, so the two can be compared directly.
+function occupationTrainedWeaponKey(weaponText) {
+  const text = String(weaponText || "").trim();
+  const asMatch = text.match(/\(as\s+([^)]+)\)/i);
+  const key = weaponTrainingKeyFromLabel(asMatch ? asMatch[1] : text);
+  return WEAPON_TRAINING_ALIASES[key] || key;
+}
+
+function dccWeaponTrainingKey(entry) {
+  const key = weaponTrainingKeyFromLabel(entry.label);
+  return WEAPON_TRAINING_ALIASES[key] || key;
+}
+
+// Table 4-1's "Using an untrained weapon" penalty (-1d to the attack
+// roll, melee AND missile fire alike) - applies unless: this weapon
+// matches the character's Trained Weapon (Table 1-3, player-editable, see
+// recalcPcTrainedWeapon); the weapon is Unarmed (everyone's assumed
+// trained in their own fists) or "Custom / Other" (nothing on file to
+// judge training against - left to the Judge); the character is a
+// Warrior (per the class's own writeup, Warriors are trained in the use
+// of all weapons and never take this penalty); or there's no Trained
+// Weapon on file at all (a blank field skips the penalty rather than
+// guessing untrained by default - same "missing data isn't a penalty"
+// stance the rest of this app takes, e.g. a blank HD field).
+function isWeaponUntrained(stats, atk) {
+  if (stats.mode !== "pc") return false;
+  if ((stats.data.class || "").trim() === "Warrior") return false;
+  const entry = dccWeaponEntry(atk.weapon);
+  if (!entry || entry.key === "unarmed" || entry.key === "custom") return false;
+  const trainedRaw = String(stats.data["trained-weapon"] || "").trim();
+  if (!trainedRaw) return false;
+  return occupationTrainedWeaponKey(trainedRaw) !== dccWeaponTrainingKey(entry);
+}
+
+// Live-form equivalent of isWeaponUntrained, for rendering the per-row
+// Untrained badge (attackRowHtml) against whatever Class/Trained Weapon
+// is currently on screen rather than the token's last-saved snapshot.
+function isWeaponUntrainedLive(atk) {
+  const classEl = document.getElementById("pc-class");
+  const trainedEl = document.getElementById("pc-trained-weapon");
+  return isWeaponUntrained({ mode: "pc", data: { class: classEl ? classEl.value : "", "trained-weapon": trainedEl ? trainedEl.value : "" } }, atk);
+}
+
 // Combines an ability modifier with this class/level's Attack bonus into
 // the text that goes in an attack row's Bonus field. Cleric/Thief/
 // Halfling/Wizard/Elf have a flat numeric Attack bonus that adds straight
-// in. Warrior/Dwarf instead roll a Deed Die on top of the ability
-// modifier (Mighty Deeds of Arms) - that die isn't a fixed number, so it
-// can't be folded into the numeric total; it's appended as a readable
-// annotation instead, and the numeric part (still parsed by
-// parseModifier() elsewhere for actually rolling the attack) stays just
-// the ability modifier until Deed Die rolling is its own feature.
+// in. Warrior/Dwarf's Deed Die (Mighty Deeds of Arms) lives in its own
+// field now (see computePcDeedDieText) rather than being appended here as
+// text, so their Bonus is just the ability modifier too - the actual Deed
+// Die roll is added on top of this at roll time (see rollDeedDieForStats).
 function composedAttackBonusText(abilityFieldId) {
   const abilityMod = abilityModifierFromField(abilityFieldId);
   const entry = currentClassLevelEntry();
-  if (!entry) return formatSignedNumber(abilityMod);
-  if (typeof entry.attack === "number") {
+  if (entry && typeof entry.attack === "number") {
     return formatSignedNumber(abilityMod + entry.attack);
-  }
-  if (typeof entry.attack === "string") {
-    return `${formatSignedNumber(abilityMod)} (+${entry.attack} Deed Die)`;
   }
   return formatSignedNumber(abilityMod);
 }
 
-// Composes a weapon row's Damage text the same way composedAttackBonusText
-// composes Bonus: <base die><Str modifier, if this weapon/range applies
-// one>, plus a Deed Die annotation for Warrior/Dwarf - Mighty Deeds of
-// Arms adds the deed die to BOTH the attack roll and the damage roll, not
-// just the attack, so a Warrior/Dwarf's Damage needs the same "(+dX Deed
-// Die)" suffix the Bonus field already gets. This is also why leveling up
-// a Warrior/Dwarf needs to visibly change Damage, not just Bonus - the
-// deed die itself grows with level (Table 1-10/1-14).
+// Composes a weapon row's Damage text: <base die><Str modifier, if this
+// weapon/range applies one>. A Warrior/Dwarf's Deed Die is added on top
+// of this at roll time (rollDeedDieForStats), same one roll shared with
+// the attack total - it no longer lives in this text (see the Deed Die
+// field above).
 function composedDamageText(baseDie, strApplies) {
   const mod = strApplies ? abilityModifierFromField("pc-str") : 0;
-  const base = `${baseDie}${mod ? formatSignedNumber(mod) : ""}`;
-  const entry = currentClassLevelEntry();
-  if (entry && typeof entry.attack === "string") {
-    return `${base} (+${entry.attack} Deed Die)`;
-  }
-  return base;
+  return `${baseDie}${mod ? formatSignedNumber(mod) : ""}`;
 }
 
 function dccWeaponEntry(key) {
@@ -2610,20 +2773,6 @@ function weaponOptionsHtml(selectedKey) {
 
 function emptyAttack() {
   return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false, deedType: "", deedCustom: "" };
-}
-
-// Does this row's Bonus or Damage carry a "(+dX Deed Die)" annotation
-// right now - i.e. is a Deed Die actually going to be rolled with this
-// attack (Warrior/Dwarf only, per Table 1-10/1-14)? Mighty Deeds of Arms
-// only make sense to declare when there's a Deed Die to resolve them
-// with, so the deed-declaration row only renders when this is true - a
-// Cleric/Thief/Wizard/Halfling/Elf row (or a Warrior/Dwarf row whose
-// Bonus/Damage the player has hand-edited away from the annotation)
-// simply doesn't show it. Same regex rollDeedDieFromAttack() itself uses
-// to find the annotation, so "can declare a deed" and "will actually roll
-// a deed die" never disagree.
-function attackHasDeedDie(atk) {
-  return /\(\+[^)]+ Deed Die\)/i.test(String(atk.bonus || "")) || /\(\+[^)]+ Deed Die\)/i.test(String(atk.damage || ""));
 }
 
 // Which Two-Weapon Fighting roles (if any) a given weapon can fill.
@@ -2673,16 +2822,37 @@ function attackRowHtml(atk, mode) {
   if (effectiveTwRole === "primary") badges.push(`<span class="weapon-badge weapon-badge-tw" title="Two-weapon fighting: primary hand">TW: Primary</span>`);
   if (effectiveTwRole === "offhand") badges.push(`<span class="weapon-badge weapon-badge-tw" title="Two-weapon fighting: off-hand">TW: Off-hand</span>`);
   // Small at-a-glance reminder of the actual die this row's attack roll
-  // uses right now - normally always d20, but a configured Primary/
-  // Off-hand two-weapon role steps it down per Table 4-3 (or the Halfling
-  // ability), and that's easy to lose track of once several rows are
-  // involved.
-  let dieBadgeText = "d20";
+  // uses right now - normally d20, but a configured Primary/Off-hand
+  // two-weapon role steps it down per Table 4-3 (or the Halfling
+  // ability), and an untrained weapon (Table 4-1) steps it down ONE
+  // FURTHER step on top of that (the two penalties stack - nothing in
+  // either rule says fighting two-weapon with an unfamiliar weapon waives
+  // the other's penalty). Easy to lose track of once several rows and
+  // both penalties are in play, hence showing the actual resulting die
+  // rather than making the player recompute it.
+  const untrained = isWeaponUntrainedLive(atk);
+  let dieSidesForBadge = 20;
   if (effectiveTwRole === "primary" || effectiveTwRole === "offhand") {
     const twProfile = liveTwoWeaponProfile();
-    dieBadgeText = effectiveTwRole === "primary" ? `d${twProfile.primarySides}` : `d${twProfile.offhandSides}`;
+    dieSidesForBadge = effectiveTwRole === "primary" ? twProfile.primarySides : twProfile.offhandSides;
   }
-  badges.push(`<span class="weapon-badge weapon-badge-die" title="Attack die this weapon currently rolls">${dieBadgeText}</span>`);
+  if (untrained) dieSidesForBadge = stepDiceChainDown(dieSidesForBadge, 1);
+  badges.push(`<span class="weapon-badge weapon-badge-die" title="Attack die this weapon currently rolls">d${dieSidesForBadge}</span>`);
+  if (untrained) {
+    const trainedEl = document.getElementById("pc-trained-weapon");
+    const trainedText = trainedEl && trainedEl.value.trim() ? trainedEl.value.trim() : "(none on file)";
+    badges.push(`<span class="weapon-badge weapon-badge-untrained" title="Untrained weapon (Table 4-1) - this character is only trained in ${escapeHtml(trainedText)}. -1 die step to the attack roll (not damage); Warriors are trained in the use of all weapons and never take this.">Untrained</span>`);
+  }
+  // Mighty Deeds of Arms is character-wide (see pcClassHasDeedDieLive), so
+  // every attack row for a Warrior/Dwarf gets this reminder that a Deed
+  // Die also rolls alongside this attack - reads straight off the Deed
+  // Die field above rather than recomputing it, so it always matches
+  // whatever that field currently says (including a hand-typed override).
+  if (pcClassHasDeedDieLive()) {
+    const deedDieEl = document.getElementById("pc-deed-die");
+    const deedDieText = deedDieEl && deedDieEl.value.trim() ? deedDieEl.value.trim() : "Deed Die";
+    badges.push(`<span class="weapon-badge weapon-badge-deed" title="Also rolls this character's Deed Die (see the Deed Die field above), added to both this attack's to-hit and damage roll">${escapeHtml(deedDieText)}</span>`);
+  }
   const twSelectHtml = `<select class="attack-tw-role" title="Two-weapon fighting (Table 4-3) - mark this weapon as your primary or off-hand attack">${twOptions.map(o =>
     `<option value="${o.value}"${o.value === effectiveTwRole ? " selected" : ""}>${escapeHtml(o.label)}</option>`
   ).join("")}</select>`;
@@ -2708,18 +2878,21 @@ function attackRowHtml(atk, mode) {
   const currentLabel = currentSource === "pc-agi" ? "Agi" : "Str";
 
   // Mighty Deeds of Arms (Reference Booklet p.25-31) - only offered when
-  // this row actually has a Deed Die to resolve one with (see
-  // attackHasDeedDie). Declaring one of the book's seven named types shows
-  // its full example table in a collapsible ⓘ panel right away, so a
-  // player can see what a 3 vs. a 7+ does before committing to it; "Custom
-  // deed…" instead opens a free-text field for a deed the book didn't
-  // print an example for - it still gets the same Deed-Die-roll success
-  // check when the attack is rolled, just without book flavor text.
+  // this CHARACTER currently has a Deed Die to resolve one with (see
+  // pcClassHasDeedDieLive - a character-wide check now, since the Deed
+  // Die itself is a character stat, not something parsed per-row out of
+  // Bonus/Damage text anymore). Declaring one of the book's seven named
+  // types shows its full example table in a collapsible ⓘ panel right
+  // away, so a player can see what a 3 vs. a 7+ does before committing to
+  // it; "Custom deed…" instead opens a free-text field for a deed the
+  // book didn't print an example for - it still gets the same Deed-Die-
+  // roll success check when the attack is rolled, just without book
+  // flavor text.
   const deedType = atk.deedType || "";
   const deedOptionsHtml = DCC_MIGHTY_DEED_OPTIONS.map(([v, l]) =>
     `<option value="${v}"${v === deedType ? " selected" : ""}>${escapeHtml(l)}</option>`
   ).join("");
-  const deedBlockHtml = attackHasDeedDie(atk) ? `
+  const deedBlockHtml = pcClassHasDeedDieLive() ? `
       <div class="attack-deed-row">
         <select class="attack-deed-type" title="Declare a Mighty Deed of Arms for this attack (Reference Booklet p.25) - rolled automatically with your Deed Die. A roll of 3+ succeeds, if the attack also hits.">${deedOptionsHtml}</select>
         <input type="text" class="attack-deed-custom" placeholder="Describe your own deed…" value="${escapeHtml(atk.deedCustom || "")}" ${deedType === "custom" ? "" : "hidden"} />
@@ -3241,6 +3414,9 @@ function renderPcStatline(d) {
   // `d.crit` snapshot) matching the current Class/Level on every render,
   // not just right after a Class/Level change fires its own forced sync.
   const liveCrit = recalcPcCrit(false);
+  // Same passive, auto-synced-only recompute as Crit Die/Table just
+  // above, for the Deed Die field.
+  recalcPcDeedDie(false);
   const hp = d.hpMax ? `${d.hpCurrent || d.hpMax}/${d.hpMax}` : (d.hpCurrent || "—");
   const classLevel = [d.class || d.occupation || null, d.level ? `Lvl ${d.level}` : null].filter(Boolean).join(" ");
   const atkSummary = formatAttacksSummary(d.attacks);
@@ -3346,6 +3522,45 @@ if (pcCritSyncBtn) {
   pcCritSyncBtn.addEventListener("click", () => {
     recalcPcCrit(true);
     scheduleSave();
+    cfgRenderFromCurrentForm("pc");
+  });
+}
+const pcDeedDieEl = document.getElementById("pc-deed-die");
+if (pcDeedDieEl) {
+  // Same contract as pc-crit's own listener - untags auto-sync, nothing
+  // more. The per-row Deed Die badge (attackRowHtml) picks up a hand-
+  // typed override the next time attack rows actually re-render (a
+  // weapon change, add/remove, etc.), same as every other attack-row
+  // badge that reads a live character field rather than forcing a full
+  // rebuild on every keystroke here.
+  pcDeedDieEl.addEventListener("input", () => { pcDeedDieEl.dataset.autoSynced = "0"; });
+}
+const pcDeedDieSyncBtn = document.getElementById("pc-deed-die-sync-btn");
+if (pcDeedDieSyncBtn) {
+  pcDeedDieSyncBtn.addEventListener("click", () => {
+    recalcPcDeedDie(true);
+    scheduleSave();
+    // The ↻ click IS a discrete enough action to rebuild the attack rows
+    // (unlike a keystroke in the field) - refreshes the per-row Deed Die
+    // badge (and any untrained-weapon check that also lives in that
+    // render pass) to match the newly-synced value right away.
+    renderAttacks("pc", readAttacks("pc"));
+    cfgRenderFromCurrentForm("pc");
+  });
+}
+const pcTrainedWeaponEl = document.getElementById("pc-trained-weapon");
+if (pcTrainedWeaponEl) {
+  pcTrainedWeaponEl.addEventListener("input", () => { pcTrainedWeaponEl.dataset.autoSynced = "0"; });
+}
+const pcTrainedWeaponSyncBtn = document.getElementById("pc-trained-weapon-sync-btn");
+if (pcTrainedWeaponSyncBtn) {
+  pcTrainedWeaponSyncBtn.addEventListener("click", () => {
+    recalcPcTrainedWeapon(true);
+    scheduleSave();
+    // Same reasoning as the Deed Die sync button above - refreshes each
+    // row's Untrained badge (see attackRowHtml) against the newly-synced
+    // Trained Weapon right away.
+    renderAttacks("pc", readAttacks("pc"));
     cfgRenderFromCurrentForm("pc");
   });
 }
@@ -3995,12 +4210,27 @@ if (occSelectEl && occCustomEl && occHiddenEl) {
       occHiddenEl.value = occSelectEl.value;
     }
     updateOccupationTooltipContent(occHiddenEl.value);
+    // Picking a canonical Occupation (or explicitly switching to Custom,
+    // which clears it) is a deliberate enough action that Trained Weapon
+    // should always resync to it - same force-overwrite contract Class
+    // gives Crit Die/Table. A hand-typed override still survives, since a
+    // manual edit untags the field from auto-sync (see pcTrainedWeaponEl's
+    // "input" listener below) and only a FORCED resync overrides that.
+    recalcPcTrainedWeapon(true);
+    renderAttacks("pc", readAttacks("pc"));
     scheduleSave();
     cfgRenderFromCurrentForm("pc");
   });
   occCustomEl.addEventListener("input", () => {
     occHiddenEl.value = occCustomEl.value;
     updateOccupationTooltipContent(occHiddenEl.value);
+    // Typing a CUSTOM occupation name has no Table 1-3 entry to look up,
+    // so this is the passive, auto-synced-only recompute (force=false) -
+    // it won't fight a Trained Weapon the player has already hand-typed
+    // for their homebrew occupation, but keeps a still-blank/still-auto
+    // field harmlessly blank rather than stuck on the PREVIOUS
+    // occupation's weapon.
+    recalcPcTrainedWeapon(false);
     scheduleSave();
     cfgRenderFromCurrentForm("pc");
   });
@@ -4057,11 +4287,21 @@ document.getElementById("pc-class").addEventListener("change", () => {
   // field from auto-sync (see pcCritEl's "input" listener) and only a
   // FORCED resync (Class/Level change, or the ↻ button) overrides that.
   recalcPcCrit(true);
+  // A new Class can also mean a (possibly different, or newly-absent)
+  // Deed Die - same force-overwrite contract as Crit Die/Table above, and
+  // for the same reason (switching OUT of Warrior/Dwarf should visibly
+  // clear it, not leave a stale die behind for a class that no longer has
+  // one).
+  recalcPcDeedDie(true);
   // Halfling's special two-weapon rule waives the off-hand's "light
   // weapon" restriction - switching Class in or out of Halfling can
   // change which weapons are eligible for that role, so the attack rows
   // (whose Off-hand option list is computed per-render from the current
-  // Class) need a rebuild, not just the note text.
+  // Class) need a rebuild, not just the note text. This same rebuild also
+  // picks up the Deed Die badge and Mighty Deed declaration row (both
+  // gated on Class) and the Untrained-weapon badge (Warriors are always
+  // trained, everyone else's training didn't just change but their
+  // Deed-Die-none status might affect layout).
   renderAttacks("pc", readAttacks("pc"));
   cfgRenderFromCurrentForm("pc");
   scheduleSave();
@@ -4075,6 +4315,14 @@ document.getElementById("pc-class").addEventListener("change", () => {
 function cascadeLevelChangeEffects() {
   refreshDerivedPcFields();
   recalcPcCrit(true);
+  // A Level change (however it happened - a manual pick, the ↻ button, or
+  // an XP edit auto-syncing it) grows a Warrior/Dwarf's Deed Die (Table
+  // 1-10/1-14) same as it does Crit Die/Table above, and a rebuild is
+  // needed (not just recalcPcDeedDie's own value update) so every attack
+  // row's Deed Die badge picks up the new die immediately instead of only
+  // on the next unrelated render.
+  recalcPcDeedDie(true);
+  renderAttacks("pc", readAttacks("pc"));
   cfgRenderFromCurrentForm("pc");
 }
 
@@ -4392,22 +4640,24 @@ function rollDamage(diceStr) {
   return { notation: `${count}d${sides}`, dieTotal, mod, total: dieTotal + mod, dice };
 }
 
-// A Warrior/Dwarf's attack row carries a "(+dX Deed Die)" annotation in
-// its Bonus and/or Damage text (written by composedAttackBonusText /
-// composedDamageText) - per the Reference Booklet's Table 1-10 note, "A
-// warrior's attack modifier is rolled anew, according to the appropriate
-// die, with each attack. The result modifies both attack and damage
-// rolls." That means ONE deed die roll, reused for both. This pulls the
-// die notation (e.g. "d3", or "d10+4" at higher levels) out of whichever
-// field still carries the annotation and rolls it; rollAttackFor() then
-// applies that single result to both totals. Returns null if neither
-// field has the annotation (not a deed-die class, or the player has
-// since typed a fully custom Bonus/Damage that overwrote it).
-function rollDeedDieFromAttack(atk) {
-  const source = String(atk.bonus || "").match(/\(\+([^)]+) Deed Die\)/i)
-    || String(atk.damage || "").match(/\(\+([^)]+) Deed Die\)/i);
-  if (!source) return null;
-  const m = source[1].match(/^d(\d+)\s*([+-]\s*\d+)?$/i);
+// Rolls this character's Deed Die (Table 1-10 Warrior / Table 1-14
+// Dwarf), read from the dedicated Deed Die field (stats.data["deed-die"],
+// see recalcPcDeedDie) rather than parsed out of Bonus/Damage text - that
+// annotation-based approach was fragile (broke the moment a player hand-
+// edited either field) and this app's own comments flagged it as a
+// stopgap "until Deed Die rolling is its own feature." Per the Reference
+// Booklet's Table 1-10 note, "A warrior's attack modifier is rolled anew,
+// according to the appropriate die, with each attack. The result modifies
+// both attack and damage rolls" - ONE roll, reused for both, same as
+// before. Takes `stats` (a character-wide value) rather than a specific
+// atk - callers roll one of these per ATTACK (so twice in a row for a
+// two-weapon pair, once for a single attack), matching "with each
+// attack." Returns null for any character with no Deed Die set (Cleric/
+// Thief/Wizard/Elf/Halfling/0-level/unset/"Other", or a Warrior/Dwarf
+// whose field is blank/unparseable).
+function rollDeedDieForStats(stats) {
+  const raw = String((stats.data && stats.data["deed-die"]) || "").trim();
+  const m = raw.match(/^\+?d(\d+)\s*([+-]\s*\d+)?$/i);
   if (!m) return null;
   const sides = parseInt(m[1], 10);
   const mod = m[2] ? parseInt(m[2].replace(/\s+/g, ""), 10) : 0;
@@ -4416,7 +4666,7 @@ function rollDeedDieFromAttack(atk) {
 }
 
 // Resolves a declared Mighty Deed of Arms against the Deed Die that was
-// JUST rolled for this same attack (rollDeedDieFromAttack) - per the
+// JUST rolled for this same attack (rollDeedDieForStats) - per the
 // Reference Booklet, a deed succeeds when the die's raw face (not
 // including the flat +1..+4 kicker higher-level warriors add on top) come
 // up 3 or better, in addition to the attack actually hitting; this app
@@ -4433,7 +4683,7 @@ function mightyDeedResultText(atk, deed) {
     ? (atk.deedCustom && atk.deedCustom.trim() ? atk.deedCustom.trim() : "Custom deed")
     : (DCC_MIGHTY_DEEDS[type] ? DCC_MIGHTY_DEEDS[type].label : "Mighty Deed");
   if (!deed) {
-    return ` ⚔️ Mighty Deed declared (${label}), but no Deed Die was rolled for this attack — check this row's Bonus/Damage field.`;
+    return ` ⚔️ Mighty Deed declared (${label}), but no Deed Die was rolled for this attack — check the character's Deed Die field.`;
   }
   if (deed.roll < 3) {
     return ` ⚔️ Mighty Deed — ${label}: FAILED (Deed Die rolled ${deed.roll}, needed 3+) — no deed effect, but the attack/damage above still applies normally if it hits.`;
@@ -5286,13 +5536,26 @@ async function rollAttackFor(itemId, attackId) {
   if (!atk) return;
 
   const atkMod = parseModifier(atk.bonus);
+  // Table 4-1: using an untrained weapon (melee or missile alike) steps
+  // the attack die down ONE step on the dice chain (d20 -> d16) - it does
+  // NOT touch damage. See isWeaponUntrained for exactly who's exempt
+  // (Warriors always are).
+  const untrained = isWeaponUntrained(stats, atk);
+  const atkSides = untrained ? stepDiceChainDown(20, 1) : 20;
   const forcedD20 = consumeForcedD20();
-  const d20Roll = forcedD20 ?? (Math.floor(Math.random() * 20) + 1);
+  const d20Roll = forcedD20 !== null ? Math.min(forcedD20, atkSides) : (Math.floor(Math.random() * atkSides) + 1);
   const wasForced = forcedD20 !== null;
   const profile = critProfileForStats(stats);
+  // profile.threatRange only reads below 20 for a Warrior (Table 1-10) -
+  // and a Warrior is never untrained (trained in the use of all weapons),
+  // so an untrained, stepped-down attack die can only ever crit on ITS
+  // OWN natural max, the same way fighting two-weapon already works; no
+  // separate "expanded range is lost" handling is needed here the way
+  // Table 4-3 spells out, because the two situations can't overlap.
   const isCrit = d20Roll >= profile.threatRange;
   const isFumble = d20Roll === 1;
-  const rollDice = [{ sides: 20, value: d20Roll }];
+  const rollDice = [{ sides: atkSides, value: d20Roll }];
+  const untrainedNote = untrained ? " (untrained weapon, Table 4-1: -1 die)" : "";
   let text, label;
 
   if (isFumble) {
@@ -5302,10 +5565,10 @@ async function rollAttackFor(itemId, attackId) {
     const fumbleRow = fumbleRoll ? lookupTableRow(FUMBLE_TABLE, fumbleRoll.total) : null;
     if (fumbleRoll) rollDice.push(...fumbleRoll.dice);
     const rowText = fumbleRow ? fumbleRow.text : "";
-    text = `${atk.name || "Attack"}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${wasForced ? " (GM-forced)" : ""} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}). ${rowText}`;
+    text = `${atk.name || "Attack"}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${wasForced ? " (GM-forced)" : ""} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}).${untrainedNote} ${rowText}`;
     label = "💀 FUMBLE! Natural 1 — automatic miss";
   } else {
-    const deed = rollDeedDieFromAttack(atk);
+    const deed = rollDeedDieForStats(stats);
     const toHit = d20Roll + atkMod + (deed ? deed.total : 0);
     const dmg = rollDamage(atk.damage);
     const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)})` : "";
@@ -5340,7 +5603,7 @@ async function rollAttackFor(itemId, attackId) {
       critLine = ` ${markCritAlert("💥 CRITICAL HIT!")} Natural ${d20Roll}${wasForced ? " (GM-forced)" : ""} — automatic hit. ${critDieText ? `${critDieText} — ` : ""}${rowText}`;
     }
 
-    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d20 ${d20Roll}${wasForced ? " forced" : ""}${formatModifier(atkMod)}${deedText})`;
+    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${atkSides} ${d20Roll}${wasForced ? " forced" : ""}${formatModifier(atkMod)}${deedText})${untrainedNote}`;
     const dmgText = dmg !== null
       ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${isCrit ? " +crit" : ""})`
       : "";
@@ -5400,12 +5663,22 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
   const critDieProfile = critProfileForStats(stats);
   const rollDice = [];
 
+  // Table 4-1's untrained-weapon penalty (-1 die step, attack roll only)
+  // stacks with Table 4-3's two-weapon step-down - it's evaluated PER
+  // HAND, since the primary and off-hand weapons can independently be
+  // trained or not (unlike the two-weapon dice profile itself, which is
+  // one Agility/Halfling-driven number for the whole character).
+  const primaryUntrained = isWeaponUntrained(stats, primaryAtk);
+  const offhandUntrained = isWeaponUntrained(stats, offhandAtk);
+  const primarySides = primaryUntrained ? stepDiceChainDown(twProfile.primarySides, 1) : twProfile.primarySides;
+  const offhandSides = offhandUntrained ? stepDiceChainDown(twProfile.offhandSides, 1) : twProfile.offhandSides;
+
   const forcedD20 = consumeForcedD20();
   const wasForced = forcedD20 !== null;
-  const primaryRoll = wasForced ? Math.min(forcedD20, twProfile.primarySides) : (Math.floor(Math.random() * twProfile.primarySides) + 1);
-  const offhandRoll = Math.floor(Math.random() * twProfile.offhandSides) + 1;
-  rollDice.push({ sides: twProfile.primarySides, value: primaryRoll });
-  rollDice.push({ sides: twProfile.offhandSides, value: offhandRoll });
+  const primaryRoll = wasForced ? Math.min(forcedD20, primarySides) : (Math.floor(Math.random() * primarySides) + 1);
+  const offhandRoll = Math.floor(Math.random() * offhandSides) + 1;
+  rollDice.push({ sides: primarySides, value: primaryRoll });
+  rollDice.push({ sides: offhandSides, value: offhandRoll });
 
   // Halfling special rule: a single natural 1 on either hand is just an
   // ordinary miss for that hand, not a fumble - only BOTH hands coming up
@@ -5437,11 +5710,12 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
     }
 
     const atkMod = parseModifier(atk.bonus);
-    const deed = rollDeedDieFromAttack(atk);
+    const deed = rollDeedDieForStats(stats);
     const toHit = roll + atkMod + (deed ? deed.total : 0);
     const dmg = rollDamage(atk.damage);
     const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)})` : "";
     const deedLine = mightyDeedResultText(atk, deed);
+    const untrainedNote = isWeaponUntrained(stats, atk) ? " (untrained weapon, Table 4-1: -1 die)" : "";
     if (deed) rollDice.push({ sides: deed.sides, value: deed.roll });
     if (dmg) rollDice.push(...dmg.dice);
     let dmgTotal = dmg !== null ? dmg.total + (deed ? deed.total : 0) : null;
@@ -5486,7 +5760,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
       critLine = ` ${markCritAlert("💥 CRITICAL HIT!")} Natural ${roll}${forcedNote}${autoHitNote}. ${critDieText ? `${critDieText} — ` : ""}${rowText}`;
     }
 
-    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${sides} ${roll}${forcedNote}${formatModifier(atkMod)}${deedText})`;
+    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${sides} ${roll}${forcedNote}${formatModifier(atkMod)}${deedText})${untrainedNote}`;
     const dmgText = dmg !== null
       ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${critEligible ? " +crit" : ""})`
       : "";
@@ -5506,8 +5780,8 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
     primaryText = `${primaryAtk.name || "Primary hand"}: natural 1`;
     offhandText = `${offhandAtk.name || "Off-hand"}: natural 1`;
   } else {
-    primaryText = resolveHand(primaryAtk, primaryRoll, twProfile.primarySides, true);
-    offhandText = resolveHand(offhandAtk, offhandRoll, twProfile.offhandSides, false);
+    primaryText = resolveHand(primaryAtk, primaryRoll, primarySides, true);
+    offhandText = resolveHand(offhandAtk, offhandRoll, offhandSides, false);
   }
 
   const text = halflingDoubleFumble
@@ -5535,12 +5809,44 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
   });
 }
 
+// Rolling an attack from the Combat Tracker's expanded attack list used to
+// always go through the plain single-weapon path (rollAttackFor), even
+// for a PC attack that's actually one half of a configured Primary/
+// Off-hand two-weapon pair - unlike the Sheet's own roll button, which
+// already checks for that pairing (see its click handler in
+// attachAttackRowListeners) before deciding which roll to make. That
+// meant rolling a Warrior's two-weapon attack from the Tracker used the
+// character's full single-weapon crit threat range and undamped d20
+// instead of Table 4-3's stepped-down dice and "expanded threat range is
+// lost while fighting two-weapon" rule - the exact discrepancy this
+// function closes by mirroring the Sheet's pairing check here, sourced
+// from the token's own saved attacks (getStatsForItem) since the Tracker
+// rolls for whichever token was clicked, not necessarily the one open on
+// the Sheet tab.
+async function rollAttackForTrackerRow(itemId, attackId) {
+  const [item] = await OBR.scene.items.getItems([itemId]);
+  if (!item) return;
+  const stats = getStatsForItem(item);
+  const atk = stats.attacks.find(a => a.id === attackId);
+  if (atk && atk.twoWeaponRole) {
+    const otherRole = atk.twoWeaponRole === "primary" ? "offhand" : "primary";
+    const otherAtk = stats.attacks.find(a => a.twoWeaponRole === otherRole);
+    if (otherAtk) {
+      const primaryId = atk.twoWeaponRole === "primary" ? atk.id : otherAtk.id;
+      const offhandId = atk.twoWeaponRole === "offhand" ? atk.id : otherAtk.id;
+      rollTwoWeaponAttack(itemId, primaryId, offhandId);
+      return;
+    }
+  }
+  rollAttackFor(itemId, attackId);
+}
+
 function attachTrackerRowListeners() {
   document.querySelectorAll("#tracker-list .attack-detail").forEach(detail => {
     const parentId = detail.dataset.parentId;
     detail.querySelectorAll(".attack-detail-row").forEach(row => {
       const attackId = row.dataset.attackId;
-      row.querySelector(".attack-roll-btn").addEventListener("click", () => rollAttackFor(parentId, attackId));
+      row.querySelector(".attack-roll-btn").addEventListener("click", () => rollAttackForTrackerRow(parentId, attackId));
     });
   });
   document.querySelectorAll("#tracker-list .tracker-row[data-id]").forEach(row => {
