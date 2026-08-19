@@ -525,6 +525,13 @@
   }
   .weapon-badge-2h { background: var(--accent); color: #1e1b18; }
   .weapon-badge-ranged { background: var(--good); color: #1e1b18; }
+  .weapon-badge-tw { background: #c96f3c; color: #1e1b18; }
+  .attack-tw-role {
+    flex: none;
+    width: 96px;
+    padding: 4px 4px;
+    font-size: 10.5px;
+  }
   .attack-row-meta {
     font-size: 10px;
     color: var(--muted);
@@ -1229,6 +1236,7 @@
           <div class="fumble-die-line">Fumble Die: <span id="pc-fumble-die">d4</span> <span class="fumble-die-note">(based on equipped armor/shield)</span> <button type="button" class="tables-btn" id="pc-tables-btn" title="View this character's Crit and Fumble tables">📖 Crit/Fumble Tables</button></div>
           <div class="attack-list" id="attack-list-pc"></div>
           <button type="button" class="add-attack-btn" id="add-attack-pc">+ Add Attack</button>
+          <div class="fumble-die-note" id="pc-tw-note" style="margin-top:6px;">Mark one attack "Primary" and another "Off-hand" to fight with two weapons (Table 4-3).</div>
         </fieldset>
 
         <fieldset>
@@ -1625,35 +1633,48 @@ function readForm(mode) {
 // at close range, not medium/long - the auto-filled damage assumes close
 // range and says so in the row's info line, since a static field can't
 // track which range band an actual roll falls in.
+// `light` marks a one-handed melee weapon as small/quick enough to use
+// as an OFF-HAND weapon in two-weapon fighting (see the Two-Weapon
+// Fighting wiring further down). DCC's core text doesn't define "light"
+// weapons the way some other systems do - Table 4-3 gates two-weapon
+// fighting purely on Agility, not weapon size - so this split is this
+// app's own house-rule categorization (dagger/handaxe/short sword/club/
+// mace/blackjack/garrote/unarmed count as light; longer or heavier
+// one-handed weapons like longsword/warhammer/spear/flail/javelin/staff
+// don't). It only matters for non-Halfling characters - a Halfling's
+// special two-weapon ability waives this restriction entirely and can
+// use any one-handed melee weapon in the off hand. Irrelevant (and left
+// false) for ranged and two-handed weapons, which are never eligible
+// for two-weapon fighting at all.
 const DCC_WEAPONS = [
-  { key: "unarmed", label: "Unarmed", damage: "1d3", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
-  { key: "battleaxe", label: "Battleaxe (2H)", damage: "1d10", backstabDamage: null, range: "", type: "melee", twoHanded: true, strAtClose: false },
-  { key: "blackjack", label: "Blackjack (subdual)", damage: "1d3", backstabDamage: "2d6", range: "", type: "melee", twoHanded: false, strAtClose: false },
-  { key: "blowgun", label: "Blowgun", damage: "1d3", backstabDamage: "1d5", range: "20/40/60", type: "ranged", twoHanded: false, strAtClose: false },
-  { key: "club", label: "Club", damage: "1d4", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
-  { key: "crossbow", label: "Crossbow (2H)", damage: "1d6", backstabDamage: null, range: "80/160/240", type: "ranged", twoHanded: true, strAtClose: false },
-  { key: "dagger-melee", label: "Dagger (Melee)", damage: "1d4", backstabDamage: "1d10", range: "", type: "melee", twoHanded: false, strAtClose: false },
-  { key: "dagger-ranged", label: "Dagger (Thrown)", damage: "1d4", backstabDamage: "1d10", range: "10/20/30", type: "ranged", twoHanded: false, strAtClose: true },
-  { key: "dart", label: "Dart (Thrown)", damage: "1d4", backstabDamage: null, range: "20/40/60", type: "ranged", twoHanded: false, strAtClose: true },
-  { key: "flail", label: "Flail", damage: "1d6", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
-  { key: "garrote", label: "Garrote", damage: "1", backstabDamage: "3d4", range: "", type: "melee", twoHanded: false, strAtClose: false },
-  { key: "handaxe-melee", label: "Handaxe (Melee)", damage: "1d6", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
-  { key: "handaxe-ranged", label: "Handaxe (Thrown)", damage: "1d6", backstabDamage: null, range: "10/20/30", type: "ranged", twoHanded: false, strAtClose: true },
-  { key: "javelin-melee", label: "Javelin (Melee)", damage: "1d6", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
-  { key: "javelin-ranged", label: "Javelin (Thrown)", damage: "1d6", backstabDamage: null, range: "30/60/90", type: "ranged", twoHanded: false, strAtClose: true },
-  { key: "lance", label: "Lance (mounted only)", damage: "1d12", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
-  { key: "longbow", label: "Longbow (2H)", damage: "1d6", backstabDamage: null, range: "70/140/210", type: "ranged", twoHanded: true, strAtClose: false },
-  { key: "longsword", label: "Longsword", damage: "1d8", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
-  { key: "mace", label: "Mace", damage: "1d6", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
-  { key: "polearm", label: "Polearm (2H)", damage: "1d10", backstabDamage: null, range: "", type: "melee", twoHanded: true, strAtClose: false },
-  { key: "shortbow", label: "Shortbow (2H)", damage: "1d6", backstabDamage: null, range: "50/100/150", type: "ranged", twoHanded: true, strAtClose: false },
-  { key: "shortsword", label: "Short Sword", damage: "1d6", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
-  { key: "sling", label: "Sling", damage: "1d4", backstabDamage: null, range: "40/80/160", type: "ranged", twoHanded: false, strAtClose: true },
-  { key: "spear", label: "Spear", damage: "1d8", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
-  { key: "staff", label: "Staff", damage: "1d4", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
-  { key: "twohandedsword", label: "Two-Handed Sword (2H)", damage: "1d10", backstabDamage: null, range: "", type: "melee", twoHanded: true, strAtClose: false },
-  { key: "warhammer", label: "Warhammer", damage: "1d8", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
-  { key: "custom", label: "Custom / Other", damage: "", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false },
+  { key: "unarmed", label: "Unarmed", damage: "1d3", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false, light: true },
+  { key: "battleaxe", label: "Battleaxe (2H)", damage: "1d10", backstabDamage: null, range: "", type: "melee", twoHanded: true, strAtClose: false, light: false },
+  { key: "blackjack", label: "Blackjack (subdual)", damage: "1d3", backstabDamage: "2d6", range: "", type: "melee", twoHanded: false, strAtClose: false, light: true },
+  { key: "blowgun", label: "Blowgun", damage: "1d3", backstabDamage: "1d5", range: "20/40/60", type: "ranged", twoHanded: false, strAtClose: false, light: false },
+  { key: "club", label: "Club", damage: "1d4", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false, light: true },
+  { key: "crossbow", label: "Crossbow (2H)", damage: "1d6", backstabDamage: null, range: "80/160/240", type: "ranged", twoHanded: true, strAtClose: false, light: false },
+  { key: "dagger-melee", label: "Dagger (Melee)", damage: "1d4", backstabDamage: "1d10", range: "", type: "melee", twoHanded: false, strAtClose: false, light: true },
+  { key: "dagger-ranged", label: "Dagger (Thrown)", damage: "1d4", backstabDamage: "1d10", range: "10/20/30", type: "ranged", twoHanded: false, strAtClose: true, light: false },
+  { key: "dart", label: "Dart (Thrown)", damage: "1d4", backstabDamage: null, range: "20/40/60", type: "ranged", twoHanded: false, strAtClose: true, light: false },
+  { key: "flail", label: "Flail", damage: "1d6", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false, light: false },
+  { key: "garrote", label: "Garrote", damage: "1", backstabDamage: "3d4", range: "", type: "melee", twoHanded: false, strAtClose: false, light: true },
+  { key: "handaxe-melee", label: "Handaxe (Melee)", damage: "1d6", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false, light: true },
+  { key: "handaxe-ranged", label: "Handaxe (Thrown)", damage: "1d6", backstabDamage: null, range: "10/20/30", type: "ranged", twoHanded: false, strAtClose: true, light: false },
+  { key: "javelin-melee", label: "Javelin (Melee)", damage: "1d6", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false, light: false },
+  { key: "javelin-ranged", label: "Javelin (Thrown)", damage: "1d6", backstabDamage: null, range: "30/60/90", type: "ranged", twoHanded: false, strAtClose: true, light: false },
+  { key: "lance", label: "Lance (mounted only)", damage: "1d12", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false, light: false },
+  { key: "longbow", label: "Longbow (2H)", damage: "1d6", backstabDamage: null, range: "70/140/210", type: "ranged", twoHanded: true, strAtClose: false, light: false },
+  { key: "longsword", label: "Longsword", damage: "1d8", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false, light: false },
+  { key: "mace", label: "Mace", damage: "1d6", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false, light: true },
+  { key: "polearm", label: "Polearm (2H)", damage: "1d10", backstabDamage: null, range: "", type: "melee", twoHanded: true, strAtClose: false, light: false },
+  { key: "shortbow", label: "Shortbow (2H)", damage: "1d6", backstabDamage: null, range: "50/100/150", type: "ranged", twoHanded: true, strAtClose: false, light: false },
+  { key: "shortsword", label: "Short Sword", damage: "1d6", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false, light: true },
+  { key: "sling", label: "Sling", damage: "1d4", backstabDamage: null, range: "40/80/160", type: "ranged", twoHanded: false, strAtClose: true, light: false },
+  { key: "spear", label: "Spear", damage: "1d8", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false, light: false },
+  { key: "staff", label: "Staff", damage: "1d4", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false, light: false },
+  { key: "twohandedsword", label: "Two-Handed Sword (2H)", damage: "1d10", backstabDamage: null, range: "", type: "melee", twoHanded: true, strAtClose: false, light: false },
+  { key: "warhammer", label: "Warhammer", damage: "1d8", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false, light: false },
+  { key: "custom", label: "Custom / Other", damage: "", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false, light: false },
 ];
 
 // DCC per-class, per-level Attack bonus and Saving Throw progressions
@@ -2307,7 +2328,23 @@ function weaponOptionsHtml(selectedKey) {
 }
 
 function emptyAttack() {
-  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false };
+  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "" };
+}
+
+// Which Two-Weapon Fighting roles (if any) a given weapon can fill.
+// Primary hand: any one-handed melee weapon. Off-hand: a one-handed melee
+// weapon this app has classified as "light" (see DCC_WEAPONS above) -
+// UNLESS the character is a Halfling, whose class ability waives that
+// restriction and lets them off-hand any one-handed melee weapon too.
+// Two-handed weapons and ranged weapons are never eligible for either
+// role (DCC's two-weapon fighting is melee-only by definition - you're
+// wielding one weapon in each hand).
+function twoWeaponRoleOptions(entry, isHalfling) {
+  const options = [{ value: "", label: "—" }];
+  const isOneHandedMelee = entry.type === "melee" && !entry.twoHanded;
+  if (isOneHandedMelee) options.push({ value: "primary", label: "Primary hand" });
+  if (isOneHandedMelee && (entry.light || isHalfling)) options.push({ value: "offhand", label: "Off-hand" });
+  return options;
 }
 
 function attackRowHtml(atk, mode) {
@@ -2329,6 +2366,20 @@ function attackRowHtml(atk, mode) {
 
   const classEl = document.getElementById("pc-class");
   const isThief = classEl && classEl.value === "Thief";
+  const isHalfling = classEl && classEl.value === "Halfling";
+  const twOptions = twoWeaponRoleOptions(entry, isHalfling);
+  // A weapon change (or a class change out of Halfling) can leave a
+  // previously-picked role no longer eligible for THIS weapon - rather
+  // than silently keep the stale role active, the row just shows it as
+  // cleared (falls back to "None"); readAttacks() then persists that
+  // cleared value the moment anything triggers a re-render, so a stale
+  // role never lingers into an actual roll.
+  const effectiveTwRole = twOptions.some(o => o.value === atk.twoWeaponRole) ? atk.twoWeaponRole : "";
+  if (effectiveTwRole === "primary") badges.push(`<span class="weapon-badge weapon-badge-tw" title="Two-weapon fighting: primary hand">TW: Primary</span>`);
+  if (effectiveTwRole === "offhand") badges.push(`<span class="weapon-badge weapon-badge-tw" title="Two-weapon fighting: off-hand">TW: Off-hand</span>`);
+  const twSelectHtml = `<select class="attack-tw-role" title="Two-weapon fighting (Table 4-3) - mark this weapon as your primary or off-hand attack">${twOptions.map(o =>
+    `<option value="${o.value}"${o.value === effectiveTwRole ? " selected" : ""}>${escapeHtml(o.label)}</option>`
+  ).join("")}</select>`;
   const metaParts = [];
   if (entry.range) {
     metaParts.push(`Range: ${entry.range}${entry.strAtClose ? " (Str applies at close range only - shown damage assumes close range)" : ""}`);
@@ -2355,6 +2406,7 @@ function attackRowHtml(atk, mode) {
       <div class="attack-weapon-line">
         <input type="checkbox" class="attack-equipped" ${atk.equipped ? "checked" : ""} title="Currently wielded - only one weapon can be equipped at a time, and it's what determines your Initiative Die" />
         <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
+        ${twSelectHtml}
         ${badges.join(" ")}
       </div>
       <div class="attack-row-fields">
@@ -2377,6 +2429,7 @@ function renderAttacks(mode, attacks) {
   const listEl = attackListEl(mode);
   listEl.innerHTML = (attacks || []).map(atk => attackRowHtml(atk, mode)).join("");
   attachAttackRowListeners(mode);
+  if (mode === "pc") updateTwoWeaponNote();
 }
 
 function readAttacks(mode) {
@@ -2400,6 +2453,8 @@ function readAttacks(mode) {
       base.damageAuto = damageEl ? damageEl.dataset.autoSynced === "1" : false;
       base.damageBase = damageEl ? (damageEl.dataset.damageBase || "") : "";
       base.damageStrApplies = damageEl ? damageEl.dataset.damageStrApplies === "1" : false;
+      const twRoleEl = row.querySelector(".attack-tw-role");
+      base.twoWeaponRole = twRoleEl ? twRoleEl.value : "";
     }
     return base;
   });
@@ -2504,6 +2559,24 @@ function attachAttackRowListeners(mode) {
         // snapshot on the token.
         clearTimeout(saveTimeout);
         await saveCurrent();
+        // If this row is one half of a configured Primary/Off-hand pair,
+        // rolling EITHER row's die rolls both hands together (that's how
+        // two-weapon fighting actually works - one action, two attacks) -
+        // otherwise it's just a normal single-weapon roll.
+        if (mode === "pc") {
+          const attacks = readAttacks(mode);
+          const thisAtk = attacks.find(a => a.id === row.dataset.id);
+          if (thisAtk && thisAtk.twoWeaponRole) {
+            const otherRole = thisAtk.twoWeaponRole === "primary" ? "offhand" : "primary";
+            const otherAtk = attacks.find(a => a.twoWeaponRole === otherRole);
+            if (otherAtk) {
+              const primaryId = thisAtk.twoWeaponRole === "primary" ? thisAtk.id : otherAtk.id;
+              const offhandId = thisAtk.twoWeaponRole === "offhand" ? thisAtk.id : otherAtk.id;
+              rollTwoWeaponAttack(currentItemId, primaryId, offhandId);
+              return;
+            }
+          }
+        }
         rollAttackFor(currentItemId, row.dataset.id);
       });
     }
@@ -2536,6 +2609,24 @@ function attachAttackRowListeners(mode) {
           }
           scheduleSave();
           recalcPcInitiativeDie();
+        });
+      }
+      const twRoleSel = row.querySelector(".attack-tw-role");
+      if (twRoleSel) {
+        twRoleSel.addEventListener("change", () => {
+          // Same "only one at a time" pattern as Equipped, applied per
+          // role independently - picking a new Primary clears any other
+          // row that was Primary, and likewise for Off-hand, so there's
+          // never more than one of each.
+          if (twRoleSel.value) {
+            attackListEl(mode).querySelectorAll(".attack-row").forEach(other => {
+              if (other === row) return;
+              const otherSel = other.querySelector(".attack-tw-role");
+              if (otherSel && otherSel.value === twRoleSel.value) otherSel.value = "";
+            });
+          }
+          scheduleSave();
+          renderAttacks(mode, readAttacks(mode));
         });
       }
       const abilityToggleBtn = row.querySelector(".ability-toggle-btn");
@@ -2922,6 +3013,7 @@ function refreshDerivedPcFields() {
   refreshAutoSyncedAttackBonuses();
   refreshAutoSyncedAttackDamages();
   recalcPcAC();
+  updateTwoWeaponNote();
   scheduleSave();
 }
 
@@ -3446,6 +3538,12 @@ document.getElementById("pc-class").addEventListener("change", () => {
   // player already entered; use the ↻ buttons (or the Str/Agi attack
   // buttons) to resync a field that's already filled.
   refreshDerivedPcFields();
+  // Halfling's special two-weapon rule waives the off-hand's "light
+  // weapon" restriction - switching Class in or out of Halfling can
+  // change which weapons are eligible for that role, so the attack rows
+  // (whose Off-hand option list is computed per-render from the current
+  // Class) need a rebuild, not just the note text.
+  renderAttacks("pc", readAttacks("pc"));
   cfgRenderFromCurrentForm("pc");
   scheduleSave();
 });
@@ -4406,6 +4504,107 @@ function renderTrackerRows(items) {
   attachTrackerRowListeners();
 }
 
+// DCC's "dice chain" (Rulebook p.19) - the sequence a die "steps up" or
+// "steps down" along, used all over the system (deed dice, two-weapon
+// penalties, etc.) instead of a flat +/-N to the roll.
+const DICE_CHAIN = [3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 30];
+
+// Steps a die size down the chain by `steps` (each step = one entry
+// toward d3). Falling off the bottom of the chain clamps at d3, same as
+// the Rulebook's own "cannot go below d3" rule for stacked penalties.
+function stepDiceChainDown(sides, steps) {
+  const idx = DICE_CHAIN.indexOf(sides);
+  const startIdx = idx === -1 ? DICE_CHAIN.length - 1 : idx; // unknown die: treat as already at the top (d20-ish)
+  return DICE_CHAIN[Math.max(0, startIdx - steps)];
+}
+
+// Table 4-3 (Reference Booklet p.29) - fighting with two weapons steps
+// BOTH hands' attack die down the dice chain (not a flat penalty), with
+// the primary hand penalized less than the off hand, and also restricts
+// (or at low Agility, forbids) critical hits while fighting two-handed.
+// No Agility floor gates the option itself here (matches RAW - Table 4-3
+// has an entry for every Agility band, all the way down to "8 or less";
+// the dice-chain penalty alone is the deterrent at low Agility, not an
+// inability to attempt it).
+// primaryCrit: "none" (can't crit at all while fighting two-weapon),
+// "maxOnly" (crits only on the die's max face, and that max face does NOT
+// also count as an automatic hit the way a natural 20 normally would),
+// or "normal" (crits exactly like single-weapon fighting).
+function twoWeaponDiceForAgility(agiScore) {
+  const agi = Number.isFinite(agiScore) ? agiScore : 0;
+  if (agi <= 8) return { primarySides: 20, primarySteps: 3, offhandSides: 20, offhandSteps: 4, primaryCrit: "none" };
+  if (agi <= 11) return { primarySides: 20, primarySteps: 2, offhandSides: 20, offhandSteps: 3, primaryCrit: "none" };
+  if (agi <= 15) return { primarySides: 20, primarySteps: 1, offhandSides: 20, offhandSteps: 2, primaryCrit: "none" };
+  if (agi <= 17) return { primarySides: 20, primarySteps: 1, offhandSides: 20, offhandSteps: 1, primaryCrit: "maxOnly" };
+  return { primarySides: 20, primarySteps: 0, offhandSides: 20, offhandSteps: 1, primaryCrit: "normal" };
+}
+
+// Halfling class "Two Weapons" special ability (referenced by Table 4-3's
+// footnote as living in the Halfling class description, not reproduced in
+// the Reference Booklet itself) - a Halfling ignores Table 4-3 entirely
+// and always fights two-weapon at a flat -1 die step on BOTH hands
+// (d20->d16), regardless of Agility, per published summaries of the
+// ability (best-available secondary source; the primary-hand crit
+// eligibility at this die step specifically isn't confirmed by any source
+// found, so it's modeled the same as Table 4-3's Agi 16-17 row - crits
+// only on the die's max face, no automatic-hit bonus - pending correction
+// against the actual class writeup). halflingFumbleRule flags the
+// Halfling-specific fumble condition: a Halfling fighting two-weapon only
+// fumbles if BOTH dice come up a natural 1, not just one.
+function twoWeaponDiceForHalfling() {
+  return { primarySides: 20, primarySteps: 1, offhandSides: 20, offhandSteps: 1, primaryCrit: "maxOnly", halflingFumbleRule: true };
+}
+
+// Resolves which two-weapon dice profile applies for a given stats blob
+// (Halfling special rule takes priority over the Agility table, per the
+// Table 4-3 footnote), and rolls the actual stepped-down die size for
+// each hand out of the dice chain.
+function twoWeaponProfileForStats(stats) {
+  const isHalfling = (stats.data.class || "").trim() === "Halfling";
+  const agiScore = parseAbilityScore(stats.data.agi);
+  const base = isHalfling ? twoWeaponDiceForHalfling() : twoWeaponDiceForAgility(agiScore);
+  return {
+    isHalfling,
+    agiScore,
+    primaryCrit: base.primaryCrit,
+    halflingFumbleRule: !!base.halflingFumbleRule,
+    primarySides: stepDiceChainDown(base.primarySides, base.primarySteps),
+    offhandSides: stepDiceChainDown(base.offhandSides, base.offhandSteps),
+  };
+}
+
+// Live-updating summary shown under the Attacks list: what's currently
+// configured (or a prompt to configure it), including the actual stepped-
+// down dice, crit eligibility, and fumble rule that a roll would use right
+// now - same "explain what the auto-fill will do" pattern as
+// updateMonsterTypeNote(). Reads the LIVE form (Class/Agility/row roles),
+// not saved token data, since this note lives on the Sheet tab the player
+// is actively editing.
+function updateTwoWeaponNote() {
+  const noteEl = document.getElementById("pc-tw-note");
+  if (!noteEl) return;
+  const attacks = readAttacks("pc");
+  const primary = attacks.find(a => a.twoWeaponRole === "primary");
+  const offhand = attacks.find(a => a.twoWeaponRole === "offhand");
+  if (!primary || !offhand) {
+    noteEl.textContent = 'Mark one attack "Primary" and another "Off-hand" to fight with two weapons (Table 4-3).';
+    return;
+  }
+  const classEl = document.getElementById("pc-class");
+  const agiEl = document.getElementById("pc-agi");
+  const isHalfling = classEl && classEl.value === "Halfling";
+  const profile = twoWeaponProfileForStats({ data: { class: classEl ? classEl.value : "", agi: agiEl ? agiEl.value : "" } });
+  let critText;
+  if (profile.primaryCrit === "none") critText = "Neither hand can score a critical hit while fighting two-weapon.";
+  else if (profile.primaryCrit === "maxOnly") critText = `Primary hand crits only on a natural max roll (d${profile.primarySides}), with no automatic hit; off-hand can never crit.`;
+  else critText = "Primary hand crits normally; off-hand can never crit.";
+  const fumbleText = profile.halflingFumbleRule
+    ? "As a Halfling, this only counts as a fumble if BOTH dice come up their lowest face."
+    : "Each hand fumbles independently on a roll of its own die's lowest face.";
+  const agiNote = isHalfling ? "Halfling special ability - ignores Agility" : `Agility ${profile.agiScore ?? "?"}`;
+  noteEl.textContent = `Two-weapon fighting active - ${primary.name || "Primary"}: d${profile.primarySides}, ${offhand.name || "Off-hand"}: d${profile.offhandSides} (${agiNote}). ${critText} ${fumbleText}`;
+}
+
 // Rolling an attack from the Tracker previously only showed the final
 // totals ("14 to hit, 7 dmg") with no way to tell how much of that was
 // the die versus the character's attack/damage bonus. Both the raw d20 -
@@ -4550,6 +4749,167 @@ async function rollAttackFor(itemId, attackId) {
   // triggered it from (and the other stays harmlessly unseen until they
   // switch tabs, same duration window either way).
   const rollDuration = (isCrit || isFumble) ? 9000 : 6500;
+  showTrackerStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
+  showStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
+  await appendChatLog({
+    kind: "attack",
+    tokenName: item.name || "Token",
+    mode: stats.mode,
+    text,
+    gmOnly: stats.mode === "monster",
+  });
+
+  broadcastDiceRoll({
+    rollerName: item.name || "Token",
+    dice: rollDice,
+    label,
+  });
+}
+
+// Resolves a Primary+Off-hand pair as ONE two-weapon attack action (Table
+// 4-3, or the Halfling class's special two-weapon ability) - both hands
+// roll their own stepped-down attack die and, if they connect, their own
+// damage, combined into a single status/log entry rather than two
+// separate rolls, since that's how the rule plays at the table (one
+// action, two dice). The Crit Table and crit die themselves are unchanged
+// from single-weapon fighting (that's the character's class/level crit
+// die, e.g. a Warrior's d10 on Crit Table III - a completely different die
+// from the attack die Table 4-3 steps down); only whether either hand is
+// ELIGIBLE to crit at all, and on what roll, comes from the two-weapon
+// profile. GM-forced d20 (Dice tab > GM Testing) only ever applies to the
+// PRIMARY hand's die, clamped to that die's actual size - there's no way
+// to force the off-hand die, or to force the Halfling both-natural-1
+// fumble case, from that single field; a known, documented limitation of
+// the testing aid rather than of the rule itself.
+async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
+  const [item] = await OBR.scene.items.getItems([itemId]);
+  if (!item) return;
+  const stats = getStatsForItem(item);
+  const primaryAtk = stats.attacks.find(a => a.id === primaryAttackId);
+  const offhandAtk = stats.attacks.find(a => a.id === offhandAttackId);
+  if (!primaryAtk || !offhandAtk) return;
+
+  const twProfile = twoWeaponProfileForStats(stats);
+  const critDieProfile = critProfileForStats(stats);
+  const rollDice = [];
+
+  const forcedD20 = consumeForcedD20();
+  const wasForced = forcedD20 !== null;
+  const primaryRoll = wasForced ? Math.min(forcedD20, twProfile.primarySides) : (Math.floor(Math.random() * twProfile.primarySides) + 1);
+  const offhandRoll = Math.floor(Math.random() * twProfile.offhandSides) + 1;
+  rollDice.push({ sides: twProfile.primarySides, value: primaryRoll });
+  rollDice.push({ sides: twProfile.offhandSides, value: offhandRoll });
+
+  // Halfling special rule: a single natural 1 on either hand is just an
+  // ordinary miss for that hand, not a fumble - only BOTH hands coming up
+  // their lowest face AT ONCE counts as an actual fumble, and that's
+  // resolved ONCE (a single Fumble Die roll), not once per hand. Everyone
+  // else fumbles independently per hand, same as single-weapon fighting.
+  const halflingDoubleFumble = twProfile.halflingFumbleRule && primaryRoll === 1 && offhandRoll === 1;
+  let anyFumble = false;
+  let anyCrit = false;
+
+  function resolveHand(atk, roll, sides, isPrimary) {
+    const label = atk.name || (isPrimary ? "Primary hand" : "Off-hand");
+    const forcedNote = isPrimary && wasForced ? " (GM-forced)" : "";
+    const isNat1 = roll === 1;
+    const isFumble = isNat1 && !twProfile.halflingFumbleRule;
+    const isPlainMiss = isNat1 && twProfile.halflingFumbleRule && !halflingDoubleFumble;
+
+    if (isFumble) {
+      anyFumble = true;
+      const fumbleDie = fumbleDieForStats(stats);
+      const fumbleRoll = rollDamage(`1d${fumbleDie}`);
+      const fumbleRow = fumbleRoll ? lookupTableRow(FUMBLE_TABLE, fumbleRoll.total) : null;
+      if (fumbleRoll) rollDice.push(...fumbleRoll.dice);
+      const rowText = fumbleRow ? fumbleRow.text : "";
+      return `${label}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${forcedNote} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}). ${rowText}`;
+    }
+    if (isPlainMiss) {
+      return `${label}: Natural 1${forcedNote} — miss (Halfling two-weapon fighting: a lone natural 1 doesn't fumble by itself).`;
+    }
+
+    const atkMod = parseModifier(atk.bonus);
+    const deed = rollDeedDieFromAttack(atk);
+    const toHit = roll + atkMod + (deed ? deed.total : 0);
+    const dmg = rollDamage(atk.damage);
+    const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)})` : "";
+    if (deed) rollDice.push({ sides: deed.sides, value: deed.roll });
+    if (dmg) rollDice.push(...dmg.dice);
+    let dmgTotal = dmg !== null ? dmg.total + (deed ? deed.total : 0) : null;
+
+    // Off-hand can never crit under Table 4-3 / the Halfling rule -
+    // critical hits while fighting two-weapon are a primary-hand-only
+    // possibility, and even then only at whatever eligibility this
+    // Agility tier (or the Halfling ability) allows.
+    const critEligible = isPrimary && twProfile.primaryCrit !== "none" && roll === sides;
+    let critLine = "";
+    if (critEligible) {
+      anyCrit = true;
+      const critDieRoll = rollDamage(critDieProfile.critDie);
+      const table = critDieProfile.critTable ? CRIT_TABLES[critDieProfile.critTable] : null;
+      const row = critDieRoll && table ? lookupTableRow(table, critDieRoll.total) : null;
+      let bonusDamage = null;
+      if (row) {
+        const bm = row.text.match(/\+(\d*d\d+)/i);
+        if (bm) bonusDamage = rollDamage(bm[1]);
+      }
+      if (critDieRoll) rollDice.push(...critDieRoll.dice);
+      if (bonusDamage) {
+        rollDice.push(...bonusDamage.dice);
+        dmgTotal = (dmgTotal ?? 0) + bonusDamage.total;
+      }
+      const critDieText = critDieRoll
+        ? `${table ? table.label : critDieProfile.critTable ? `Crit Table ${critDieProfile.critTable}` : "Crit die"}: rolled ${critDieRoll.total} (${critDieProfile.critDie})`
+        : "";
+      const rowText = row
+        ? row.text
+        : critDieProfile.critTable
+          ? `Crit Table ${critDieProfile.critTable} isn't preloaded in this app — check your Reference Booklet for the ${critDieProfile.critDie} result.`
+          : `No Crit field set — rolled a plain ${critDieProfile.critDie} crit die.`;
+      // The 16-17 Agility tier (and the Halfling ability, modeled the
+      // same way pending confirmation - see the comment on
+      // twoWeaponDiceForHalfling) explicitly is NOT an automatic hit the
+      // way a normal natural-max roll is - Table 4-3 says it still has to
+      // beat the target's AC. This app doesn't track target AC for any
+      // roll, so that check is left to the table, same as everywhere else
+      // here - the difference is just this line's wording.
+      const autoHitNote = twProfile.primaryCrit === "maxOnly" ? " (not an automatic hit — must still beat the target's AC)" : " — automatic hit";
+      critLine = ` ${markCritAlert("💥 CRITICAL HIT!")} Natural ${roll}${forcedNote}${autoHitNote}. ${critDieText ? `${critDieText} — ` : ""}${rowText}`;
+    }
+
+    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${sides} ${roll}${forcedNote}${formatModifier(atkMod)}${deedText})`;
+    const dmgText = dmg !== null
+      ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${critEligible ? " +crit" : ""})`
+      : "";
+    return `${label}: ${toHitText}${dmgText}${critLine}`;
+  }
+
+  let fumbleNote = "";
+  let primaryText, offhandText;
+  if (halflingDoubleFumble) {
+    anyFumble = true;
+    const fumbleDie = fumbleDieForStats(stats);
+    const fumbleRoll = rollDamage(`1d${fumbleDie}`);
+    const fumbleRow = fumbleRoll ? lookupTableRow(FUMBLE_TABLE, fumbleRoll.total) : null;
+    if (fumbleRoll) rollDice.push(...fumbleRoll.dice);
+    const rowText = fumbleRow ? fumbleRow.text : "";
+    fumbleNote = `${markFumbleAlert("💀 FUMBLE!")} Both hands rolled natural 1s${wasForced ? " (primary GM-forced)" : ""} — automatic miss with both weapons (Halfling two-weapon fighting; Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}). ${rowText}`;
+    primaryText = `${primaryAtk.name || "Primary hand"}: natural 1`;
+    offhandText = `${offhandAtk.name || "Off-hand"}: natural 1`;
+  } else {
+    primaryText = resolveHand(primaryAtk, primaryRoll, twProfile.primarySides, true);
+    offhandText = resolveHand(offhandAtk, offhandRoll, twProfile.offhandSides, false);
+  }
+
+  const text = halflingDoubleFumble
+    ? `Two-Weapon Attack — ${fumbleNote}`
+    : `Two-Weapon Attack — ${primaryText} | ${offhandText}`;
+  const label = anyFumble && (halflingDoubleFumble || (primaryRoll === 1 && !twProfile.halflingFumbleRule) || (offhandRoll === 1 && !twProfile.halflingFumbleRule))
+    ? "💀 Two-Weapon Attack — fumble"
+    : (anyCrit ? "💥 Two-Weapon Attack — CRITICAL HIT!" : "Two-Weapon Attack");
+
+  const rollDuration = (anyCrit || anyFumble) ? 9000 : 6500;
   showTrackerStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
   showStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
   await appendChatLog({
