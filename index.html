@@ -526,6 +526,7 @@
   .weapon-badge-2h { background: var(--accent); color: #1e1b18; }
   .weapon-badge-ranged { background: var(--good); color: #1e1b18; }
   .weapon-badge-tw { background: #c96f3c; color: #1e1b18; }
+  .weapon-badge-die { background: var(--border); color: var(--text); font-weight: 700; }
   .attack-tw-role {
     flex: none;
     width: 96px;
@@ -2373,7 +2374,7 @@ function weaponOptionsHtml(selectedKey) {
 }
 
 function emptyAttack() {
-  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "" };
+  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false };
 }
 
 // Which Two-Weapon Fighting roles (if any) a given weapon can fill.
@@ -2422,6 +2423,17 @@ function attackRowHtml(atk, mode) {
   const effectiveTwRole = twOptions.some(o => o.value === atk.twoWeaponRole) ? atk.twoWeaponRole : "";
   if (effectiveTwRole === "primary") badges.push(`<span class="weapon-badge weapon-badge-tw" title="Two-weapon fighting: primary hand">TW: Primary</span>`);
   if (effectiveTwRole === "offhand") badges.push(`<span class="weapon-badge weapon-badge-tw" title="Two-weapon fighting: off-hand">TW: Off-hand</span>`);
+  // Small at-a-glance reminder of the actual die this row's attack roll
+  // uses right now - normally always d20, but a configured Primary/
+  // Off-hand two-weapon role steps it down per Table 4-3 (or the Halfling
+  // ability), and that's easy to lose track of once several rows are
+  // involved.
+  let dieBadgeText = "d20";
+  if (effectiveTwRole === "primary" || effectiveTwRole === "offhand") {
+    const twProfile = liveTwoWeaponProfile();
+    dieBadgeText = effectiveTwRole === "primary" ? `d${twProfile.primarySides}` : `d${twProfile.offhandSides}`;
+  }
+  badges.push(`<span class="weapon-badge weapon-badge-die" title="Attack die this weapon currently rolls">${dieBadgeText}</span>`);
   const twSelectHtml = `<select class="attack-tw-role" title="Two-weapon fighting (Table 4-3) - mark this weapon as your primary or off-hand attack">${twOptions.map(o =>
     `<option value="${o.value}"${o.value === effectiveTwRole ? " selected" : ""}>${escapeHtml(o.label)}</option>`
   ).join("")}</select>`;
@@ -2449,7 +2461,7 @@ function attackRowHtml(atk, mode) {
   return `
     <div class="attack-row pc-attack-row${atk.equipped ? " equipped" : ""}" data-id="${atk.id}">
       <div class="attack-weapon-line">
-        <input type="checkbox" class="attack-equipped" ${atk.equipped ? "checked" : ""} title="Currently wielded - only one weapon can be equipped at a time, and it's what determines your Initiative Die" />
+        <input type="checkbox" class="attack-equipped" ${atk.equipped ? "checked" : ""} title="Currently wielded - normally one weapon at a time, but a configured two-weapon Primary+Off-hand pair can both be equipped - this is what determines your Initiative Die" />
         <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
         ${twSelectHtml}
         ${badges.join(" ")}
@@ -2458,7 +2470,7 @@ function attackRowHtml(atk, mode) {
         <input type="text" class="attack-name" placeholder="Custom label (optional)" value="${escapeHtml(atk.name)}" />
         <input type="text" class="attack-bonus" placeholder="+4" value="${escapeHtml(atk.bonus)}" data-auto-synced="${atk.bonusAuto ? "1" : "0"}" data-bonus-source="${escapeHtml(atk.bonusSource || "")}" />
         <button type="button" class="attack-quick-btn ability-toggle-btn" data-mod="${toggleMod}" title="Bonus currently uses ${currentLabel} modifier + class/level Attack bonus - click to switch to ${toggleLabel}">${toggleLabel}</button>
-        <input type="text" class="attack-damage" placeholder="1d6" value="${escapeHtml(atk.damage)}" data-auto-synced="${atk.damageAuto ? "1" : "0"}" data-damage-base="${escapeHtml(atk.damageBase || "")}" data-damage-str-applies="${atk.damageStrApplies ? "1" : "0"}" />
+        <input type="text" class="attack-damage" placeholder="1d6" value="${escapeHtml(atk.damage)}" data-auto-synced="${atk.damageAuto ? "1" : "0"}" data-damage-base="${escapeHtml(atk.damageBase || "")}" data-damage-str-applies="${atk.damageStrApplies ? "1" : "0"}" data-backstab-active="${atk.backstabActive ? "1" : "0"}" />
         <button type="button" class="hp-btn attack-roll-btn" title="Roll this attack">🎲</button>
         <button type="button" class="attack-remove-btn" title="Remove attack">×</button>
       </div>
@@ -2498,6 +2510,7 @@ function readAttacks(mode) {
       base.damageAuto = damageEl ? damageEl.dataset.autoSynced === "1" : false;
       base.damageBase = damageEl ? (damageEl.dataset.damageBase || "") : "";
       base.damageStrApplies = damageEl ? damageEl.dataset.damageStrApplies === "1" : false;
+      base.backstabActive = damageEl ? damageEl.dataset.backstabActive === "1" : false;
       const twRoleEl = row.querySelector(".attack-tw-role");
       base.twoWeaponRole = twRoleEl ? twRoleEl.value : "";
     }
@@ -2554,6 +2567,11 @@ function applyWeaponSelection(row) {
     damageInput.dataset.autoSynced = "0";
     damageInput.dataset.damageBase = "";
   }
+  // A weapon change means any pending "revert to normal after this roll"
+  // backstab flag (see revertBackstabIfActive) is stale - Damage just got
+  // reset to this (possibly different) weapon's own die above, so there's
+  // nothing left to revert to something else later.
+  damageInput.dataset.backstabActive = "0";
   // Resync the Bonus field if it's blank, OR if it's still tagged as
   // auto-managed (set by a prior weapon pick or a Str/Agi quick-button
   // click, and not hand-edited since) - that second case is what lets
@@ -2568,9 +2586,69 @@ function applyWeaponSelection(row) {
   }
 }
 
+// Checks a row's Equipped box, unequipping every OTHER row EXCEPT its
+// two-weapon-fighting pairmate - a row already carrying the complementary
+// Primary/Off-hand role. Normally only one weapon is "in your hands" at a
+// time (same rule Armor & Shields uses per-slot), but a configured
+// Primary+Off-hand pair is the whole point of two-weapon fighting, so
+// both need to be able to show as equipped together rather than checking
+// one always kicking the other back out.
+function equipAttackRow(mode, row) {
+  const equippedBox = row.querySelector(".attack-equipped");
+  if (!equippedBox) return;
+  equippedBox.checked = true;
+  row.classList.add("equipped");
+  const roleSel = row.querySelector(".attack-tw-role");
+  const thisRole = roleSel ? roleSel.value : "";
+  attackListEl(mode).querySelectorAll(".attack-row").forEach(other => {
+    if (other === row) return;
+    const otherBox = other.querySelector(".attack-equipped");
+    if (!otherBox) return;
+    const otherRoleSel = other.querySelector(".attack-tw-role");
+    const otherRole = otherRoleSel ? otherRoleSel.value : "";
+    const isTwPairmate = thisRole && otherRole && thisRole !== otherRole;
+    if (!isTwPairmate) {
+      otherBox.checked = false;
+      other.classList.remove("equipped");
+    }
+  });
+}
+
+// A weapon's Backstab damage (Thief-only, Table 3-1) applies to exactly
+// the one sneak-attack roll it was set up for, not to every attack with
+// this weapon from now on - so once a roll actually goes out with it
+// active, the Damage field snaps back to the weapon's normal die
+// (recomputed the same way picking the weapon fresh would) instead of
+// silently staying overridden. Only fires if the backstabActive flag is
+// still set - a manual edit to Damage, or picking a different weapon,
+// already clears that flag itself (see their own listeners), so this
+// never clobbers a value the player deliberately changed in between.
+function revertBackstabIfActive(row) {
+  const damageEl = row.querySelector(".attack-damage");
+  if (!damageEl || damageEl.dataset.backstabActive !== "1") return;
+  const weaponSel = row.querySelector(".attack-weapon");
+  const entry = dccWeaponEntry(weaponSel ? weaponSel.value : "");
+  const damageStrApplies = entry.type === "melee" || entry.strAtClose;
+  damageEl.value = entry.damage ? composedDamageText(entry.damage, damageStrApplies) : "";
+  damageEl.dataset.backstabActive = "0";
+  if (entry.damage) {
+    damageEl.dataset.autoSynced = "1";
+    damageEl.dataset.damageBase = entry.damage;
+    damageEl.dataset.damageStrApplies = damageStrApplies ? "1" : "0";
+  } else {
+    damageEl.dataset.autoSynced = "0";
+    damageEl.dataset.damageBase = "";
+  }
+  scheduleSave();
+  cfgRenderFromCurrentForm("pc");
+}
+
 function attachAttackRowListeners(mode) {
   attackListEl(mode).querySelectorAll(".attack-row").forEach(row => {
-    row.querySelectorAll("input").forEach(inp => inp.addEventListener("input", scheduleSave));
+    row.querySelectorAll("input").forEach(inp => inp.addEventListener("input", () => {
+      scheduleSave();
+      if (mode === "pc") syncWeaponsIntoEquipment();
+    }));
     // Typing directly into Bonus untags it as auto-managed, so class/level/
     // ability changes stop touching it - the same "manual edit wins"
     // contract the derived PC fields (Init/Fort/Ref/Will) follow.
@@ -2580,16 +2658,25 @@ function attachAttackRowListeners(mode) {
     }
     // Same contract for Damage: typing directly into it (e.g. adding a
     // magic weapon's damage bonus by hand) untags it, so a later Str edit
-    // stops overwriting what the player just typed.
+    // stops overwriting what the player just typed. It also cancels any
+    // pending backstab revert (see revertBackstabIfActive) - the player
+    // just told this field what it should say, so a roll going out
+    // shouldn't then override that back to anything, backstab or normal.
     const damageInputEl = row.querySelector(".attack-damage");
     if (damageInputEl) {
-      damageInputEl.addEventListener("input", () => { damageInputEl.dataset.autoSynced = "0"; });
+      damageInputEl.addEventListener("input", () => {
+        damageInputEl.dataset.autoSynced = "0";
+        damageInputEl.dataset.backstabActive = "0";
+      });
     }
     row.querySelector(".attack-remove-btn").addEventListener("click", () => {
       row.remove();
       scheduleSave();
       cfgRenderFromCurrentForm(mode);
-      if (mode === "pc") recalcPcInitiativeDie();
+      if (mode === "pc") {
+        recalcPcInitiativeDie();
+        syncWeaponsIntoEquipment();
+      }
     });
     const rollBtn = row.querySelector(".attack-roll-btn");
     if (rollBtn) {
@@ -2618,11 +2705,18 @@ function attachAttackRowListeners(mode) {
               const primaryId = thisAtk.twoWeaponRole === "primary" ? thisAtk.id : otherAtk.id;
               const offhandId = thisAtk.twoWeaponRole === "offhand" ? thisAtk.id : otherAtk.id;
               rollTwoWeaponAttack(currentItemId, primaryId, offhandId);
+              // A backstab set up on EITHER hand of a two-weapon pair
+              // reverts once the combined roll goes out - check both rows,
+              // not just the one that was clicked.
+              revertBackstabIfActive(row);
+              const otherRowEl = attackListEl(mode).querySelector(`.attack-row[data-id="${otherAtk.id}"]`);
+              if (otherRowEl) revertBackstabIfActive(otherRowEl);
               return;
             }
           }
         }
         rollAttackFor(currentItemId, row.dataset.id);
+        if (mode === "pc") revertBackstabIfActive(row);
       });
     }
     if (mode === "pc") {
@@ -2633,27 +2727,25 @@ function attachAttackRowListeners(mode) {
           scheduleSave();
           renderAttacks(mode, readAttacks(mode));
           recalcPcInitiativeDie();
+          syncWeaponsIntoEquipment();
         });
       }
       const equippedBox = row.querySelector(".attack-equipped");
       if (equippedBox) {
         equippedBox.addEventListener("change", () => {
-          row.classList.toggle("equipped", equippedBox.checked);
-          // Only one weapon is "in your hands" at a time - checking this
-          // one unchecks every other row, same pattern as Armor & Shields,
-          // since that's what Initiative Die actually needs to know.
           if (equippedBox.checked) {
-            attackListEl(mode).querySelectorAll(".attack-row").forEach(other => {
-              if (other === row) return;
-              const otherBox = other.querySelector(".attack-equipped");
-              if (otherBox) {
-                otherBox.checked = false;
-                other.classList.remove("equipped");
-              }
-            });
+            // Normally only one weapon is "in your hands" at a time -
+            // checking this one unchecks every other row, same pattern as
+            // Armor & Shields - EXCEPT this row's two-weapon-fighting
+            // pairmate (see equipAttackRow), which is meant to stay
+            // equipped alongside it.
+            equipAttackRow(mode, row);
+          } else {
+            row.classList.remove("equipped");
           }
           scheduleSave();
           recalcPcInitiativeDie();
+          syncWeaponsIntoEquipment();
         });
       }
       const twRoleSel = row.querySelector(".attack-tw-role");
@@ -2669,9 +2761,17 @@ function attachAttackRowListeners(mode) {
               const otherSel = other.querySelector(".attack-tw-role");
               if (otherSel && otherSel.value === twRoleSel.value) otherSel.value = "";
             });
+            // Marking a weapon as your Primary or Off-hand is a strong
+            // enough signal that you're wielding it right now - auto-equip
+            // it too (pairing-aware, so it doesn't kick out a pairmate
+            // that's already equipped), so configuring both roles is
+            // enough to get both weapons equipped without an extra click.
+            equipAttackRow(mode, row);
           }
           scheduleSave();
           renderAttacks(mode, readAttacks(mode));
+          recalcPcInitiativeDie();
+          syncWeaponsIntoEquipment();
         });
       }
       const abilityToggleBtn = row.querySelector(".ability-toggle-btn");
@@ -2704,10 +2804,14 @@ function attachAttackRowListeners(mode) {
           const damageEl = row.querySelector(".attack-damage");
           damageEl.value = composedDamageText(backstabBtn.dataset.backstab, true);
           // Backstab damage always uses Str, same auto-sync opt-in as the
-          // Str/Agi Bonus quick buttons.
+          // Str/Agi Bonus quick buttons - but ALSO flagged as pending
+          // revert, so the next roll made with this row snaps Damage back
+          // to the weapon's normal die afterward instead of leaving the
+          // sneak-attack damage active for every future attack.
           damageEl.dataset.autoSynced = "1";
           damageEl.dataset.damageBase = backstabBtn.dataset.backstab;
           damageEl.dataset.damageStrApplies = "1";
+          damageEl.dataset.backstabActive = "1";
           scheduleSave();
           cfgRenderFromCurrentForm(mode);
         });
@@ -2728,6 +2832,7 @@ document.getElementById("add-attack-pc").addEventListener("click", () => {
   attackListEl("pc").insertAdjacentHTML("beforeend", attackRowHtml(emptyAttack(), "pc"));
   attachAttackRowListeners("pc");
   recalcPcInitiativeDie();
+  syncWeaponsIntoEquipment();
 });
 
 function firstLine(text) {
@@ -3439,6 +3544,43 @@ function syncArmorIntoEquipment() {
       const bonus = parseInt(item.bonus, 10) || 0;
       return `${label} (${bonus >= 0 ? "+" : ""}${bonus} AC)${item.equipped ? " [equipped]" : ""}`;
     });
+
+  equipEl.value = autoLines.length
+    ? (lines.length ? [...autoLines, "", ...lines].join("\n") : autoLines.join("\n"))
+    : lines.join("\n");
+  scheduleSave();
+}
+
+// Same auto-managed-block pattern as syncArmorIntoEquipment above, for the
+// Attacks list instead of Armor & Shields - every configured attack
+// (named, or with a Bonus/Damage set) gets a line the moment it's added
+// or edited, flagged if currently equipped, without disturbing anything
+// else the player has typed into Equipment. The "dmg " tag inside the
+// parenthetical is this block's fingerprint - it's what lets this
+// function find and replace only ITS OWN lines on the next sync, and
+// (just as importantly) keeps it from ever matching the Armor & Shields
+// block's "(+N AC)" lines, so both auto-managed blocks coexist and each
+// resyncs independently without stepping on the other. The strip regex
+// uses a greedy ".*" rather than "[^()]*" for the parenthetical's inner
+// content - a Warrior/Dwarf's Damage already contains its OWN nested
+// parens (e.g. "1d8 (+d7 Deed Die)"), and a non-greedy/paren-excluding
+// match would stop at that inner ")" and fail to recognize the line as
+// its own, leaving stale duplicate lines behind on every resync instead
+// of replacing them.
+function syncWeaponsIntoEquipment() {
+  const equipEl = document.getElementById("pc-equipment");
+  if (!equipEl) return;
+
+  const attacks = readAttacks("pc").filter(a => a.name || a.bonus || a.damage);
+  const lines = (equipEl.value || "").split("\n").filter(line => {
+    return !/^.+ \(dmg .*\)( \[equipped\])?$/.test(line.trim());
+  });
+  while (lines.length && lines[0].trim() === "") lines.shift();
+
+  const autoLines = attacks.map(a => {
+    const label = a.name || dccWeaponEntry(a.weapon).label;
+    return `${label} (dmg ${a.damage || "none set"})${a.equipped ? " [equipped]" : ""}`;
+  });
 
   equipEl.value = autoLines.length
     ? (lines.length ? [...autoLines, "", ...lines].join("\n") : autoLines.join("\n"))
@@ -4650,6 +4792,18 @@ function twoWeaponProfileForStats(stats) {
   };
 }
 
+// Same two-weapon dice profile as twoWeaponProfileForStats, but read from
+// the LIVE Sheet form (Class + Agility) rather than a saved token snapshot
+// - for anything that needs "what would this roll right now" during
+// rendering (the per-row die badge, the note below the Attacks list)
+// rather than for an actual roll (which always uses the token's saved
+// stats via twoWeaponProfileForStats itself).
+function liveTwoWeaponProfile() {
+  const classEl = document.getElementById("pc-class");
+  const agiEl = document.getElementById("pc-agi");
+  return twoWeaponProfileForStats({ data: { class: classEl ? classEl.value : "", agi: agiEl ? agiEl.value : "" } });
+}
+
 // Live-updating summary shown under the Attacks list: what's currently
 // configured (or a prompt to configure it), including the actual stepped-
 // down dice, crit eligibility, and fumble rule that a roll would use right
@@ -4668,9 +4822,8 @@ function updateTwoWeaponNote() {
     return;
   }
   const classEl = document.getElementById("pc-class");
-  const agiEl = document.getElementById("pc-agi");
   const isHalfling = classEl && classEl.value === "Halfling";
-  const profile = twoWeaponProfileForStats({ data: { class: classEl ? classEl.value : "", agi: agiEl ? agiEl.value : "" } });
+  const profile = liveTwoWeaponProfile();
   let critText;
   if (profile.primaryCrit === "none") critText = "Neither hand can score a critical hit while fighting two-weapon.";
   else if (profile.primaryCrit === "maxOnly") critText = `Primary hand crits only on a natural max roll (d${profile.primarySides}), with no automatic hit; off-hand can never crit.`;
