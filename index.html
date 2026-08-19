@@ -1173,7 +1173,10 @@
         <div class="row">
           <div>
             <label>Crit Die/Table</label>
-            <input type="text" id="pc-crit" placeholder="1d8/III" />
+            <div class="field-sync-row">
+              <input type="text" id="pc-crit" placeholder="1d8/III" />
+              <button type="button" class="derived-sync-btn" id="pc-crit-sync-btn" title="Set to this Class/Level's Crit Die/Table (Table 1-10)">↻</button>
+            </div>
           </div>
           <div>
             <label>Action Dice</label>
@@ -1587,6 +1590,10 @@ function fillForm(mode, data) {
     // occupations) from the hidden pc-occupation field this loop just
     // populated from saved data.
     syncOccupationControlsFromValue(document.getElementById("pc-occupation").value);
+    // Same "still auto-managed?" restoration as Init/Fort/Ref/Will above,
+    // for the Crit Die/Table field's Class/Level auto-fill.
+    const pcCritRestoreEl = document.getElementById("pc-crit");
+    if (pcCritRestoreEl) pcCritRestoreEl.dataset.autoSynced = d.pcCritAutoSynced ? "1" : "0";
   }
   // Same "still auto-managed?" restoration as above, for the monster
   // Crit field's Monster Type + HD auto-fill.
@@ -1613,6 +1620,8 @@ function readForm(mode) {
       autoFlags[fieldId] = el ? el.dataset.autoSynced === "1" : false;
     });
     d.derivedAuto = autoFlags;
+    const pcCritSaveEl = document.getElementById("pc-crit");
+    d.pcCritAutoSynced = pcCritSaveEl ? pcCritSaveEl.dataset.autoSynced === "1" : false;
   }
   if (mode === "monster") {
     const critEl = document.getElementById("crit");
@@ -2277,6 +2286,42 @@ function classSaveBonus(saveKey) {
   return entry ? (entry[saveKey] || 0) : 0;
 }
 
+// What the Crit Die/Table field SHOULD read for the current Class + Level
+// (Table 1-10) - this is the exact same source critProfileForStats() pulls
+// from to resolve an actual roll, so this field and the dice a crit
+// actually uses can never drift apart. 0-level/unset-class/"Other" PCs
+// fall back to Crit Table I with a plain d6, same default
+// critProfileForStats() itself uses, rather than leaving the field blank -
+// that keeps it truthful to what a crit would actually roll even before a
+// Class is picked. The expanded threat range (currently only Warriors,
+// e.g. 19-20) is appended in parentheses since the die/table alone
+// wouldn't otherwise show it.
+function computePcCritText() {
+  const entry = currentClassLevelEntry();
+  const critDie = entry && entry.critDie ? entry.critDie : "1d6";
+  const critTable = entry && entry.critTable ? entry.critTable : "I";
+  const threatRange = entry && entry.threatRange ? entry.threatRange : 20;
+  const threatText = threatRange < 20 ? ` (${threatRange}-20)` : "";
+  return `${critDie}/${critTable}${threatText}`;
+}
+
+// Keeps the Crit Die/Table field synced to Class + Level, same "manual
+// edit wins" contract as the Monster sheet's Crit field
+// (recalcMonsterCrit): `force` (a Class or Level change, or the ↻ button)
+// always overwrites the field and re-opts it into auto-sync; without it
+// (e.g. a render triggered by something unrelated) the field is only
+// touched if it's still tagged auto-synced, so a hand-typed override (say,
+// a house-ruled crit die) is never silently clobbered.
+function recalcPcCrit(force) {
+  const el = document.getElementById("pc-crit");
+  if (!el) return "";
+  if (force || el.dataset.autoSynced === "1") {
+    el.value = computePcCritText();
+    el.dataset.autoSynced = "1";
+  }
+  return el.value;
+}
+
 // Combines an ability modifier with this class/level's Attack bonus into
 // the text that goes in an attack row's Bonus field. Cleric/Thief/
 // Halfling/Wizard/Elf have a flat numeric Attack bonus that adds straight
@@ -2780,6 +2825,13 @@ function renderPcStatline(d) {
   const speed = recalcPcSpeed();
   recalcPcFumbleDie();
   recalcPcInitiativeDie();
+  // Same "passive re-render only touches an already-auto-synced field"
+  // recompute the Monster sheet's Crit field gets from
+  // renderMonsterStatline - keeps the field (and the statline preview
+  // below, which reads the live DOM value rather than the possibly-stale
+  // `d.crit` snapshot) matching the current Class/Level on every render,
+  // not just right after a Class/Level change fires its own forced sync.
+  const liveCrit = recalcPcCrit(false);
   const hp = d.hpMax ? `${d.hpCurrent || d.hpMax}/${d.hpMax}` : (d.hpCurrent || "—");
   const classLevel = [d.class || d.occupation || null, d.level ? `Lvl ${d.level}` : null].filter(Boolean).join(" ");
   const atkSummary = formatAttacksSummary(d.attacks);
@@ -2792,7 +2844,7 @@ function renderPcStatline(d) {
     `<b>Spd</b> ${speed}'`,
     d.actdice ? `<b>Act</b> ${d.actdice}` : null,
     (d.fort || d.ref || d.will) ? `<b>SV</b> Fort ${d.fort || "+0"}, Ref ${d.ref || "+0"}, Will ${d.will || "+0"}` : null,
-    d.crit ? `<b>Crit</b> ${d.crit}` : null,
+    liveCrit ? `<b>Crit</b> ${liveCrit}` : null,
     atkSummary ? `<b>Atk</b> ${atkSummary}` : null,
   ].filter(Boolean);
   document.getElementById("statline-preview-pc").innerHTML = parts.join("; ");
@@ -2874,6 +2926,18 @@ if (critSyncBtn) {
     recalcMonsterCrit(true);
     scheduleSave();
     cfgRenderFromCurrentForm("monster");
+  });
+}
+const pcCritEl = document.getElementById("pc-crit");
+if (pcCritEl) {
+  pcCritEl.addEventListener("input", () => { pcCritEl.dataset.autoSynced = "0"; });
+}
+const pcCritSyncBtn = document.getElementById("pc-crit-sync-btn");
+if (pcCritSyncBtn) {
+  pcCritSyncBtn.addEventListener("click", () => {
+    recalcPcCrit(true);
+    scheduleSave();
+    cfgRenderFromCurrentForm("pc");
   });
 }
 
@@ -3538,6 +3602,15 @@ document.getElementById("pc-class").addEventListener("change", () => {
   // player already entered; use the ↻ buttons (or the Str/Agi attack
   // buttons) to resync a field that's already filled.
   refreshDerivedPcFields();
+  // A new Class also means a (possibly) different Crit Die/Table (Table
+  // 1-10) - unlike Fort/Ref/Will above, this one force-overwrites rather
+  // than only-if-blank, matching the Monster sheet's Crit field: picking a
+  // Class is a deliberate enough action that it should always take effect,
+  // the same way the monster sheet's Monster Type dropdown does. A
+  // hand-typed override still survives, since a manual edit untags the
+  // field from auto-sync (see pcCritEl's "input" listener) and only a
+  // FORCED resync (Class/Level change, or the ↻ button) overrides that.
+  recalcPcCrit(true);
   // Halfling's special two-weapon rule waives the off-hand's "light
   // weapon" restriction - switching Class in or out of Halfling can
   // change which weapons are eligible for that role, so the attack rows
@@ -3552,11 +3625,15 @@ document.getElementById("pc-level").addEventListener("change", () => {
   // Same non-destructive refresh as the Class handler above - leveling up
   // fills in blank saves with the new class/level base, but resyncing an
   // already-filled save after a level-up is what the ↻ button is for.
+  // Crit Die/Table (Table 1-10) forces the same way it does on a Class
+  // change - see the comment there.
   // Bound to "change" now that Level is a <select> (a picked option is a
   // discrete choice, not something that fires "input" mid-keystroke the
   // way the old free-text field did).
   refreshDerivedPcFields();
+  recalcPcCrit(true);
   cfgRenderFromCurrentForm("pc");
+  scheduleSave();
 });
 
 // Active half: an explicit click always sets the field to exactly its
