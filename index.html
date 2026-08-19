@@ -1257,6 +1257,17 @@ function fillForm(mode, data) {
   document.getElementById(cfg.hpMaxId).value = d.hpMax ?? "";
   renderAttacks(mode, d.attacks || []);
   if (mode === "pc") renderArmorItems(d.armorItems || []);
+  // Restores which of Init/Fort/Ref/Will were still auto-managed (as
+  // opposed to hand-typed) when this token was last saved, so that flag
+  // - and therefore live Class/Level/ability updates to those fields -
+  // survives switching to another token and back, or reopening the sheet.
+  if (mode === "pc") {
+    const autoFlags = d.derivedAuto || {};
+    Object.keys(PC_DERIVED_FIELD_SOURCES).forEach(fieldId => {
+      const el = document.getElementById(fieldId);
+      if (el) el.dataset.autoSynced = autoFlags[fieldId] ? "1" : "0";
+    });
+  }
   suppressChange = false;
   cfg.render(d);
 }
@@ -1269,6 +1280,14 @@ function readForm(mode) {
   d.hpMax = document.getElementById(cfg.hpMaxId).value;
   d.attacks = readAttacks(mode);
   d.armorItems = mode === "pc" ? readArmorItems() : [];
+  if (mode === "pc") {
+    const autoFlags = {};
+    Object.keys(PC_DERIVED_FIELD_SOURCES).forEach(fieldId => {
+      const el = document.getElementById(fieldId);
+      autoFlags[fieldId] = el ? el.dataset.autoSynced === "1" : false;
+    });
+    d.derivedAuto = autoFlags;
+  }
   return d;
 }
 
@@ -1491,7 +1510,7 @@ function weaponOptionsHtml(selectedKey) {
 }
 
 function emptyAttack() {
-  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false };
+  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "" };
 }
 
 function attackRowHtml(atk, mode) {
@@ -1529,7 +1548,7 @@ function attackRowHtml(atk, mode) {
       </div>
       <div class="attack-row-fields">
         <input type="text" class="attack-name" placeholder="Custom label (optional)" value="${escapeHtml(atk.name)}" />
-        <input type="text" class="attack-bonus" placeholder="+4" value="${escapeHtml(atk.bonus)}" />
+        <input type="text" class="attack-bonus" placeholder="+4" value="${escapeHtml(atk.bonus)}" data-auto-synced="${atk.bonusAuto ? "1" : "0"}" data-bonus-source="${escapeHtml(atk.bonusSource || "")}" />
         <button type="button" class="attack-quick-btn" data-mod="str" title="Set Bonus to Str modifier + class/level Attack bonus">Str</button>
         <button type="button" class="attack-quick-btn" data-mod="agi" title="Set Bonus to Agi modifier + class/level Attack bonus">Agi</button>
         <input type="text" class="attack-damage" placeholder="1d6" value="${escapeHtml(atk.damage)}" />
@@ -1563,6 +1582,9 @@ function readAttacks(mode) {
       base.weapon = weaponEl ? weaponEl.value : "";
       const equippedEl = row.querySelector(".attack-equipped");
       base.equipped = equippedEl ? equippedEl.checked : false;
+      const bonusEl = row.querySelector(".attack-bonus");
+      base.bonusAuto = bonusEl ? bonusEl.dataset.autoSynced === "1" : false;
+      base.bonusSource = bonusEl ? (bonusEl.dataset.bonusSource || "") : "";
     }
     return base;
   });
@@ -1601,15 +1623,30 @@ function applyWeaponSelection(row) {
   }
   const damageAbilityMod = (entry.type === "melee" || entry.strAtClose) ? abilityModifierFromField("pc-str") : 0;
   damageInput.value = entry.damage ? `${entry.damage}${damageAbilityMod ? formatSignedNumber(damageAbilityMod) : ""}` : "";
-  if (!bonusInput.value.trim()) {
+  // Resync the Bonus field if it's blank, OR if it's still tagged as
+  // auto-managed (set by a prior weapon pick or a Str/Agi quick-button
+  // click, and not hand-edited since) - that second case is what lets
+  // switching from a melee weapon to a ranged one flip the Bonus from
+  // Str-sourced to Agi-sourced instead of leaving it stuck on the old
+  // ability. A field the player typed into directly is never touched here.
+  if (!bonusInput.value.trim() || bonusInput.dataset.autoSynced === "1") {
     const attackAbilitySource = entry.type === "ranged" ? "pc-agi" : "pc-str";
     bonusInput.value = composedAttackBonusText(attackAbilitySource);
+    bonusInput.dataset.autoSynced = "1";
+    bonusInput.dataset.bonusSource = attackAbilitySource;
   }
 }
 
 function attachAttackRowListeners(mode) {
   attackListEl(mode).querySelectorAll(".attack-row").forEach(row => {
     row.querySelectorAll("input").forEach(inp => inp.addEventListener("input", scheduleSave));
+    // Typing directly into Bonus untags it as auto-managed, so class/level/
+    // ability changes stop touching it - the same "manual edit wins"
+    // contract the derived PC fields (Init/Fort/Ref/Will) follow.
+    const bonusInputEl = row.querySelector(".attack-bonus");
+    if (bonusInputEl) {
+      bonusInputEl.addEventListener("input", () => { bonusInputEl.dataset.autoSynced = "0"; });
+    }
     row.querySelector(".attack-remove-btn").addEventListener("click", () => {
       row.remove();
       scheduleSave();
@@ -1650,7 +1687,13 @@ function attachAttackRowListeners(mode) {
       row.querySelectorAll(".attack-quick-btn").forEach(btn => {
         btn.addEventListener("click", () => {
           const sourceId = btn.dataset.mod === "agi" ? "pc-agi" : "pc-str";
-          row.querySelector(".attack-bonus").value = composedAttackBonusText(sourceId);
+          const bonusEl = row.querySelector(".attack-bonus");
+          bonusEl.value = composedAttackBonusText(sourceId);
+          // A quick-button click opts this row back into staying in sync -
+          // same as clicking a save's ↻ button - so later class/level/
+          // ability changes keep updating it until the player types over it.
+          bonusEl.dataset.autoSynced = "1";
+          bonusEl.dataset.bonusSource = sourceId;
           scheduleSave();
           cfgRenderFromCurrentForm(mode);
         });
@@ -1883,21 +1926,55 @@ function derivedPcFieldValue(fieldId, sourceId) {
   return formatSignedNumber(abilityMod + classSaveBonus(saveKey));
 }
 
-// Passive half of the automation: whenever an ability score, Class, or
-// Level is edited, fill in any of Init/Fort/Ref/Will that are still blank
-// with their full derived value (ability modifier, plus class/level save
-// bonus for Fort/Ref/Will). Never touches a field that already has
-// something in it, so this only ever provides a starting point, not a
-// silent overwrite of whatever the player already entered.
+// Every derived PC field (Init/Fort/Ref/Will, and any weapon row's Bonus
+// field) is tagged data-auto-synced="1" the moment WE fill it - via this
+// function, the ↻ buttons, a Str/Agi quick-button click, or a weapon pick.
+// Typing directly into one of these fields clears that tag (see the
+// "input" listeners below and in attachAttackRowListeners). That tag, not
+// "is the field currently blank," is what decides whether a class/level/
+// ability change is allowed to keep updating it - a blank-only check
+// meant the very first auto-fill (e.g. an ability's blur handler running
+// before Class was even chosen) permanently blocked every later class/
+// level change from ever touching that field again, which is why saves
+// and attack bonuses appeared to stop reacting to Class/Level/ability
+// edits after the first value landed.
 function refreshDerivedPcFields() {
   Object.entries(PC_DERIVED_FIELD_SOURCES).forEach(([fieldId, sourceId]) => {
     const el = document.getElementById(fieldId);
-    if (!el || el.value.trim() !== "") return;
+    if (!el) return;
+    const isBlank = el.value.trim() === "";
+    if (!isBlank && el.dataset.autoSynced !== "1") return;
     el.value = derivedPcFieldValue(fieldId, sourceId);
+    el.dataset.autoSynced = "1";
   });
+  refreshAutoSyncedAttackBonuses();
   recalcPcAC();
   scheduleSave();
 }
+
+// Same auto-synced contract, applied to every PC weapon row's Bonus field:
+// resync any row whose Bonus is still tagged auto-managed to the current
+// ability modifier + class/level Attack bonus, using whichever ability
+// (Str or Agi) that row was last computed from. Rows the player has typed
+// a custom Bonus into are skipped, same as the save fields above.
+function refreshAutoSyncedAttackBonuses() {
+  const listEl = attackListEl("pc");
+  if (!listEl) return;
+  listEl.querySelectorAll(".attack-row").forEach(row => {
+    const bonusInput = row.querySelector(".attack-bonus");
+    if (!bonusInput || bonusInput.dataset.autoSynced !== "1") return;
+    const source = bonusInput.dataset.bonusSource || "pc-str";
+    bonusInput.value = composedAttackBonusText(source);
+  });
+}
+
+// Manual edits to a derived save field opt it back out of auto-sync,
+// mirroring the "input" listener attached to each weapon row's Bonus
+// field in attachAttackRowListeners.
+Object.keys(PC_DERIVED_FIELD_SOURCES).forEach(fieldId => {
+  const el = document.getElementById(fieldId);
+  if (el) el.addEventListener("input", () => { el.dataset.autoSynced = "0"; });
+});
 
 // DCC's core armor table - verified against a DCC quick-reference before
 // hardcoding, since the AC bonus per tier is NOT a flat +1 increment
@@ -2232,6 +2309,9 @@ function syncDerivedPcField(fieldId) {
   const el = document.getElementById(fieldId);
   if (!el) return;
   el.value = derivedPcFieldValue(fieldId, sourceId);
+  // An explicit ↻ click re-opts this field into auto-sync, same as a
+  // Str/Agi quick-button click does for a weapon row's Bonus field.
+  el.dataset.autoSynced = "1";
   scheduleSave();
   cfgRenderFromCurrentForm("pc");
 }
