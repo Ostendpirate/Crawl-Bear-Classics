@@ -2186,12 +2186,20 @@ const MONSTER_TYPE_LABELS = {
   other: "All Other",
 };
 
-// The HD field is free text like "4d8+4" or "1d6" - the leading dice
-// count is what Table 9-10 keys off of. No parseable count (blank field,
-// "1d3 hp" style notation, etc.) is treated as "Less than 1 HD" (tier 0),
-// same bucket the source table uses for the weakest creatures.
+// The HD field is free text - usually dice notation like "4d8+4" or
+// "1d6", where the leading dice count is what Table 9-10 keys off of, but
+// plenty of stat blocks just write the Hit Dice as a bare number ("4",
+// "11 HD") with no die at all, so that's read as the HD count directly.
+// Dice notation wins if both a bare leading number AND a "NdX" pattern
+// are present (e.g. "4d8+4" uses the 4 before the "d", not some other
+// number later in the string). No parseable count (blank field, etc.) is
+// treated as "Less than 1 HD" (tier 0), same bucket the source table uses
+// for the weakest creatures.
 function hdTierFromText(hdText) {
-  const m = String(hdText || "").match(/(\d+)\s*d/i);
+  const text = String(hdText || "").trim();
+  const diceMatch = text.match(/(\d+)\s*d/i);
+  const bareMatch = text.match(/^(\d+)/);
+  const m = diceMatch || bareMatch;
   if (!m) return 0;
   const count = parseInt(m[1], 10);
   if (!count || count < 1) return 0;
