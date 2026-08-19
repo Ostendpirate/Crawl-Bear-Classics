@@ -938,6 +938,22 @@
 
         <div class="row">
           <div>
+            <label>Monster Type</label>
+            <select id="montype">
+              <option value="">— Unspecified (manual Crit) —</option>
+              <option value="humanoid">Humanoid w/ Weapons</option>
+              <option value="dragon">Dragon</option>
+              <option value="demon">Demon / Devil</option>
+              <option value="giant">Giant</option>
+              <option value="undead">Un-dead</option>
+              <option value="other">All Other</option>
+            </select>
+            <div class="fumble-die-note" id="montype-note">Picking a type auto-fills Crit below from Table 9-10, based on HD.</div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
             <label>Init</label>
             <input type="text" id="init" placeholder="+2" />
           </div>
@@ -948,7 +964,8 @@
           <div>
             <label>Crit</label>
             <div class="field-sync-row">
-              <input type="text" id="crit" placeholder="M/d10" />
+              <input type="text" id="crit" placeholder="M/d10" data-auto-synced="0" />
+              <button type="button" class="derived-sync-btn" id="crit-sync-btn" title="Recompute Crit from Monster Type + HD">↻</button>
               <button type="button" class="tables-btn tables-btn-icon" id="monster-tables-btn" title="View this monster's Crit and Fumble tables">📖</button>
             </div>
           </div>
@@ -1361,7 +1378,7 @@ const EMPTY_STATE_NOT_OWNED_HTML = `This token isn't assigned to you.<br/><br/>A
 
 const MONSTER_TEXT_FIELD_IDS = ["init","crit","hd","mv","act","fort","ref","will","sp","notes"];
 const MONSTER_NUMBER_FIELD_IDS = ["ac"];
-const MONSTER_SELECT_FIELD_IDS = ["al"];
+const MONSTER_SELECT_FIELD_IDS = ["al", "montype"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
 const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-actdice","pc-fort","pc-ref","pc-will","pc-equipment","pc-spells","pc-languages","pc-notes","pc-ac-misc"];
@@ -1437,6 +1454,12 @@ function fillForm(mode, data) {
       if (el) el.dataset.autoSynced = autoFlags[fieldId] ? "1" : "0";
     });
   }
+  // Same "still auto-managed?" restoration as above, for the monster
+  // Crit field's Monster Type + HD auto-fill.
+  if (mode === "monster") {
+    const critEl = document.getElementById("crit");
+    if (critEl) critEl.dataset.autoSynced = d.critAutoSynced ? "1" : "0";
+  }
   suppressChange = false;
   cfg.render(d);
 }
@@ -1456,6 +1479,10 @@ function readForm(mode) {
       autoFlags[fieldId] = el ? el.dataset.autoSynced === "1" : false;
     });
     d.derivedAuto = autoFlags;
+  }
+  if (mode === "monster") {
+    const critEl = document.getElementById("crit");
+    d.critAutoSynced = critEl ? critEl.dataset.autoSynced === "1" : false;
   }
   return d;
 }
@@ -1631,17 +1658,15 @@ const DCC_CLASS_TABLES = {
 // is represented as max: 0 / max: 1 respectively. lookupTableRow() below
 // does the range lookup.
 //
-// Only Crit Tables I-V (used by all seven PC classes, see critTable on
-// DCC_CLASS_TABLES above) and Crit Table M ("Monsters" - Table 9-10's
-// generic "All Other" column, and the fallback for anything not
-// covered below) are transcribed in full. Table 9-10 also maps
-// Humanoids w/ Weapons to Table III (already included) by monster HD.
-// The three most elaborate monster-specific tables - DR (Dragons), DN
-// (Demons & Devils), G (Giants), and U (Un-dead) - run to dozens of
-// paragraph-length entries each and aren't reproduced here; a monster
-// whose Crit field names one of those (e.g. "DR/d20") still gets a
-// correctly-sized die roll and a clear crit alert, just without the
-// flavor-text lookup - lookupCritTable() returns null and the caller
+// Crit Tables I-V (used by all seven PC classes, see critTable on
+// DCC_CLASS_TABLES above) plus every monster-specific table from Table
+// 9-10 - DR (Dragons), DN (Demons & Devils), G (Giants), U (Un-dead), and
+// M (the generic "All Other" column, also the fallback for anything not
+// covered below) - are all transcribed in full. Table 9-10 also maps
+// Humanoids w/ Weapons to Table III (already included) by monster HD. A
+// monster whose Crit field names a table key not present here still gets
+// a correctly-sized die roll and a clear crit alert, just without the
+// flavor-text lookup - lookupTableRow() falls through and the caller
 // falls back to a "consult the Reference Booklet" note.
 const CRIT_TABLES = {
   I: {
@@ -1761,7 +1786,8 @@ const CRIT_TABLES = {
       { max: 20, text: "Blow crushes spinal cord. Inflict +3d12 damage with this strike, and the foe must make a Fort save (DC 15 + PC level) or suffer permanent paralysis." },
       { max: 21, text: "Blow reduces internal organs to jelly. Death is inevitable in 1d8 rounds." },
       { max: 22, text: "Target is disemboweled, spilling their entrails onto the ground. The foe dies of shock in 1d6 rounds." },
-      { max: Infinity, text: "Strike to chest explodes heart. (Reference Booklet p.25 continues rows 23-28+ with an instant-kill result at the top of the range - consult your rulebook for the exact wording.)" },
+      { max: 23, text: "Strike to chest explodes heart. Inflict +3d12 damage with this strike, and the foe must make a Fort save (DC 15 + PC level) or die instantly." },
+      { max: Infinity, text: "Skull crushed like a melon. Inflict +3d12 damage with this strike, and the foe must make a Fort save (DC 20 + PC level) or die in 1d3 rounds." },
     ],
     footnotes: "* Magical weapons never break due to critical fumbles. The target is disarmed instead, the weapon landing 1d10+5 feet away.\n** A PC overcome by battle rage may temporarily expend points of their Personality or Intelligence score to enhance the damage on their critical hit. For every ability point they expend, they add +1d12 to their damage roll. Ability scores lost this way return as the warrior heals.",
   },
@@ -1831,6 +1857,114 @@ const CRIT_TABLES = {
     ],
     footnotes: "* Magical weapons never break due to critical fumbles. The target is disarmed instead, the weapon landing 1d10+5 feet away.",
   },
+  DR: {
+    label: "Crit Table DR — Dragons",
+    rows: [
+      { max: 1, text: "Dragon rakes target with its spiny hide. This attack inflicts +1d6 damage." },
+      { max: 2, text: "Dragon crushes PC's head between its jaws! The PC is stunned and falls to the bottom of the initiative count for remainder of battle." },
+      { max: 3, text: "Dragon smashes the PC's legs, knocking the PC prone. The character suffers -5' speed until healed." },
+      { max: 4, text: "Dragon targets the character's weapon. The character takes half damage, but must make an opposed Strength check against the dragon. Treat dragon as Strength equal to 10 + HD. If the check fails, dragon grabs weapon and hurls it 3d10x10' feet away." },
+      { max: 5, text: "Blow to shield arm! Normal damage and the shield is destroyed. If no shield, this attack inflicts +1d6 damage." },
+      { max: 6, text: "Scale, tooth, or claw lodged in the PC's chest! This attack inflicts +2d6 damage, plus an additional 1d6 damage next round." },
+      { max: 7, text: "Breath weapon splash! Spittle laced with dragon's breath weapon causes an additional 1d8 damage and any other side effects of breath weapon (poison, sleep, etc.) if appropriate." },
+      { max: 8, text: "Arm ripped from socket! Dragon hurls the arm away. This attack inflicts +1d12 damage, and the arm is forever useless unless recovered and magically healed." },
+      { max: 9, text: "Tail-sling! Dragon wraps its tail around the PC and slingshots them into the distance. The character is flung 3d6x10' away in a random direction. If a wall or other obstruction is in the way, the character slams into it. The PC takes normal damage from the blow plus an additional 1d4 damage per 30' (or portion thereof) they are thrown, plus an additional 1d6 if they hit a wall or obstruction." },
+      { max: 10, text: "Combination strike! Normal damage and the dragon follows up with a second attack of same type." },
+      { max: 11, text: "Claw through the throat! The PC can't speak until healed and spends the next round struggling to breathe (unable to act)." },
+      { max: 12, text: "Dragon targets the PC's kneecap. PC's movement cut by half and this attack inflicts +1d10 damage." },
+      { max: 13, text: "Awe-inspiring blow! This attack inflicts +1d12 damage, and all nearby retainers and henchmen are forced to make a morale check. Additionally, PCs must make a Will save (vs. DC of 10 + dragon's HD) or take a -2 penalty to their remaining attacks this round." },
+      { max: 14, text: "Breath weapon combo attack! Dragon unleashes a tiny fraction of its power against the character. This does not count against its daily breath weapon use. The PC takes normal damage plus a breath weapon strike at half normal damage—in most cases this means half damage on a failed save and quarter damage on a save." },
+      { max: 15, text: "Dragon spears the PC with one of its leg spines, then moves away. The PC flails about trying to free themself from impalement. This attack inflicts +2d12 damage, and the PC can only free themself with a DC 16 Agility check. The PC can take no actions until freed, and moves with the dragon while impaled." },
+      { max: 16, text: "Dragon finishes its strike with a mighty head-butt! The character is sent flying 2d4x10' away from the dragon and takes an additional +3d6 damage from the head-butt and subsequent fall." },
+      { max: 17, text: "Dragon bends back the PC's leg in a way it was never meant to, snapping the leg in half. The character's movement is reduced by half, and they take an extra 2d6 damage." },
+      { max: 18, text: "Dragon pins the character down with one claw before slashing with another. Dragon inflicts +1d6 damage and gets a bonus claw attack at +4 to hit." },
+      { max: 19, text: "Rag doll smash! Dragon locks onto the character's ankle, swings them up, and smashes him to the ground head-first. This attack inflicts +1d16 damage, and the PC must make a Fort save (DC 15 + HD) or fall unconscious." },
+      { max: 20, text: "Dragon's spines pierce the character in 1d7 places. Long, sharp, lance-like dragon scales emerge from the character's back, piercing multiple important organs. The character takes double damage, and if they survive, they are automatically reduced to 1 Strength and 1 Agility as their organs fail one by one. However, the character is now stuck to the dragon (its head, claw, wing, or whatever part the dragon attacked with). The dragon must spend its next attack with that limb prying off the bleeding PC before it can use that attack mode again. Once the PC is pried off, they take 1d8 damage per round from massive hemorrhaging. Only magical healing can arrest the bleeding and prevent death." },
+      { max: 21, text: "Dragon hooks the PC with its wing and does a lift-and-smash. The character takes an additional +2d8 damage and is automatically stunned for 1d4 rounds." },
+      { max: 22, text: "Dragon captures the PC with its tail and begins constricting like an anaconda. The PC automatically takes an extra 1d8 crushing damage. Additionally, the PC is held in place and begins suffocating. The character must make a Fort save each round thereafter (DC equals 10 + dragon's HD) or die of suffocation. The PC cannot escape (or move in any way) until they succeed on an opposed Strength check (treat dragon as 10 + HD). The dragon cannot use its tail to attack while holding PC." },
+      { max: 23, text: "Dragon uses one claw to hold down the PC while it rips their limbs off with the other. The character loses 1d3+1 limbs, taking an extra 1d14 damage for each limb lost. The result is probably a paraplegic or quadriplegic PC. The dragon proceeds to swallow the limbs. Limbs can only be restored if they are recovered from the dragon's gullet and then magically reattached." },
+      { max: 24, text: "Dragon embeds its claw/tooth/spine in the PC and shreds the character's internal organs. The character takes an additional 1d16 damage and is pinned in place, unable to take any action. On the following round, the dragon finishes this attack by ripping out the character's guts. The character is disemboweled. The character automatically dies in 1d4 rounds as they bleed out. The dragon proceeds to hurl the character's internal organs at another opponent, forcing a DC 20 morale check." },
+      { max: 25, text: "With staggering precision, the dragon plucks out both the character's eyes in a single strike. The character takes no additional damage but is permanently blinded. The dragon flings the eyeballs back at the PC, who, in their now-sightless state, fails to see them go rolling out of reach." },
+      { max: 26, text: "The dragon swallows the character whole in a single massive bite. The character takes normal damage and is now trapped in the dragon's gullet. The character automatically takes an additional 3d8 damage each round thereafter from suffocation, constriction, and stomach acids. If the character succeeds in a DC 22 Strength check they can force their hands to move against the crushing strength of the dragon's stomach, allowing an attack of some kind (e.g., drawing a dagger to try to cut their way out), but they cannot be freed until the dragon is killed and they are cut out." },
+      { max: 27, text: "The dragon's razor-sharp talons (or teeth or spines, as appropriate) slash the character in perfect synchronicity, rendering the character's body into equal thirds. Instant death!" },
+      { max: 28, text: "Practicing a difficult draconic maneuver, the dragon executes a \"reverse breath weapon,\" breathing out in a short burst then immediately inhaling. This focused attack does not count against the dragon's daily breath weapon use. The PC takes normal damage, plus a full breath weapon hit (with a normal save allowed). There is no area of effect, as the dragon immediately cuts off the breath weapon after a micro-second of attack." },
+      { max: 29, text: "The dragon pins the character down, cracks their rib cage open, reaches into their chest cavity, and rips out their heart. The character dies instantly. Brandishing the heart as a bludgeoning weapon, the dragon then makes one free claw attack against the nearest ally of the PC, splattering the character's heart on the ally." },
+      { max: Infinity, text: "The dragon explodes the character's head into splinters with an incredible blow, causing instant death. Everyone who witnesses the attack must make a morale check vs. DC 25 or flee (for retainers) or remain stunned and motionless on their next round (for PCs). The dragon makes a free claw attack against the nearest PC, and may continue making additional claw attacks until it misses." },
+    ],
+  },
+  DN: {
+    label: "Crit Table DN — Devils and Demons",
+    rows: [
+      { max: 1, text: "Piercing blow. The character takes an additional 1d8 damage." },
+      { max: 2, text: "Life burn. The character permanently loses an additional 2 hit points." },
+      { max: 3, text: "Head strike. The character takes an additional 1d10 damage." },
+      { max: 4, text: "Major life burn. The character permanently loses an additional 4 hit points." },
+      { max: 5, text: "Corruption. Character takes on corruption, similar to a wizard casting spells. Roll 1d10 on a corruption table. If the demon has 5 HD or less, use the minor corruption table; if 6-10 HD, use the major corruption table; if 11+ HD, use the greater corruption table." },
+      { max: 6, text: "Aging. The character ages 1d10 years instantly. If cumulative aging from this and other effects exceeds 20 years, the character suffers a -1 penalty to all physical ability scores." },
+      { max: 7, text: "Infernal weakening I. The PC loses 1d4 points of ability score for one week. Determine randomly: (roll 1d5) (1) Strength; (2) Agility; (3) Stamina; (4) Intelligence; (5) Personality." },
+      { max: 8, text: "Soul wound. The character loses 1 XP from the soul-burning touch of the demon." },
+      { max: 9, text: "Soul trade. The character's soul is swapped with that of a soul already owned by the demon. The demon takes possession of the character's soul while their body is now controlled by another life force. The character's physical stats remain unchanged, but re-roll the character's new Intelligence, Personality, and Luck with 3d6. The character loses all their normal memories and takes on the memories of the soul now in their body, including its most recent memories of infernal brimstone. They retain their class abilities and other training, but their new mental statistics may change the skill with which they use their abilities. The character can recover their stolen soul only by journeying to the demon's home plane and recovering it. The judge is encouraged to come up with a new history for the soul now in their body." },
+      { max: 10, text: "Double corruption! The PC takes on corruption twice, similar to a wizard casting spells. Roll 1d10 twice on a corruption table. If the demon has 5 HD or less, use the minor corruption table; if 6-10 HD, use the major corruption table; if 11+ HD, use the greater corruption table." },
+      { max: 11, text: "Infernal weakening II. The PC loses 1 point of one ability score permanently. Determine randomly: (roll 1d5) (1) Strength; (2) Agility; (3) Stamina; (4) Intelligence; (5) Personality." },
+      { max: 12, text: "Luck burn. The touch of the demon brings bad luck upon the character! They lose 1 point of Luck. A halfling or thief can recover this loss through normal class means." },
+      { max: 13, text: "Severe soul wound. The character loses 3 XP from the demon's soul-searing touch." },
+      { max: 14, text: "Astral drift. The character's soul is sent adrift on the astral plane! The character drops to the ground, catatonic, and cannot be revived until their soul is located and returned to their body." },
+      { max: 15, text: "Confinement. The demon's strike breaks the magic bonds holding it on this plane and confines the character to the demon's current location. The character sees a burning circle of flame appear around them, sputtering black with dark energy. The circle is approximately 5 feet in diameter and traps the character within. It is considered powerful magic (treat as spell check 25 to dispel). The character cannot pass through it by any means until it is dispelled or the character is freed or \"banished\" back to their native free state. The demon, on the other hand, is now freed from any confinement or banishment to this plane and can return to its home plane at will." },
+      { max: Infinity, text: "Banishment. The demon's strike banishes the character to the demon's home plane! The character vanishes from sight as they are instantly transported back to the demon's home. For all intents and purposes, the character is out of the game unless their allies immediately follow to save them." },
+    ],
+  },
+  G: {
+    label: "Crit Table G — Giants",
+    rows: [
+      { max: 1, text: "Crushing blow. This attack inflicts +1d8 damage, and the character's spine is compressed. The PC permanently loses 1d6\" of height." },
+      { max: 2, text: "Broken arm. This attack inflicts +1d10 damage and one arm is crippled. The character suffers permanent loss of 1 Strength (arm never heals back to original position properly), and the arm cannot be used until healed." },
+      { max: 3, text: "Broken leg. This attack inflicts +1d10 damage and one leg is crippled. The PC suffers permanent loss of 5' of speed (leg never heals properly) and moves at half speed until healed." },
+      { max: 4, text: "Crushed chest. This attack inflicts +1d12 damage and chest is caved in. Until completely healed, any sort of exertion (including combat, running, swimming, jumping, etc.) requires DC 6 Fort save. Failure indicates permanent loss of 1 Stamina (due to several organ damage; e.g., heart attack, lung failure, etc.)." },
+      { max: 5, text: "Flattened. The PC is literally flattened into the ground by the sheer force of the blow, with multiple broken bones and several shattered ribs. The character takes an additional 1d12 damage and permanently loses 1 Stamina." },
+      { max: 6, text: "Ricochet blow. The giant's staggering attack sends the target hurling through the air up to 3d30' to collide with another victim (randomly determined). Both the original target and the secondary target take 1d10 damage from the collision (in addition to the giant's normal damage against the first target)." },
+      { max: 7, text: "Colossal head strike. This attack inflicts +2d6 damage and the PC permanently loses 1 point of Intelligence. In addition, there is a 25% chance the character forgets the last 24 hours of their life." },
+      { max: 8, text: "Weapon smash. The giant's massive blow causes an additional 1d8 damage and splinters the character's weapons and equipment. The PC's weapons and equipment each have a 50% chance of being destroyed; roll for each item: armor is busted loose (straps broken and plates dented), shields are shattered, weapons splintered or cracked, etc. Magic items are destroyed only 10% of the time instead of 50%." },
+      { max: 9, text: "Sweeping blow. The giant's strike bowls over the character, and they take an extra 1d8 damage and are knocked prone (must spend their next activation to stand). In addition, the giant can make another attack as long as it is directed against a different target, who must be within melee range and adjacent to the first target. If this second attack hits, the giant can attack another target, up to five in total, as it sweeps through its opponents." },
+      { max: 10, text: "Legs crushed into ground. The giant's blow hits the PC square on the head, driving them into the earth like a nail into a board. The character takes an additional 2d8 damage, and both their legs are broken as they are propelled 1d4 feet into the earth (reduced to 1d4 inches if surface is stone). The character suffers a permanent loss of 10' of speed and 1 Agility (legs never heal properly) and is temporarily reduced to a speed of 1' (yes, one foot per round) until their two broken legs are healed." },
+      { max: 11, text: "Roll again twice." },
+      { max: Infinity, text: "Roll again three times." },
+    ],
+  },
+  U: {
+    label: "Crit Table U — Un-dead",
+    rows: [
+      { max: 1, text: "Unnatural boils sprout spontaneously around the wound. These are extremely painful to the touch, and automatically inflict 1 point of damage in any round where the character exerts themself physically (such as running, jumping, and fighting). The boils can only be healed with magical healing." },
+      { max: 2, text: "The cold touch of un-death spreads across the wound. This attack inflicts +1d4 damage and the PC gets the chills, chattering their teeth noisily until magically healed." },
+      { max: 3, text: "The numbness of death spreads around the wounded area. This attack inflicts +1d4 damage and the PC slowly loses sensation. On the next round, they must make a Fort save against DC 2. Failure means they are paralyzed. This first save is easy, but they must make another save against DC 3 on the next round, then against DC 4, then DC 5, and so on. If they make every save to DC 20, they shake off the numbness and is unaffected. If a single save is failed, the PC is paralyzed - insensitive to any sensation and completely numb and unable to move. The paralysis can be cured by any magical healing." },
+      { max: 4, text: "The horrifying visage of life after death infects the PC's thoughts as the un-dead leers into their eyes with its attack. The PC must make a DC 15 Fort save or be shaken and unable to move or attack for the next 1d4 rounds." },
+      { max: 5, text: "The character is cursed from beyond the grave! Depending on their actions and the intelligence of the un-dead creature, the curse may have specific terms associated with the wishes of the un-dead (judge's discretion). Alternately, the curse causes a -1 penalty to Luck and all dice rolls until lifted." },
+      { max: 6, text: "The wound blackens immediately and a horrid infection from beyond the grave begins to spread. The character must make a DC 10 Fort save or temporarily lose 1d4 Stamina. The infection continues to attack each day, forcing another DC 10 Fort save each morning (failure results in the loss of another 1d4 Stamina) until the infection is magically expunged. The character does not heal while infected." },
+      { max: 7, text: "Supernatural frost spreads out from the wound in a lacy web, causing an additional 1d8 damage and intense pain. The frost dissipates on the next round but until the next full moon, the PC takes an extra 1 point of damage from all cold-based attacks." },
+      { max: 8, text: "Necrotic energies leap from the un-dead in a sizzling flash, enervating the character. The PC loses 2d4 Stamina temporarily." },
+      { max: 9, text: "Faced with the very real prospect of unnatural un-death, the PC becomes unhinged. They immediately lose 1d4 Personality and go temporarily insane, behaving erratically and strangely until the next new moon. The controlling player must make a percentile roll before any action, and on 01-10 the character makes an insane action (as determined by the judge) instead of what was intended. On 11-00 the intended action occurs." },
+      { max: 10, text: "The visage of rotting un-death brings the horror of the grave to the character's thoughts. They must make a DC 16 Fort save or be shaken with fear, unable to attack or do anything except quake in fear for 1d4 rounds." },
+      { max: 11, text: "Strange electrical sparks leap from the attacking un-dead, causing an additional 1d10 damage." },
+      { max: 12, text: "The attack is imbued with some unnatural remnant of un-dead slumber. The character must make a DC 16 Fort save or fall asleep, instantly and deeply. They will not awaken for 1d7 hours or until shaken violently." },
+      { max: 13, text: "The attack is infused with powerful necromantic energies which cause the character's skin to flake and rot! Their flesh begins to fall off in large chunks, exposing the muscle and bone below. This is extremely painful and debilitating. The character loses an extra 1d8 hit points and 1 point of Personality immediately and again every morning thereafter as their flesh slowly rots. They die when their Personality reaches 0. The rot can be arrested only by powerful magical healing." },
+      { max: 14, text: "The strike of un-death saps the PC's energy. The character temporarily loses 1d4 Strength and must make a DC 12 Fort save or lose an additional 1d4 Strength." },
+      { max: 15, text: "Strange spectral energies arc to the PC's body, making them temporarily incorporeal for 1d4 rounds. The PC cannot grasp physical objects. They cannot speak, make noise, attack, or be seen in bright light. They can fly at their normal movement rate and can pass through solid objects at half speed. They are considered un-dead while incorporeal. There is a 1% chance the transition is permanent." },
+      { max: 16, text: "A disgusting grave rot immediately spreads around the wound, causing an additional 2d6 damage and forcing a DC 16 Fort save. Failure on the save causes an additional temporary loss of 1d4 Stamina. The rot gets progressively worse until magically cured, forcing another save each morning against the loss of another 1d4 Stamina." },
+      { max: 17, text: "The brief brush with death affects the PCs' memory. They lose all memory of the last 24 hours and must make a DC 16 Fort save or also lose memories of the past 1d7 days." },
+      { max: 18, text: "The blow smashes against the PC's temple and gives them a glimpse of their own death sometime in the future. This brush with death paralyzes the PC with fear for 1d6 rounds." },
+      { max: 19, text: "The wound immediately turns a deep yellow color and a dizzying madness infects the character. They temporarily lose 1d6 Intelligence and 1d6 Personality." },
+      { max: 20, text: "The wound takes the shape of an unholy mark. The character takes an additional 1d6 damage and is marked. Un-dead creatures are attracted to the PC from miles around. They cannot hide from un-dead, and they relentlessly hound them. The mark can only be removed by a blessing, holy cleansing, exorcism, or the like." },
+      { max: 21, text: "The character's soul is scarred by un-death. They permanently lose 1 point of Luck." },
+      { max: 22, text: "The wound erupts in a disgusting infestation of maggots. They cause an additional 2d6 damage plus an ongoing 1d6 damage per round until the wound is healed via magical means." },
+      { max: 23, text: "The un-dead's intensely concentrated aura of unholiness infects the PC with an unholy aura. Any magical blessings or similar effects are automatically cancelled, and the character takes 1d4 points of temporary Personality loss." },
+      { max: 24, text: "Grave rot! The wound bubbles and festers like a thing not from this earth. The rot causes an additional 1d12 damage and 1d6 Strength loss immediately, and the wound will not heal naturally. The damage and Strength loss can only be recovered via magical healing." },
+      { max: 25, text: "In a supernatural display, flesh melts away from the wound, revealing the bones beneath and causing an additional 1d6 damage and 1 point of Stamina loss. Each round thereafter, the radius of melted flesh expands, causing an additional 1d6 damage and 1 point of Stamina loss. The melting flesh continues to expand until the PC dies. It can only be suspended via magical healing with a spell check of 20 or greater." },
+      { max: 26, text: "Death rattle! The stench of un-death chokes the character, who collapses in a fit of gagging that slowly begins to suffocate them. They must make a DC 20 Fort save or lose 1d4 points of Stamina. If they fail the Fort save, they must make another save on the next round. If that fails, they take additional Stamina damage and must make another save. The pattern continues until they make a save or die." },
+      { max: 27, text: "The un-dead creature sucks life force from the character. The PC takes an additional 1d20 damage, and the un-dead creature heals that same amount (not to exceed its original total hit points)." },
+      { max: 28, text: "The wizening. The character immediately ages 1d20 years. If the result is 15 or more, they permanently lose 1 point of Strength, Agility, and Stamina as their body weakens." },
+      { max: 29, text: "The end is always dust: the wounded area crumbles to dust, inflicting an extra 2d12 damage and permanently disfiguring the character. They lose the use of that arm, leg, hand, or whatever area was struck. On the following round, the area adjacent to the wound in turn crumbles to dust, inflicting an additional 1d6 damage. The radius of dust transformation continues to expand, inflicting an additional 1d6 damage each round until the character is dead. The transformation to dust can only be stopped by very powerful magic." },
+      { max: Infinity, text: "Un-death seeks un-death: in a flash of thick black smoke, the un-dead creature expends some of the necromantic energies that sustain it to transform the PC into un-death. The un-dead attacker automatically loses 1d6 hit points and may be killed as a result. The PC collapses in a state of apparent death, only to arise 1d6 rounds later as an un-dead creature under the control of the judge. Roll 1d8 to determine the type of creature that arises: (1-4) zombie, (5-6) skeleton, (7) ghoul, (8) ghost." },
+    ],
+  },
 };
 
 // The generic Fumbles table (Reference Booklet Table 4-2, page 19) - used
@@ -1881,6 +2015,74 @@ function parseMonsterCritField(raw) {
   const m = String(raw || "").trim().match(/^([A-Za-z]+)\s*\/\s*(\d*d\d+(?:\s*[+-]\s*\d+)?)$/);
   if (!m) return null;
   return { table: m[1].toUpperCase(), die: m[2].replace(/\s+/g, "") };
+}
+
+// Table 9-10 (Monster Critical Hit Matrix, Reference Booklet p.56) - maps a
+// monster's HD tier to the Crit Table/die it uses, broken out by monster
+// type. Index 0 is the "Less than 1" HD row, indices 1-20 are that many
+// full Hit Dice, and index 21 covers "21+". The "Humanoids w/ Weapons"
+// column reuses Crit Table III (already transcribed above, same table
+// used by Clerics/Halflings/low-level Warriors & Dwarves) rather than a
+// separate monster-only table. Giants have no entry below 4 HD (the
+// source table shows "–") - critCodeForMonsterType() falls back to the
+// generic "All Other" column in that case.
+const MONSTER_CRIT_MATRIX = [
+  { humanoid: "III/d4", dragon: "DR/d4", demon: "DN/d3", giant: null, undead: "U/d4", other: "M/d4" },
+  { humanoid: "III/d6", dragon: "DR/d6", demon: "DN/d4", giant: null, undead: "U/d6", other: "M/d6" },
+  { humanoid: "III/d8", dragon: "DR/d8", demon: "DN/d4", giant: null, undead: "U/d6", other: "M/d8" },
+  { humanoid: "III/d8", dragon: "DR/d10", demon: "DN/d4", giant: null, undead: "U/d8", other: "M/d8" },
+  { humanoid: "III/d10", dragon: "DR/d12", demon: "DN/d4", giant: "G/d4", undead: "U/d8", other: "M/d10" },
+  { humanoid: "III/d10", dragon: "DR/d14", demon: "DN/d6", giant: "G/d4", undead: "U/d10", other: "M/d10" },
+  { humanoid: "IV/d12", dragon: "DR/d16", demon: "DN/d6", giant: "G/d4", undead: "U/d10", other: "M/d12" },
+  { humanoid: "IV/d12", dragon: "DR/d20", demon: "DN/d8", giant: "G/d4", undead: "U/d12", other: "M/d12" },
+  { humanoid: "IV/d14", dragon: "DR/d20", demon: "DN/d8", giant: "G/d4", undead: "U/d12", other: "M/d14" },
+  { humanoid: "IV/d14", dragon: "DR/d24", demon: "DN/d10", giant: "G/d4", undead: "U/d14", other: "M/d14" },
+  { humanoid: "IV/d16", dragon: "DR/d24", demon: "DN/d10", giant: "G/d4", undead: "U/d14", other: "M/d16" },
+  { humanoid: "V/d16", dragon: "DR/2d14", demon: "DN/d12", giant: "G/d4", undead: "U/d16", other: "M/d16" },
+  { humanoid: "V/d20", dragon: "DR/2d14", demon: "DN/d12", giant: "G/d6", undead: "U/d16", other: "M/d20" },
+  { humanoid: "V/d20", dragon: "DR/d30", demon: "DN/d14", giant: "G/d6", undead: "U/d20", other: "M/d20" },
+  { humanoid: "V/2d10", dragon: "DR/d30", demon: "DN/d14", giant: "G/d7", undead: "U/d20", other: "M/d20" },
+  { humanoid: "V/2d10", dragon: "DR/2d16", demon: "DN/d16", giant: "G/d7", undead: "U/d24", other: "M/d20" },
+  { humanoid: "V/2d12", dragon: "DR/2d16", demon: "DN/d16", giant: "G/d8", undead: "U/d24", other: "M/d24" },
+  { humanoid: "V/2d12", dragon: "DR/2d20", demon: "DN/d20", giant: "G/d8", undead: "U/d30", other: "M/d24" },
+  { humanoid: "V/2d14", dragon: "DR/2d20", demon: "DN/d20", giant: "G/d10", undead: "U/d30", other: "M/d24" },
+  { humanoid: "V/2d14", dragon: "DR/3d20", demon: "DN/d24", giant: "G/d10", undead: "U/d30", other: "M/d30" },
+  { humanoid: "V/3d10", dragon: "DR/3d20", demon: "DN/d24", giant: "G/d12", undead: "U/d30", other: "M/d30" },
+  { humanoid: "V/3d10", dragon: "DR/4d20", demon: "DN/d30", giant: "G/d12", undead: "U/d30", other: "M/d30" },
+];
+
+const MONSTER_TYPE_LABELS = {
+  humanoid: "Humanoid w/ Weapons",
+  dragon: "Dragon",
+  demon: "Demon / Devil",
+  giant: "Giant",
+  undead: "Un-dead",
+  other: "All Other",
+};
+
+// The HD field is free text like "4d8+4" or "1d6" - the leading dice
+// count is what Table 9-10 keys off of. No parseable count (blank field,
+// "1d3 hp" style notation, etc.) is treated as "Less than 1 HD" (tier 0),
+// same bucket the source table uses for the weakest creatures.
+function hdTierFromText(hdText) {
+  const m = String(hdText || "").match(/(\d+)\s*d/i);
+  if (!m) return 0;
+  const count = parseInt(m[1], 10);
+  if (!count || count < 1) return 0;
+  return Math.min(count, 21);
+}
+
+// Returns the Crit field code (e.g. "DR/d20") for a given monster type +
+// HD text, or null if that type has no entry at this tier (Giants below
+// 4 HD). Falls back to the generic "All Other" column in that case rather
+// than leaving the caller with nothing - the note shown next to the
+// Monster Type field explains when that's happened.
+function critCodeForMonsterType(type, hdText) {
+  if (!type) return null;
+  const tier = hdTierFromText(hdText);
+  const row = MONSTER_CRIT_MATRIX[tier];
+  if (!row) return null;
+  return row[type] || null;
 }
 
 function parseLevelNumber(raw) {
@@ -2275,7 +2477,60 @@ function formatAttacksSummary(attacks) {
   return parts.length ? parts.join(", ") : null;
 }
 
+// Figures out what the Crit field *should* be for the currently selected
+// Monster Type + HD, and whether Table 9-10 actually has an entry for
+// that combination (Giants below 4 HD don't - the source table shows a
+// "–"). Returns null if no Monster Type is set at all (fully manual mode).
+function computeMonsterCritInfo() {
+  const typeEl = document.getElementById("montype");
+  const type = typeEl ? typeEl.value : "";
+  if (!type) return null;
+  const hdEl = document.getElementById("hd");
+  const hdText = hdEl ? hdEl.value : "";
+  const tier = hdTierFromText(hdText);
+  const tierLabel = tier === 0 ? "less than 1 HD" : (tier === 21 ? "21+ HD" : `${tier} HD`);
+  let code = critCodeForMonsterType(type, hdText);
+  let usedFallback = false;
+  if (!code) {
+    code = critCodeForMonsterType("other", hdText);
+    usedFallback = true;
+  }
+  return { type, code, tierLabel, usedFallback };
+}
+
+function updateMonsterTypeNote() {
+  const noteEl = document.getElementById("montype-note");
+  if (!noteEl) return;
+  const info = computeMonsterCritInfo();
+  if (!info) {
+    noteEl.textContent = "Picking a type auto-fills Crit below from Table 9-10, based on HD.";
+    return;
+  }
+  noteEl.textContent = info.usedFallback
+    ? `${MONSTER_TYPE_LABELS[info.type]} has no Table 9-10 entry below 4 HD (${info.tierLabel}) - using All Other (${info.code || "—"}) instead.`
+    : `${MONSTER_TYPE_LABELS[info.type]} @ ${info.tierLabel} → ${info.code || "—"} (Table 9-10).`;
+}
+
+// Keeps the Crit field synced to Monster Type + HD via Table 9-10.
+// `force` (picking a new Monster Type, or clicking the ↻ button) always
+// overwrites the field and re-opts it into auto-sync; without it (e.g.
+// HD changing on its own) the field is only touched if it's still tagged
+// auto-synced - the same "manual edit wins" contract the PC attack
+// Bonus/Damage fields use, so hand-typed Crit values are never clobbered
+// by an incidental HD edit.
+function recalcMonsterCrit(force) {
+  updateMonsterTypeNote();
+  const critEl = document.getElementById("crit");
+  const info = computeMonsterCritInfo();
+  if (critEl && info && (force || critEl.dataset.autoSynced === "1")) {
+    critEl.value = info.code || "";
+    critEl.dataset.autoSynced = "1";
+  }
+  return critEl ? critEl.value : "";
+}
+
 function renderMonsterStatline(d) {
+  const liveCrit = recalcMonsterCrit(false);
   const hp = d.hpMax ? `${d.hpCurrent || d.hpMax}/${d.hpMax}` : (d.hpCurrent || "—");
   const atkSummary = formatAttacksSummary(d.attacks);
   const parts = [
@@ -2288,7 +2543,7 @@ function renderMonsterStatline(d) {
     `<b>Act</b> ${d.act || "—"}`,
     d.sp ? `<b>SP</b> ${firstLine(d.sp)}` : null,
     (d.fort || d.ref || d.will) ? `<b>SV</b> Fort ${d.fort || "+0"}, Ref ${d.ref || "+0"}, Will ${d.will || "+0"}` : null,
-    d.crit ? `<b>Crit</b> ${d.crit}` : null,
+    liveCrit ? `<b>Crit</b> ${liveCrit}` : null,
     d.al ? `<b>AL</b> ${d.al}` : null,
   ].filter(Boolean);
   document.getElementById("statline-preview-monster").innerHTML = parts.join("; ");
@@ -2356,6 +2611,39 @@ function scheduleSave() {
   document.getElementById(id).addEventListener("input", scheduleSave);
 });
 nameEl.addEventListener("input", scheduleSave);
+
+// Monster Type -> Crit auto-fill wiring. Picking a type is a deliberate
+// "compute this for me" action, so it always overwrites Crit and opts
+// the field back into auto-sync (force=true); typing directly into Crit
+// opts back out (same contract as the PC attack Bonus/Damage fields), and
+// HD changing on its own only updates Crit if it's still auto-synced.
+const montypeEl = document.getElementById("montype");
+if (montypeEl) {
+  montypeEl.addEventListener("change", () => {
+    recalcMonsterCrit(true);
+    scheduleSave();
+    cfgRenderFromCurrentForm("monster");
+  });
+}
+const monsterHdEl = document.getElementById("hd");
+if (monsterHdEl) {
+  monsterHdEl.addEventListener("input", () => recalcMonsterCrit(false));
+}
+const monsterCritEl = document.getElementById("crit");
+if (monsterCritEl) {
+  monsterCritEl.addEventListener("input", () => {
+    monsterCritEl.dataset.autoSynced = "0";
+    updateMonsterTypeNote();
+  });
+}
+const critSyncBtn = document.getElementById("crit-sync-btn");
+if (critSyncBtn) {
+  critSyncBtn.addEventListener("click", () => {
+    recalcMonsterCrit(true);
+    scheduleSave();
+    cfgRenderFromCurrentForm("monster");
+  });
+}
 
 ["hp-current", "hp-max", "pc-hp-current", "pc-hp-max"].forEach(id => {
   document.getElementById(id).addEventListener("input", scheduleSave);
