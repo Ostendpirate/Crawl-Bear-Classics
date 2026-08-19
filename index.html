@@ -1090,20 +1090,23 @@
           </div>
           <div>
             <label>Level</label>
-            <select id="pc-level">
-              <option value="">—</option>
-              <option value="0">0</option>
-              <option value="1">1</option>
-              <option value="2">2</option>
-              <option value="3">3</option>
-              <option value="4">4</option>
-              <option value="5">5</option>
-              <option value="6">6</option>
-              <option value="7">7</option>
-              <option value="8">8</option>
-              <option value="9">9</option>
-              <option value="10">10</option>
-            </select>
+            <div class="field-sync-row">
+              <select id="pc-level">
+                <option value="">—</option>
+                <option value="0">0</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="7">7</option>
+                <option value="8">8</option>
+                <option value="9">9</option>
+                <option value="10">10</option>
+              </select>
+              <button type="button" class="derived-sync-btn" id="pc-level-sync-btn" title="Set to this XP total's level (Table 1-4)">↻</button>
+            </div>
           </div>
         </div>
 
@@ -1120,6 +1123,10 @@
           <div>
             <label>XP</label>
             <input type="text" id="pc-xp" placeholder="0" />
+          </div>
+          <div>
+            <label>XP to Next Lvl</label>
+            <input type="text" id="pc-xp-next" placeholder="10 (Lvl 1 at 10)" readonly title="How much more total XP is needed to reach the next level (Table 1-4) - computed from the XP field, not editable directly" />
           </div>
         </div>
 
@@ -1422,7 +1429,7 @@ const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al", "montype"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-actdice","pc-fort","pc-ref","pc-will","pc-equipment","pc-spells","pc-languages","pc-notes","pc-ac-misc"];
+const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-actdice","pc-fort","pc-ref","pc-will","pc-equipment","pc-spells","pc-languages","pc-notes","pc-ac-misc"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
 const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
@@ -1595,6 +1602,10 @@ function fillForm(mode, data) {
     // for the Crit Die/Table field's Class/Level auto-fill.
     const pcCritRestoreEl = document.getElementById("pc-crit");
     if (pcCritRestoreEl) pcCritRestoreEl.dataset.autoSynced = d.pcCritAutoSynced ? "1" : "0";
+    // Same "still auto-managed?" restoration, for Level's XP-driven
+    // auto-fill (Table 1-4).
+    const pcLevelRestoreEl = document.getElementById("pc-level");
+    if (pcLevelRestoreEl) pcLevelRestoreEl.dataset.autoSynced = d.pcLevelAutoSynced ? "1" : "0";
   }
   // Same "still auto-managed?" restoration as above, for the monster
   // Crit field's Monster Type + HD auto-fill.
@@ -1623,6 +1634,8 @@ function readForm(mode) {
     d.derivedAuto = autoFlags;
     const pcCritSaveEl = document.getElementById("pc-crit");
     d.pcCritAutoSynced = pcCritSaveEl ? pcCritSaveEl.dataset.autoSynced === "1" : false;
+    const pcLevelSaveEl = document.getElementById("pc-level");
+    d.pcLevelAutoSynced = pcLevelSaveEl ? pcLevelSaveEl.dataset.autoSynced === "1" : false;
   }
   if (mode === "monster") {
     const critEl = document.getElementById("crit");
@@ -2255,6 +2268,45 @@ function parseLevelNumber(raw) {
   return m ? parseInt(m[0], 10) : null;
 }
 
+// Table 1-4 (Reference Booklet p.4) - total XP required to REACH each
+// level. Indexed by level (0-10) - DCC's own printed table tops out at
+// level 10, same ceiling classLevelEntryFor already applies for the
+// class/level tables, so a higher level just isn't derivable from XP
+// alone (a Judge awarding a level above 10 is a house-rule call this app
+// doesn't try to guess at).
+const DCC_XP_THRESHOLDS = [0, 10, 50, 110, 190, 290, 410, 550, 710, 890, 1090];
+
+function parseXpTotal(raw) {
+  const m = String(raw || "").match(/-?\d+/);
+  const n = m ? parseInt(m[0], 10) : 0;
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+// Highest level whose Table 1-4 threshold the given XP total meets or
+// beats. A blank/unparseable XP value reads as 0 (level 0), same
+// "no input = weakest case" default this app uses elsewhere (e.g.
+// hdTierFromText for HD).
+function levelForXp(xpRaw) {
+  const total = parseXpTotal(xpRaw);
+  let level = 0;
+  for (let i = 0; i < DCC_XP_THRESHOLDS.length; i++) {
+    if (total >= DCC_XP_THRESHOLDS[i]) level = i;
+  }
+  return level;
+}
+
+// How much MORE total XP is needed to reach the next level (and what
+// that next level's own threshold is), from the given XP total. Both
+// come back null once already at the table's top (level 10) - Table 1-4
+// doesn't define an 11th threshold to progress toward.
+function xpProgress(xpRaw) {
+  const total = parseXpTotal(xpRaw);
+  const level = levelForXp(total);
+  if (level >= 10) return { total, level, nextLevel: null, nextThreshold: null, xpNeeded: null };
+  const nextThreshold = DCC_XP_THRESHOLDS[level + 1];
+  return { total, level, nextLevel: level + 1, nextThreshold, xpNeeded: Math.max(0, nextThreshold - total) };
+}
+
 // Looks up this PC's class/level row in DCC_CLASS_TABLES, clamped to the
 // table's 1-10 range (this booklet doesn't publish beyond level 10, so a
 // higher-level sheet just keeps using the level 10 row rather than
@@ -2321,6 +2373,43 @@ function recalcPcCrit(force) {
     el.dataset.autoSynced = "1";
   }
   return el.value;
+}
+
+// Keeps the read-only "XP to Next Lvl" field showing how much more total
+// XP (and at what level) the CURRENT Xp field's value implies, per Table
+// 1-4. Always recomputed from the live XP field - unlike Level, there's
+// nothing here for a player to override, it's pure arithmetic off
+// whatever XP is currently entered.
+function updateXpNextLevelField() {
+  const el = document.getElementById("pc-xp-next");
+  if (!el) return "";
+  const xpEl = document.getElementById("pc-xp");
+  const info = xpProgress(xpEl ? xpEl.value : "");
+  el.value = info.nextLevel === null
+    ? "Max level (10)"
+    : `${info.xpNeeded} (Lvl ${info.nextLevel} at ${info.nextThreshold})`;
+  return el.value;
+}
+
+// Keeps Level synced to the XP field via Table 1-4, same "manual edit
+// wins" contract as the Crit Die/Table and Monster sheet Crit fields
+// (recalcPcCrit / recalcMonsterCrit): `force` (an XP edit, or the ↻
+// button) always overwrites Level and re-opts it into auto-sync; without
+// force, a still-blank Level ("—") also counts as eligible (nothing to
+// preserve there), same as the derived save fields treat a blank field -
+// but a Level the player has actually PICKED is left alone, so hand-set
+// levels (a Judge's house-ruled bonus level, funnel survivors bumped a
+// level, etc.) never get silently overwritten by a later XP tweak.
+function recalcPcLevelFromXp(force) {
+  const levelEl = document.getElementById("pc-level");
+  if (!levelEl) return "";
+  const isBlank = levelEl.value.trim() === "";
+  if (force || isBlank || levelEl.dataset.autoSynced === "1") {
+    const xpEl = document.getElementById("pc-xp");
+    levelEl.value = String(levelForXp(xpEl ? xpEl.value : ""));
+    levelEl.dataset.autoSynced = "1";
+  }
+  return levelEl.value;
 }
 
 // Combines an ability modifier with this class/level's Attack bonus into
@@ -2930,6 +3019,12 @@ function renderPcStatline(d) {
   const speed = recalcPcSpeed();
   recalcPcFumbleDie();
   recalcPcInitiativeDie();
+  // Same passive recompute as Crit Die/Table just below - keeps Level (if
+  // still auto-synced) and the "XP to Next Lvl" note matching the current
+  // XP field on every render, not just right after an XP edit fires its
+  // own forced sync.
+  recalcPcLevelFromXp(false);
+  updateXpNextLevelField();
   // Same "passive re-render only touches an already-auto-synced field"
   // recompute the Monster sheet's Crit field gets from
   // renderMonsterStatline - keeps the field (and the statline preview
@@ -3763,7 +3858,28 @@ document.getElementById("pc-class").addEventListener("change", () => {
   scheduleSave();
 });
 
+// Shared side-effect cascade for anything that changes Level - a manual
+// pick, the ↻ button, or an XP edit auto-syncing it (Table 1-4) - since
+// Fort/Ref/Will, attack Bonus fields, and Crit Die/Table all key off
+// Class+Level and would otherwise go stale until something else happened
+// to touch Level again.
+function cascadeLevelChangeEffects() {
+  refreshDerivedPcFields();
+  recalcPcCrit(true);
+  cfgRenderFromCurrentForm("pc");
+}
+
 document.getElementById("pc-level").addEventListener("change", () => {
+  const levelEl = document.getElementById("pc-level");
+  // A manual pick opts Level OUT of XP-driven auto-sync (see
+  // recalcPcLevelFromXp) - same "manual edit wins" contract as Crit
+  // Die/Table - so a Judge's house-ruled level (funnel survivors bumped a
+  // level, a level awarded outside the XP table, etc.) is never silently
+  // overwritten the next time XP is edited. The ↻ button next to Level
+  // opts back in. This only ever fires on a genuine user pick (setting
+  // .value programmatically, as recalcPcLevelFromXp does, never fires
+  // "change" on its own), so it's safe to unconditionally untag here.
+  levelEl.dataset.autoSynced = "0";
   // Same non-destructive refresh as the Class handler above - leveling up
   // fills in blank saves with the new class/level base, but resyncing an
   // already-filled save after a level-up is what the ↻ button is for.
@@ -3772,11 +3888,35 @@ document.getElementById("pc-level").addEventListener("change", () => {
   // Bound to "change" now that Level is a <select> (a picked option is a
   // discrete choice, not something that fires "input" mid-keystroke the
   // way the old free-text field did).
-  refreshDerivedPcFields();
-  recalcPcCrit(true);
-  cfgRenderFromCurrentForm("pc");
+  cascadeLevelChangeEffects();
   scheduleSave();
 });
+
+// XP -> Level auto-fill (Table 1-4). Typing XP always recomputes the
+// read-only "XP to Next Lvl" note, and recomputes Level itself if it's
+// still eligible for auto-sync (blank, or not manually overridden - see
+// recalcPcLevelFromXp). When that XP-driven recompute actually changes
+// Level, it needs the SAME cascade a manual Level pick triggers above -
+// otherwise Fort/Ref/Will/Crit/attack Bonus would silently go stale.
+const pcXpEl = document.getElementById("pc-xp");
+if (pcXpEl) {
+  pcXpEl.addEventListener("input", () => {
+    updateXpNextLevelField();
+    const levelEl = document.getElementById("pc-level");
+    const prevLevel = levelEl ? levelEl.value : "";
+    recalcPcLevelFromXp(false);
+    if (levelEl && levelEl.value !== prevLevel) cascadeLevelChangeEffects();
+    scheduleSave();
+  });
+}
+const pcLevelSyncBtn = document.getElementById("pc-level-sync-btn");
+if (pcLevelSyncBtn) {
+  pcLevelSyncBtn.addEventListener("click", () => {
+    recalcPcLevelFromXp(true);
+    cascadeLevelChangeEffects();
+    scheduleSave();
+  });
+}
 
 // Active half: an explicit click always sets the field to exactly its
 // full derived value - the linked ability's current modifier, plus (for
@@ -5733,6 +5873,15 @@ async function loadSelection(selection) {
   if (!newId) {
     lastKnownSelectionId = null;
     if (isEditingSheetField()) return;
+    // Deselecting (e.g. clicking empty map space) right after an edit -
+    // like picking a new Level - can land while that edit is still sitting
+    // in scheduleSave's debounce window. Flush it first, before clearing
+    // currentItemId, so it actually gets written to the token it belongs
+    // to instead of silently never being saved at all.
+    if (currentItemId && saveTimeout) {
+      clearTimeout(saveTimeout);
+      await saveCurrent();
+    }
     currentItemId = null;
     emptyState.innerHTML = EMPTY_STATE_DEFAULT_HTML;
     emptyState.style.display = "block";
@@ -5747,7 +5896,24 @@ async function loadSelection(selection) {
   // destroys and recreates the attack-row inputs and drops focus mid-edit.
   const selectionUnchanged = newId === lastKnownSelectionId;
   lastKnownSelectionId = newId;
-  if (selectionUnchanged && isEditingSheetField()) return;
+  if (selectionUnchanged) {
+    if (isEditingSheetField()) return;
+    // Same reasoning as the scene.items.onChange handler's saveTimeout
+    // guard: a pending debounced save means there's a local edit newer
+    // than anything we'd refetch right now (a <select> commits its
+    // "change" immediately, but the save itself is still debounced) -
+    // rebuilding the form here would silently clobber it before it's ever
+    // written. Let the pending save finish instead; there's nothing to
+    // usefully reload until it does.
+    if (saveTimeout) return;
+  } else if (currentItemId && saveTimeout) {
+    // About to switch to a genuinely different token with an edit still
+    // pending for the CURRENT one - flush it first (targeting the old
+    // currentItemId, before it gets reassigned below), so switching
+    // tokens shortly after an edit doesn't drop it.
+    clearTimeout(saveTimeout);
+    await saveCurrent();
+  }
 
   const items = await OBR.scene.items.getItems(selection);
   const item = items[0];
@@ -5877,6 +6043,20 @@ OBR.onReady(async () => {
           // already sitting in the fields the user is editing, so skipping
           // is safe. We still want it to sync when *another* client changed
           // the item while this one isn't mid-edit.
+        } else if (saveTimeout) {
+          // A local edit (e.g. just picking a new Level) is still sitting
+          // in scheduleSave's debounce window and hasn't been written to
+          // OBR yet - so whatever snapshot just arrived here is guaranteed
+          // to PRE-DATE it. Unlike the isEditingSheetField() case above,
+          // this can trip even after the field itself has lost focus (a
+          // <select> commits its "change" immediately but the save is
+          // still debounced), which is exactly the gap that let an
+          // unrelated scene event (anything else changing on the map)
+          // silently overwrite a just-made edit before it ever got saved -
+          // the most likely cause of "changes sometimes don't stick, have
+          // to redo them" reports. Skip the refill and let the pending
+          // save finish; ITS OWN echo will correctly confirm the final
+          // state once it lands, with nothing left pending to race against.
         } else {
           const monsterData = item.metadata[MONSTER_METADATA_KEY] || defaultData("monster");
           const pcData = item.metadata[PC_METADATA_KEY] || defaultData("pc");
