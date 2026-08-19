@@ -1887,7 +1887,17 @@ function abilityModifierFromField(id) {
 const PC_ABILITY_FIELD_IDS = ["pc-str", "pc-agi", "pc-sta", "pc-per", "pc-int", "pc-lck"];
 
 PC_ABILITY_FIELD_IDS.forEach(id => {
-  document.getElementById(id).addEventListener("blur", () => {
+  const abilityEl = document.getElementById(id);
+  // Live update while typing: parseAbilityScore() already pulls the
+  // leading number out of a raw, not-yet-reformatted score, so
+  // Init/Fort/Ref/Will (and any auto-synced attack Bonus) can recompute
+  // on every keystroke instead of waiting for the field to lose focus.
+  // The "14 (+1)" pretty-formatting below stays blur-only since rewriting
+  // the field's own text mid-keystroke would fight with typing.
+  abilityEl.addEventListener("input", () => {
+    refreshDerivedPcFields();
+  });
+  abilityEl.addEventListener("blur", () => {
     const el = document.getElementById(id);
     const score = parseAbilityScore(el.value);
     if (score !== null) {
