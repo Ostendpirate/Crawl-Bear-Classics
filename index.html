@@ -204,7 +204,21 @@
   }
   .status { font-size: 11px; color: var(--good); min-height: 14px; }
 
-  .main-nav { margin-bottom: 14px; }
+  .main-nav {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    background: var(--bg);
+    margin: -12px -14px 0;
+    padding: 12px 14px 14px;
+  }
+  .mode-tabs {
+    position: sticky;
+    z-index: 20;
+    background: var(--bg);
+    margin: 0 -14px 10px;
+    padding: 0 14px 8px;
+  }
 
   .chat-log {
     display: flex;
@@ -785,7 +799,7 @@
       <h1>DCC Character Sheet</h1>
       <div class="subtitle">Renaming and editing this token's stat block</div>
 
-      <div class="tabs">
+      <div class="tabs mode-tabs" id="mode-tabs">
         <button class="tab-btn active" id="tab-monster">Monster</button>
         <button class="tab-btn" id="tab-pc">Player</button>
       </div>
@@ -2507,6 +2521,18 @@ function setMode(mode, persist = true) {
 
 document.getElementById("tab-monster").addEventListener("click", () => setMode("monster"));
 document.getElementById("tab-pc").addEventListener("click", () => setMode("pc"));
+
+// ---- Sticky tab-bar stacking ----
+// Keeps the Monster/Player sub-tabs pinned directly beneath the sticky
+// Sheet/Tracker/Dice/Log nav bar by measuring its rendered height.
+const mainNavEl = document.querySelector(".main-nav");
+const modeTabsEl = document.getElementById("mode-tabs");
+function updateStickyOffsets() {
+  if (!mainNavEl || !modeTabsEl) return;
+  modeTabsEl.style.top = `${mainNavEl.offsetHeight}px`;
+}
+window.addEventListener("resize", updateStickyOffsets);
+setTimeout(updateStickyOffsets, 0);
 
 // ---- Top-level view switching (Sheet / Tracker) ----
 const viewSheetEl = document.getElementById("view-sheet");

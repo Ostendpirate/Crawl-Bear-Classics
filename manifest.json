@@ -1,6 +1,6 @@
 {
   "name": "DCC Suite",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "manifest_version": 1,
   "author": "You",
   "description": "A Dungeon Crawl Classics companion suite: character sheets, initiative tracker, dice roller, and session log.",
@@ -8,8 +8,8 @@
     "title": "DCC Suite",
     "icon": "https://ostendpirate.github.io/Crawl-Bear-Classics/icon.svg",
     "popover": "https://ostendpirate.github.io/Crawl-Bear-Classics/index.html",
-    "height": 760,
-    "width": 480
+    "height": 860,
+    "width": 540
   },
   "background_url": "https://ostendpirate.github.io/Crawl-Bear-Classics/overlay.html"
 }
