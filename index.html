@@ -2547,6 +2547,29 @@ function rollDamage(diceStr) {
   return { notation: `${count}d${sides}`, dieTotal, mod, total: dieTotal + mod };
 }
 
+// A Warrior/Dwarf's attack row carries a "(+dX Deed Die)" annotation in
+// its Bonus and/or Damage text (written by composedAttackBonusText /
+// composedDamageText) - per the Reference Booklet's Table 1-10 note, "A
+// warrior's attack modifier is rolled anew, according to the appropriate
+// die, with each attack. The result modifies both attack and damage
+// rolls." That means ONE deed die roll, reused for both. This pulls the
+// die notation (e.g. "d3", or "d10+4" at higher levels) out of whichever
+// field still carries the annotation and rolls it; rollAttackFor() then
+// applies that single result to both totals. Returns null if neither
+// field has the annotation (not a deed-die class, or the player has
+// since typed a fully custom Bonus/Damage that overwrote it).
+function rollDeedDieFromAttack(atk) {
+  const source = String(atk.bonus || "").match(/\(\+([^)]+) Deed Die\)/i)
+    || String(atk.damage || "").match(/\(\+([^)]+) Deed Die\)/i);
+  if (!source) return null;
+  const m = source[1].match(/^d(\d+)\s*([+-]\s*\d+)?$/i);
+  if (!m) return null;
+  const sides = parseInt(m[1], 10);
+  const mod = m[2] ? parseInt(m[2].replace(/\s+/g, ""), 10) : 0;
+  const roll = Math.floor(Math.random() * sides) + 1;
+  return { notation: `d${sides}`, roll, mod, total: roll + mod };
+}
+
 function getStatsForItem(item) {
   const mode = item.metadata[MODE_METADATA_KEY] || "monster";
   const key = mode === "pc" ? PC_METADATA_KEY : MONSTER_METADATA_KEY;
@@ -3218,12 +3241,15 @@ async function rollAttackFor(itemId, attackId) {
   const atk = stats.attacks.find(a => a.id === attackId);
   if (!atk) return;
   const atkMod = parseModifier(atk.bonus);
+  const deed = rollDeedDieFromAttack(atk);
   const d20Roll = Math.floor(Math.random() * 20) + 1;
-  const toHit = d20Roll + atkMod;
+  const toHit = d20Roll + atkMod + (deed ? deed.total : 0);
   const dmg = rollDamage(atk.damage);
-  const toHitText = `${toHit} to hit (d20 ${d20Roll}${formatModifier(atkMod)})`;
+  const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)})` : "";
+  const toHitText = `${toHit} to hit (d20 ${d20Roll}${formatModifier(atkMod)}${deedText})`;
+  const dmgTotal = dmg !== null ? dmg.total + (deed ? deed.total : 0) : null;
   const dmgText = dmg !== null
-    ? `, ${dmg.total} dmg (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)})`
+    ? `, ${dmgTotal} dmg (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText})`
     : "";
   const text = `${atk.name || "Attack"}: ${toHitText}${dmgText}`;
   showTrackerStatus(`${item.name || "Token"} — ${text}`, false, 5000);
