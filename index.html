@@ -2531,15 +2531,20 @@ function parseModifier(str) {
   return m ? parseInt(m[0], 10) : 0;
 }
 
+// Returns the full breakdown of a damage roll - the dice notation, the
+// raw dice-only sum, the flat modifier parsed out of the string, and the
+// grand total - rather than just the total, so callers (the Tracker's
+// attack roll) can show the modifier that was actually applied instead of
+// just the final number.
 function rollDamage(diceStr) {
   const m = String(diceStr || "").match(/(\d*)d(\d+)\s*([+-]\s*\d+)?/i);
   if (!m) return null;
   const count = parseInt(m[1] || "1", 10) || 1;
   const sides = parseInt(m[2], 10);
   const mod = m[3] ? parseInt(m[3].replace(/\s+/g, ""), 10) : 0;
-  let total = 0;
-  for (let i = 0; i < count; i++) total += Math.floor(Math.random() * sides) + 1;
-  return total + mod;
+  let dieTotal = 0;
+  for (let i = 0; i < count; i++) dieTotal += Math.floor(Math.random() * sides) + 1;
+  return { notation: `${count}d${sides}`, dieTotal, mod, total: dieTotal + mod };
 }
 
 function getStatsForItem(item) {
@@ -3199,21 +3204,34 @@ function renderTrackerRows(items) {
   attachTrackerRowListeners();
 }
 
+// Rolling an attack from the Tracker previously only showed the final
+// totals ("14 to hit, 7 dmg") with no way to tell how much of that was
+// the die versus the character's attack/damage bonus. Both the raw d20 -
+// and the raw dice-only damage sum, from rollDamage()'s breakdown - are
+// now shown alongside the bonus that got added, so the bonus applied is
+// visible in both the Tracker toast and the persisted Log entry, not
+// just the number it produced.
 async function rollAttackFor(itemId, attackId) {
   const [item] = await OBR.scene.items.getItems([itemId]);
   if (!item) return;
   const stats = getStatsForItem(item);
   const atk = stats.attacks.find(a => a.id === attackId);
   if (!atk) return;
-  const toHit = Math.floor(Math.random() * 20) + 1 + parseModifier(atk.bonus);
+  const atkMod = parseModifier(atk.bonus);
+  const d20Roll = Math.floor(Math.random() * 20) + 1;
+  const toHit = d20Roll + atkMod;
   const dmg = rollDamage(atk.damage);
-  const label = `${item.name || "Token"} — ${atk.name || "Attack"}: ${toHit} to hit${dmg !== null ? `, ${dmg} dmg` : ""}`;
-  showTrackerStatus(label, false, 5000);
+  const toHitText = `${toHit} to hit (d20 ${d20Roll}${formatModifier(atkMod)})`;
+  const dmgText = dmg !== null
+    ? `, ${dmg.total} dmg (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)})`
+    : "";
+  const text = `${atk.name || "Attack"}: ${toHitText}${dmgText}`;
+  showTrackerStatus(`${item.name || "Token"} — ${text}`, false, 5000);
   await appendChatLog({
     kind: "attack",
     tokenName: item.name || "Token",
     mode: stats.mode,
-    text: `${atk.name || "Attack"}: ${toHit} to hit${dmg !== null ? `, ${dmg} dmg` : ""}`,
+    text,
     gmOnly: stats.mode === "monster",
   });
 }
