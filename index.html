@@ -549,6 +549,47 @@
     font-family: inherit;
   }
   .backstab-btn:hover { color: var(--text); }
+  .attack-deed-row {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+    margin-top: 4px;
+  }
+  .attack-deed-row .attack-deed-type {
+    flex: 1;
+    min-width: 0;
+    padding: 3px 4px;
+    font-size: 10.5px;
+  }
+  .attack-deed-row .attack-deed-custom {
+    flex: 1;
+    min-width: 0;
+    padding: 3px 6px;
+    font-size: 10.5px;
+  }
+  .attack-deed-info-btn {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    font-size: 11px;
+    font-weight: 700;
+    background: var(--border);
+    border: none;
+    border-radius: 4px;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .attack-deed-info-btn:hover { background: var(--accent); color: #1e1b18; }
+  .attack-deed-info {
+    font-size: 10px;
+    color: var(--muted);
+    line-height: 1.35;
+    margin-top: 3px;
+    padding-left: 2px;
+  }
+  .attack-deed-info div { margin-bottom: 2px; }
+  .attack-deed-info b { color: var(--text); }
   .init-die-note {
     font-size: 10px;
     color: var(--muted);
@@ -1700,6 +1741,111 @@ const DCC_WEAPONS = [
   { key: "custom", label: "Custom / Other", damage: "", backstabDamage: null, range: "", type: "melee", twoHanded: false, strAtClose: false, light: false },
 ];
 
+// Mighty Deeds of Arms (Reference Booklet p.25-31) - the seven named deed
+// types the book gives worked examples for, each with escalating flavor
+// text keyed by the Deed Die's raw face value (3 through 7 - a 7+ covers
+// anything higher, since a warrior's deed die can grow past d10+4 at
+// higher levels but the book's table tops out there). "custom" isn't a
+// real book entry - it's this app's way of letting a player declare a
+// deed the book didn't think to print an example for, per the request
+// that added this feature; it still gets the same 3+/Deed-Die-roll
+// success check, just without book flavor text to show for it.
+const DCC_MIGHTY_DEEDS = {
+  blinding: {
+    label: "Blinding Attack",
+    tiers: {
+      3: "Opponent's eyes are irritated and stinging, and they have difficulty seeing. On their next attack, the opponent suffers a -2 attack penalty.",
+      4: "Opponent is temporarily blinded. They suffer a -4 penalty to their next attack roll and may only move at half speed.",
+      5: "Opponent is completely blinded for 1d4 rounds. They flail about with wild attacks, suffering a -8 penalty to attack rolls, and can move only in a random direction at half speed.",
+      6: "Opponent is completely blinded, as above, for 2d6 rounds.",
+      7: "Opponent is blinded for the next 24 hours. Additionally, they must make a Fort save against the warrior's attack roll. On a failure, they are permanently blinded.",
+    },
+  },
+  disarming: {
+    label: "Disarming Attack",
+    tiers: {
+      3: "A humanoid with a weapon drops it. 50% chance it's knocked out of reach - if so it must be retrieved (no attack that round unless it draws a new weapon or fights unarmed); otherwise it can recover the weapon and still attack.",
+      4: "A humanoid's weapon automatically lands out of reach. 50% chance a mundane weapon is sundered (shattered/broken, unusable except as improvised). Magic weapons are never sundered.",
+      5: "A mundane weapon is automatically sundered; a magical one is disarmed and lands out of reach. A monster's natural weapon (claw/bite) is shattered, imposing -4 to damage with it for the rest of the fight.",
+      6: "Both humanoids and monsters have a weapon completely compromised - sundered or disarmed and out of reach, or natural weapons shattered - and the attacking limb is wounded, taking at least -4 to future damage rolls with it.",
+      7: "As above, and the warrior can also affect creatures much larger and stronger than himself.",
+    },
+  },
+  pushback: {
+    label: "Pushback Attack",
+    tiers: {
+      3: "A creature the same size as the warrior is pushed back a few feet - enough to open access to a door or staircase the target was defending.",
+      4: "A creature the same size as the warrior is pushed back half the warrior's movement. A humanoid up to 50% larger, or a stable quadruped (horse, cow), is pushed back a few feet.",
+      5: "The warrior can shove a creature up to twice their size a full movement's distance, and can pick up and hurl such a creature up to half their movement - off a cliff, through a railing, and so on.",
+      6: "The warrior can push back several oncoming opponents at once (a charging mass of goblins, a wall of men-at-arms), and can budge creatures up to three times their size, even small dragons and large basilisks.",
+      7: "As above, and the warrior can affect creatures that would seem impossible for someone their size to push back.",
+    },
+  },
+  trips: {
+    label: "Trips and Throws",
+    tiers: {
+      3: "The warrior knocks an enemy off-balance. The enemy gets a Ref save against the warrior's attack roll; on a failure it's knocked prone and must spend its next action standing (melee attacks vs. a prone target get +2).",
+      4: "Against a normal human-sized opponent, the warrior automatically knocks the target prone. Creatures up to 50% larger, quadrupedal, or otherwise sure-footed get a Ref save to avoid it.",
+      5: "A human-sized opponent is knocked down and thrown up to 10' away. Creatures up to twice the warrior's size can be knocked down but get a Ref save to avoid being knocked prone.",
+      6: "A creature up to twice the warrior's size can be thrown up to 10' away automatically, and the warrior can spend their next action pinning it prone (exceptionally strong foes may get an opposed Strength check to stand).",
+      7: "As above, and the warrior can trip or throw creatures that seem far too large to be affected.",
+    },
+  },
+  rallying: {
+    label: "Rallying Maneuver",
+    tiers: {
+      3: "The warrior lets loose a war cry or flashy maneuver that rallies nearby hirelings/retainers - any who failed a morale check get a second check.",
+      4: "The warrior urges allies to form up and leads the charge (must be at the forefront, succeeding on their own attacks) - followers get +1 to morale checks for the rest of the round.",
+      5: "A dramatic maneuver inspires courage: allies/followers get +1 to morale checks for the round, and if the warrior kills their foe or scores a critical hit this round, all allies get +1 attack next round too.",
+      6: "The maneuver's benefits extend to up to 100 followers, as long as they can see the hero.",
+      7: "As above, and the benefits extend to as many followers as can see the hero - potentially an entire army.",
+    },
+  },
+  defensive: {
+    label: "Defensive Maneuver",
+    tiers: {
+      3: "The warrior fights defensively, gaining a +1 AC bonus for the next round.",
+      4: "The warrior organizes a defensive formation (e.g. a shield wall), granting a +1 AC bonus to themselves and two adjacent allies for the next round.",
+      5: "The warrior forms up to four allies into a defensive position - as long as none of them move, the warrior and those allies get a +1 AC bonus for the next round.",
+      6: "As above but a +2 AC bonus for up to four allies, as long as no one moves; maintaining it into later rounds only needs a Deed roll of 3+, but a different deed can't be attempted without disrupting the formation.",
+      7: "As above, and the AC bonus is +3 if not moving, or +2 if moving together in formation.",
+    },
+  },
+  precision: {
+    label: "Precision Shot",
+    tiers: {
+      3: "The warrior can hit a small nearby object - a holy symbol, a banner, an ogre's tusk. A called shot here may do up to +1d4 damage (Judge's discretion).",
+      4: "The warrior can pull off a shot normally reserved for master swordsmen or archers - an apple off someone's head, a bull's-eye at 100 yards. Up to +1d5 damage.",
+      5: "A near-impossible shot: slicing a rope with an arrow at 100 yards, hurling a dagger into a coin across a moat, finding the one vulnerable scale on an ancient dragon. Up to +1d6 damage.",
+      6: "The warrior can make shots like the above even while blinded and deafened, relying on other senses. Up to +1d7 damage.",
+      7: "The warrior can make shots that seem beyond mortal ability, given a plausible explanation. Up to +1d8 damage.",
+    },
+  },
+};
+const DCC_MIGHTY_DEED_OPTIONS = [
+  ["", "No deed this attack"],
+  ["blinding", "Blinding Attack"],
+  ["disarming", "Disarming Attack"],
+  ["pushback", "Pushback Attack"],
+  ["trips", "Trips and Throws"],
+  ["rallying", "Rallying Maneuver"],
+  ["defensive", "Defensive Maneuver"],
+  ["precision", "Precision Shot"],
+  ["custom", "Custom deed…"],
+];
+
+// Full example text (all five Deed Die tiers) for one Mighty Deed type,
+// for the row's collapsible ⓘ panel - lets a player see what a 3 vs. a 7+
+// actually does BEFORE committing to a deed, not just after rolling it.
+// Blank for "" (no deed) and "custom" (nothing on file to show).
+function mightyDeedInfoText(type) {
+  const cat = DCC_MIGHTY_DEEDS[type];
+  if (!cat) return "";
+  return [3, 4, 5, 6, 7]
+    .map(n => `<div><b>${n === 7 ? "7+" : n}:</b> ${escapeHtml(cat.tiers[n])}</div>`)
+    .join("");
+}
+
 // DCC per-class, per-level Attack bonus and Saving Throw progressions
 // (Reference Booklet Tables 1-5 Cleric, 1-7 Thief, 1-10 Warrior, 1-12
 // Wizard, 1-14 Dwarf, 1-16 Elf, 1-18 Halfling). This is the class/level
@@ -2463,7 +2609,21 @@ function weaponOptionsHtml(selectedKey) {
 }
 
 function emptyAttack() {
-  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false };
+  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false, deedType: "", deedCustom: "" };
+}
+
+// Does this row's Bonus or Damage carry a "(+dX Deed Die)" annotation
+// right now - i.e. is a Deed Die actually going to be rolled with this
+// attack (Warrior/Dwarf only, per Table 1-10/1-14)? Mighty Deeds of Arms
+// only make sense to declare when there's a Deed Die to resolve them
+// with, so the deed-declaration row only renders when this is true - a
+// Cleric/Thief/Wizard/Halfling/Elf row (or a Warrior/Dwarf row whose
+// Bonus/Damage the player has hand-edited away from the annotation)
+// simply doesn't show it. Same regex rollDeedDieFromAttack() itself uses
+// to find the annotation, so "can declare a deed" and "will actually roll
+// a deed die" never disagree.
+function attackHasDeedDie(atk) {
+  return /\(\+[^)]+ Deed Die\)/i.test(String(atk.bonus || "")) || /\(\+[^)]+ Deed Die\)/i.test(String(atk.damage || ""));
 }
 
 // Which Two-Weapon Fighting roles (if any) a given weapon can fill.
@@ -2547,6 +2707,26 @@ function attackRowHtml(atk, mode) {
   const toggleLabel = toggleMod === "agi" ? "Agi" : "Str";
   const currentLabel = currentSource === "pc-agi" ? "Agi" : "Str";
 
+  // Mighty Deeds of Arms (Reference Booklet p.25-31) - only offered when
+  // this row actually has a Deed Die to resolve one with (see
+  // attackHasDeedDie). Declaring one of the book's seven named types shows
+  // its full example table in a collapsible ⓘ panel right away, so a
+  // player can see what a 3 vs. a 7+ does before committing to it; "Custom
+  // deed…" instead opens a free-text field for a deed the book didn't
+  // print an example for - it still gets the same Deed-Die-roll success
+  // check when the attack is rolled, just without book flavor text.
+  const deedType = atk.deedType || "";
+  const deedOptionsHtml = DCC_MIGHTY_DEED_OPTIONS.map(([v, l]) =>
+    `<option value="${v}"${v === deedType ? " selected" : ""}>${escapeHtml(l)}</option>`
+  ).join("");
+  const deedBlockHtml = attackHasDeedDie(atk) ? `
+      <div class="attack-deed-row">
+        <select class="attack-deed-type" title="Declare a Mighty Deed of Arms for this attack (Reference Booklet p.25) - rolled automatically with your Deed Die. A roll of 3+ succeeds, if the attack also hits.">${deedOptionsHtml}</select>
+        <input type="text" class="attack-deed-custom" placeholder="Describe your own deed…" value="${escapeHtml(atk.deedCustom || "")}" ${deedType === "custom" ? "" : "hidden"} />
+        <button type="button" class="attack-deed-info-btn" title="Show example results for this deed">ⓘ</button>
+      </div>
+      <div class="attack-deed-info" hidden>${mightyDeedInfoText(deedType)}</div>` : "";
+
   return `
     <div class="attack-row pc-attack-row${atk.equipped ? " equipped" : ""}" data-id="${atk.id}">
       <div class="attack-weapon-line">
@@ -2564,6 +2744,7 @@ function attackRowHtml(atk, mode) {
         <button type="button" class="attack-remove-btn" title="Remove attack">×</button>
       </div>
       ${metaParts.length ? `<div class="attack-row-meta">${metaParts.join(" · ")}</div>` : ""}
+      ${deedBlockHtml}
     </div>`;
 }
 
@@ -2602,6 +2783,10 @@ function readAttacks(mode) {
       base.backstabActive = damageEl ? damageEl.dataset.backstabActive === "1" : false;
       const twRoleEl = row.querySelector(".attack-tw-role");
       base.twoWeaponRole = twRoleEl ? twRoleEl.value : "";
+      const deedTypeEl = row.querySelector(".attack-deed-type");
+      base.deedType = deedTypeEl ? deedTypeEl.value : "";
+      const deedCustomEl = row.querySelector(".attack-deed-custom");
+      base.deedCustom = deedCustomEl ? deedCustomEl.value : "";
     }
     return base;
   });
@@ -2903,6 +3088,30 @@ function attachAttackRowListeners(mode) {
           damageEl.dataset.backstabActive = "1";
           scheduleSave();
           cfgRenderFromCurrentForm(mode);
+        });
+      }
+      // Picking a deed type both persists it (scheduleSave) and updates
+      // the row in place - shows/hides the free-text field for "Custom
+      // deed…", and refreshes the ⓘ info panel's content to match the
+      // newly-picked type (without touching whether the panel is
+      // currently expanded - see the info-button handler below).
+      const deedTypeSel = row.querySelector(".attack-deed-type");
+      if (deedTypeSel) {
+        deedTypeSel.addEventListener("change", () => {
+          const customInput = row.querySelector(".attack-deed-custom");
+          if (customInput) customInput.hidden = deedTypeSel.value !== "custom";
+          const infoEl = row.querySelector(".attack-deed-info");
+          if (infoEl) infoEl.innerHTML = mightyDeedInfoText(deedTypeSel.value);
+          scheduleSave();
+        });
+      }
+      // Purely a local expand/collapse toggle for the examples panel - not
+      // persisted, and doesn't affect what deed (if any) actually rolls.
+      const deedInfoBtn = row.querySelector(".attack-deed-info-btn");
+      if (deedInfoBtn) {
+        deedInfoBtn.addEventListener("click", () => {
+          const infoEl = row.querySelector(".attack-deed-info");
+          if (infoEl) infoEl.hidden = !infoEl.hidden;
         });
       }
     }
@@ -4206,6 +4415,33 @@ function rollDeedDieFromAttack(atk) {
   return { notation: `d${sides}`, sides, roll, mod, total: roll + mod };
 }
 
+// Resolves a declared Mighty Deed of Arms against the Deed Die that was
+// JUST rolled for this same attack (rollDeedDieFromAttack) - per the
+// Reference Booklet, a deed succeeds when the die's raw face (not
+// including the flat +1..+4 kicker higher-level warriors add on top) come
+// up 3 or better, in addition to the attack actually hitting; this app
+// doesn't track a target's AC for any roll (same limitation as crit/hit
+// resolution elsewhere), so a success is reported as conditional on that.
+// Returns "" if no deed was declared on this attack at all. A declared
+// deed with no Deed Die actually rolled (deed === null - e.g. the player
+// hand-edited the Deed Die annotation out of Bonus/Damage) is reported as
+// unresolved rather than silently dropped.
+function mightyDeedResultText(atk, deed) {
+  const type = atk.deedType;
+  if (!type) return "";
+  const label = type === "custom"
+    ? (atk.deedCustom && atk.deedCustom.trim() ? atk.deedCustom.trim() : "Custom deed")
+    : (DCC_MIGHTY_DEEDS[type] ? DCC_MIGHTY_DEEDS[type].label : "Mighty Deed");
+  if (!deed) {
+    return ` ⚔️ Mighty Deed declared (${label}), but no Deed Die was rolled for this attack — check this row's Bonus/Damage field.`;
+  }
+  if (deed.roll < 3) {
+    return ` ⚔️ Mighty Deed — ${label}: FAILED (Deed Die rolled ${deed.roll}, needed 3+) — no deed effect, but the attack/damage above still applies normally if it hits.`;
+  }
+  const tierText = type !== "custom" ? DCC_MIGHTY_DEEDS[type].tiers[Math.min(7, deed.roll)] : "";
+  return ` ⚔️ Mighty Deed — ${label}: SUCCEEDS (Deed Die rolled ${deed.roll}, if this attack hits)!${tierText ? ` ${tierText}` : ""}`;
+}
+
 function getStatsForItem(item) {
   const mode = item.metadata[MODE_METADATA_KEY] || "monster";
   const key = mode === "pc" ? PC_METADATA_KEY : MONSTER_METADATA_KEY;
@@ -5073,6 +5309,7 @@ async function rollAttackFor(itemId, attackId) {
     const toHit = d20Roll + atkMod + (deed ? deed.total : 0);
     const dmg = rollDamage(atk.damage);
     const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)})` : "";
+    const deedLine = mightyDeedResultText(atk, deed);
     if (deed) rollDice.push({ sides: deed.sides, value: deed.roll });
     if (dmg) rollDice.push(...dmg.dice);
 
@@ -5107,7 +5344,7 @@ async function rollAttackFor(itemId, attackId) {
     const dmgText = dmg !== null
       ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${isCrit ? " +crit" : ""})`
       : "";
-    text = `${atk.name || "Attack"}: ${toHitText}${dmgText}${critLine}`;
+    text = `${atk.name || "Attack"}: ${toHitText}${dmgText}${critLine}${deedLine}`;
     label = isCrit
       ? `💥 CRITICAL HIT! ${toHit} to hit${dmg !== null ? `, ${dmgTotal} dmg` : ""}`
       : (dmg !== null ? `${toHit} to hit, ${dmgTotal} dmg` : `${toHit} to hit`);
@@ -5204,6 +5441,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
     const toHit = roll + atkMod + (deed ? deed.total : 0);
     const dmg = rollDamage(atk.damage);
     const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)})` : "";
+    const deedLine = mightyDeedResultText(atk, deed);
     if (deed) rollDice.push({ sides: deed.sides, value: deed.roll });
     if (dmg) rollDice.push(...dmg.dice);
     let dmgTotal = dmg !== null ? dmg.total + (deed ? deed.total : 0) : null;
@@ -5252,7 +5490,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
     const dmgText = dmg !== null
       ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${critEligible ? " +crit" : ""})`
       : "";
-    return `${label}: ${toHitText}${dmgText}${critLine}`;
+    return `${label}: ${toHitText}${dmgText}${critLine}${deedLine}`;
   }
 
   let fumbleNote = "";
