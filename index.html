@@ -153,7 +153,7 @@
     align-items: center;
     gap: 3px;
   }
-  .field-sync-row input {
+  .field-sync-row input, .field-sync-row select {
     flex: 1;
     min-width: 0;
     width: auto;
@@ -1247,7 +1247,8 @@
           <div id="pc-trained-weapon-wrap">
             <label id="pc-trained-weapon-label">Trained Weapon (0-level)</label>
             <div class="field-sync-row">
-              <input type="text" id="pc-trained-weapon" placeholder="e.g. Dagger, or Hammer (as club)" title="Table 1-3's Occupation grants training in one weapon - but only applies to a 0-level character (no Class yet). The moment a character is classed, their class's own fixed weapon list takes over instead (Warrior: all weapons; Cleric: deity-based, not tracked here; Thief/Wizard/Elf/Halfling: a fixed list per class) and this field stops mattering for the Table 4-1 untrained-weapon penalty - so it's hidden once classed, except for Dwarves (see the ↻ button)." />
+              <input type="text" id="pc-trained-weapon" placeholder="e.g. Dagger, or Hammer (as club)" title="Table 1-3's Occupation grants training in one weapon - but only applies to a 0-level character (no Class yet). The moment a character is classed, their class's own fixed weapon list takes over instead (Warrior: all weapons; Cleric: deity-based, not tracked here; Thief/Wizard/Elf/Halfling: a fixed list per class) and this field stops mattering for the Table 4-1 untrained-weapon penalty - so it's hidden once classed, except for Warriors/Dwarves (who instead pick a Favorite Weapon from a dropdown - see the ↻ button)." />
+              <select id="pc-trained-weapon-select" style="display:none" title="A Warrior/Dwarf picks their Favorite Weapon from what they're actually trained in - adds their Luck modifier to the attack roll (not damage) whenever they use it."></select>
               <button type="button" class="derived-sync-btn" id="pc-trained-weapon-sync-btn" title="Set to this Occupation's Trained Weapon (Table 1-3)">↻</button>
             </div>
           </div>
@@ -2660,6 +2661,16 @@ function computePcTrainedWeaponText() {
 function recalcPcTrainedWeapon(force) {
   const el = document.getElementById("pc-trained-weapon");
   if (!el) return "";
+  // Once classed as a Warrior/Dwarf, this field holds their picked Favorite
+  // Weapon (from the dropdown - see populateFavoriteWeaponSelect), not an
+  // Occupation-derived value - Table 1-3's Occupation only ever trains a
+  // 0-level character. Leave it alone here so background/flavor edits (a
+  // Judge changing the character's Occupation after they've already leveled
+  // up) never silently clear a chosen Favorite Weapon underneath the
+  // dropdown.
+  const classEl = document.getElementById("pc-class");
+  const cls = classEl ? classEl.value.trim() : "";
+  if (FAVORITE_WEAPON_CLASSES.includes(cls)) return el.value;
   if (force || el.dataset.autoSynced === "1") {
     el.value = computePcTrainedWeaponText();
     el.dataset.autoSynced = "1";
@@ -2687,17 +2698,37 @@ function updatePcTrainedWeaponVisibility() {
   const wrap = document.getElementById("pc-trained-weapon-wrap");
   const label = document.getElementById("pc-trained-weapon-label");
   const el = document.getElementById("pc-trained-weapon");
+  const selectEl = document.getElementById("pc-trained-weapon-select");
+  const syncBtn = document.getElementById("pc-trained-weapon-sync-btn");
   if (!wrap || !label) return;
   const classEl = document.getElementById("pc-class");
   const cls = classEl ? classEl.value.trim() : "";
   if (FAVORITE_WEAPON_CLASSES.includes(cls)) {
     wrap.style.display = "";
     label.textContent = `Favorite Weapon (${cls})`;
-    if (el) el.title = `A ${cls} picks one favorite weapon and adds their Luck modifier to the ATTACK roll (not damage) whenever they use it - see the weapon row's own badge for the live bonus.`;
+    if (el) {
+      el.style.display = "none";
+      el.title = `A ${cls} picks one favorite weapon and adds their Luck modifier to the ATTACK roll (not damage) whenever they use it - see the weapon row's own badge for the live bonus.`;
+    }
+    if (selectEl) {
+      selectEl.style.display = "";
+      populateFavoriteWeaponSelect(cls, el ? el.value : "");
+    }
+    // The ↻ button re-syncs from Table 1-3's Occupation - irrelevant once a
+    // Warrior/Dwarf is picking their Favorite Weapon from the dropdown
+    // above, so it's hidden here rather than left as a dead/confusing
+    // control (recalcPcTrainedWeapon also no-ops for these classes as a
+    // second line of defense).
+    if (syncBtn) syncBtn.style.display = "none";
   } else if (cls === "") {
+    if (syncBtn) syncBtn.style.display = "";
     wrap.style.display = "";
     label.textContent = "Trained Weapon (0-level)";
-    if (el) el.title = "Table 1-3's Occupation grants training in one weapon - only applies to a 0-level character (no Class yet). The moment a character is classed, their class's own fixed weapon list takes over instead for the Table 4-1 untrained-weapon penalty.";
+    if (el) {
+      el.style.display = "";
+      el.title = "Table 1-3's Occupation grants training in one weapon - only applies to a 0-level character (no Class yet). The moment a character is classed, their class's own fixed weapon list takes over instead for the Table 4-1 untrained-weapon penalty.";
+    }
+    if (selectEl) selectEl.style.display = "none";
   } else {
     wrap.style.display = "none";
   }
@@ -2761,6 +2792,58 @@ const CLASS_WEAPON_TRAINING = {
   Elf: ["dagger", "javelin", "lance", "longbow", "longsword", "shortbow", "short sword", "staff", "spear", "two-handed sword"],
   Halfling: ["club", "crossbow", "dagger", "handaxe", "javelin", "shortbow", "short sword", "sling", "staff"],
 };
+
+// One display-friendly {key, label} entry per DISTINCT weapon-training key
+// in DCC_WEAPONS - dedupes the melee/ranged/etc. variants that already
+// train the same weapon (e.g. "Dagger (Melee)" and "Dagger (Thrown)" both
+// train "dagger") down to a single canonical option, labeled by stripping
+// the same parenthetical tag dccWeaponTrainingKey() strips to build that
+// key. This backs the Favorite Weapon dropdown (see
+// favoriteWeaponOptionsForClass/populateFavoriteWeaponSelect) - a Warrior
+// (trained in the use of ALL weapons) picks from every entry here; a
+// Dwarf picks from the subset also in CLASS_WEAPON_TRAINING.Dwarf.
+const ALL_TRAINABLE_WEAPONS = (() => {
+  const seen = new Map();
+  DCC_WEAPONS.forEach(entry => {
+    if (entry.key === "unarmed" || entry.key === "custom") return;
+    const key = dccWeaponTrainingKey(entry);
+    if (!seen.has(key)) seen.set(key, entry.label.replace(/\s*\([^)]*\)\s*/g, "").trim());
+  });
+  return Array.from(seen.entries())
+    .map(([key, label]) => ({ key, label }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+})();
+
+// A 0-level character still free-types the Trained Weapon field (Table
+// 1-3's Occupation wording - "Hammer (as club)", "Cudgel (as staff)" -
+// doesn't correspond 1:1 with a single weapon-table entry, so a dropdown
+// would be more restrictive than the actual rule). Once classed, a
+// Warrior or Dwarf instead picks from a dropdown of what they're
+// genuinely trained in - this returns that option list, empty for every
+// other class (whose Favorite Weapon field is hidden entirely - see
+// updatePcTrainedWeaponVisibility).
+function favoriteWeaponOptionsForClass(cls) {
+  if (cls === "Warrior") return ALL_TRAINABLE_WEAPONS;
+  if (cls === "Dwarf") return ALL_TRAINABLE_WEAPONS.filter(w => CLASS_WEAPON_TRAINING.Dwarf.includes(w.key));
+  return [];
+}
+
+// Rebuilds the Favorite Weapon <select>'s options for the given class and
+// pre-selects whichever option matches currentRawValue's training key (so
+// switching Class in - or loading a token that already had one recorded -
+// doesn't silently blank a value that's still a valid pick for this
+// class's list; a value that DOESN'T match anything here, e.g. a
+// 0-level Occupation weapon not on a Dwarf's actual list, is left on the
+// blank option instead of guessing).
+function populateFavoriteWeaponSelect(cls, currentRawValue) {
+  const selectEl = document.getElementById("pc-trained-weapon-select");
+  if (!selectEl) return;
+  const options = favoriteWeaponOptionsForClass(cls);
+  const currentKey = currentRawValue ? occupationTrainedWeaponKey(currentRawValue) : "";
+  selectEl.innerHTML = [`<option value="">— (pick a favorite weapon)</option>`]
+    .concat(options.map(w => `<option value="${escapeHtml(w.label)}"${w.key === currentKey ? " selected" : ""}>${escapeHtml(w.label)}</option>`))
+    .join("");
+}
 
 // Table 4-1's "Using an untrained weapon" penalty (-1d to the attack
 // roll, melee AND missile fire alike) - applies unless: the weapon is
@@ -3678,6 +3761,23 @@ if (pcDeedDieSyncBtn) {
 const pcTrainedWeaponEl = document.getElementById("pc-trained-weapon");
 if (pcTrainedWeaponEl) {
   pcTrainedWeaponEl.addEventListener("input", () => { pcTrainedWeaponEl.dataset.autoSynced = "0"; });
+}
+const pcTrainedWeaponSelectEl = document.getElementById("pc-trained-weapon-select");
+if (pcTrainedWeaponSelectEl) {
+  // The dropdown (Warrior/Dwarf only) writes into the same underlying
+  // #pc-trained-weapon input the free-text 0-level field uses, so every
+  // downstream consumer (isFavoriteWeaponMatch/Live, recalcPcTrainedWeapon's
+  // "manual edit wins" check, save/load) keeps working unchanged regardless
+  // of which control the player actually saw.
+  pcTrainedWeaponSelectEl.addEventListener("change", () => {
+    if (pcTrainedWeaponEl) {
+      pcTrainedWeaponEl.value = pcTrainedWeaponSelectEl.value;
+      pcTrainedWeaponEl.dataset.autoSynced = "0";
+    }
+    scheduleSave();
+    renderAttacks("pc", readAttacks("pc"));
+    cfgRenderFromCurrentForm("pc");
+  });
 }
 const pcTrainedWeaponSyncBtn = document.getElementById("pc-trained-weapon-sync-btn");
 if (pcTrainedWeaponSyncBtn) {
