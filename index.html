@@ -6195,30 +6195,38 @@ function deriveTrackerLines(item, stats) {
     const twProfile = twoWeaponProfileForStats(stats);
     const primarySides = isWeaponUntrained(stats, primary) ? stepDiceChainDown(twProfile.primarySides, 1) : twProfile.primarySides;
     const offhandSides = isWeaponUntrained(stats, offhand) ? stepDiceChainDown(twProfile.offhandSides, 1) : twProfile.offhandSides;
-    // A two-weapon pair (Table 4-3) is one ACTION, but a character with
-    // multiple Action Dice (extra attacks from level, Table 1-x) still
-    // gets to take that action once per Action Die in a round - exactly
-    // like any other equipped weapon already expands below. Mirrors that
-    // same expansion here instead of pinning the pair to a fixed 2 lines
-    // regardless of level. The FIRST iteration keeps the plain "tw"
-    // slotKey and un-suffixed label used before this expansion existed
-    // (same condition - actDieOptions.length > 0 - as the single-weapon
-    // case below, so a single-Action-Die character, the overwhelmingly
-    // common case, is completely unaffected and every already-saved
-    // lineDeeds declaration for slot "tw" keeps working); only a SECOND
-    // (or further) Action Die gets its own ordinal slotKey ("tw1", "tw2",
-    // ...) and label.
-    if (actDieOptions.length > 0) {
-      actDieOptions.forEach((opt, i) => {
-        const slotKey = i === 0 ? "tw" : `tw${i}`;
-        const ordinal = opt.label.replace(/\s*\(d\d+\)$/, "");
-        lines.push({ atk: primary, attackId: primary.id, slotKey, isTw: true, twHand: "primary", label: `${primary.name || "Primary hand"} (Primary) — ${ordinal}`, dieSides: primarySides });
-        lines.push({ atk: offhand, attackId: offhand.id, slotKey, isTw: true, twHand: "offhand", label: `${offhand.name || "Off-hand"} (Off-hand) — ${ordinal}`, dieSides: offhandSides });
+    // Table 4-3's two-weapon split spends exactly ONE Action Die - the
+    // character's normal single attack becomes this Primary+Off-hand pair
+    // instead, both hands at Table 4-3's stepped-down dice. It does NOT
+    // multiply into more pairs for a character with multiple Action Dice
+    // (extra attacks from level, Table 1-x) - an extra Action Die is still
+    // just an ORDINARY single attack, exactly like it would be for a
+    // character who isn't fighting two-weapon at all (see the
+    // single-remaining-weapon expansion below), not another two-weapon
+    // pair. Always the plain "tw" slotKey/un-suffixed label, so every
+    // already-saved lineDeeds declaration for slot "tw" keeps working.
+    lines.push({ atk: primary, attackId: primary.id, slotKey: "tw", isTw: true, twHand: "primary", label: `${primary.name || "Primary hand"} (Primary)`, dieSides: primarySides });
+    lines.push({ atk: offhand, attackId: offhand.id, slotKey: "tw", isTw: true, twHand: "offhand", label: `${offhand.name || "Off-hand"} (Off-hand)`, dieSides: offhandSides });
+
+    // Any Action Die BEYOND the one just spent on the pair above (index 0)
+    // is an ordinary single-weapon attack - defaults to the Primary
+    // weapon, since Table 4-3 has nothing to say about which hand an
+    // unrelated extra swing uses and this app isn't going to invent a
+    // third stepped-down dice profile no rule actually defines. Same
+    // "maxOnly" crit convention as any other extra Action Die
+    // (actionDieProfileForAttack's isMain: false) - only the character's
+    // very first Action Die (spent on the pair here) crits like an
+    // ordinary main attack.
+    const extraActDieOptions = actDieOptions.filter(o => o.value !== "0");
+    const primaryUntrainedForExtra = isWeaponUntrained(stats, primary);
+    extraActDieOptions.forEach(opt => {
+      const profile = actionDieProfileForAttack(stats, { ...primary, actionDieIndex: opt.value });
+      lines.push({
+        atk: primary, attackId: primary.id, slotKey: opt.value, isTw: false,
+        label: `${primary.name || "Attack"} — ${opt.label.replace(/\s*\(d\d+\)$/, "")}`,
+        dieSides: primaryUntrainedForExtra ? stepDiceChainDown(profile.sides, 1) : profile.sides,
       });
-    } else {
-      lines.push({ atk: primary, attackId: primary.id, slotKey: "tw", isTw: true, twHand: "primary", label: `${primary.name || "Primary hand"} (Primary)`, dieSides: primarySides });
-      lines.push({ atk: offhand, attackId: offhand.id, slotKey: "tw", isTw: true, twHand: "offhand", label: `${offhand.name || "Off-hand"} (Off-hand)`, dieSides: offhandSides });
-    }
+    });
   }
   const remaining = equipped.filter(a => !twPair || (a.id !== primary.id && a.id !== offhand.id));
 
@@ -7017,17 +7025,23 @@ async function rollAttackForTrackerRow(itemId, attackId, slotKey) {
   if (!item) return;
   const stats = getStatsForItem(item);
   const atk = stats.attacks.find(a => a.id === attackId);
-  if (atk && atk.twoWeaponRole) {
+  // A Primary/Off-hand weapon row's OWN "tw" line (see deriveTrackerLines)
+  // is the only one that actually routes through the combined two-weapon
+  // roll - a character with extra Action Dice from level also gets one or
+  // more ORDINARY single-attack lines that happen to reuse the Primary
+  // weapon's attackId (Table 4-3's split only ever spends one Action Die;
+  // an extra one is just a normal attack, not another paired swing - see
+  // deriveTrackerLines's comment on the "tw" branch). Gating on the
+  // line's own slotKey, not just "does this row have a twoWeaponRole set,"
+  // is what keeps those extra-Action-Die lines rolling as plain single
+  // attacks instead of always dragging the off-hand along for the ride.
+  if (slotKey === "tw" && atk && atk.twoWeaponRole) {
     const otherRole = atk.twoWeaponRole === "primary" ? "offhand" : "primary";
     const otherAtk = stats.attacks.find(a => a.twoWeaponRole === otherRole);
     if (otherAtk) {
       const primaryId = atk.twoWeaponRole === "primary" ? atk.id : otherAtk.id;
       const offhandId = atk.twoWeaponRole === "offhand" ? atk.id : otherAtk.id;
-      // This specific Tracker line's own slotKey ("tw", "tw1", ...)
-      // identifies which of the character's Action Dice this click was
-      // for - see deriveTrackerLines - so it must be threaded through
-      // rather than always defaulting to the pair's first iteration.
-      rollTwoWeaponAttack(itemId, primaryId, offhandId, slotKey || "tw");
+      rollTwoWeaponAttack(itemId, primaryId, offhandId, "tw");
       return;
     }
   }
