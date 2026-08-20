@@ -536,6 +536,12 @@
     padding: 4px 4px;
     font-size: 10.5px;
   }
+  .attack-action-die {
+    flex: none;
+    width: 118px;
+    padding: 4px 4px;
+    font-size: 10.5px;
+  }
   .attack-row-meta {
     font-size: 10px;
     color: var(--muted);
@@ -1232,7 +1238,10 @@
           </div>
           <div>
             <label>Action Dice</label>
-            <input type="text" id="pc-actdice" placeholder="1d20" />
+            <div class="field-sync-row">
+              <input type="text" id="pc-actdice" placeholder="1d20" title="This character's Action Dice (Table 1-5/1-7/1-10/1-12/1-14/1-16/1-18) - how many separate attacks per round they get, and which die each one uses. Auto-fills from Class + Level; a Dwarf's bonus Shield Bash (available from 1st level, doesn't grow with level) is noted separately. Pick the matching slot on an attack row below to actually roll with the right die." />
+              <button type="button" class="derived-sync-btn" id="pc-actdice-sync-btn" title="Set to this Class/Level's Action Dice">↻</button>
+            </div>
           </div>
         </div>
 
@@ -1240,7 +1249,7 @@
           <div>
             <label>Deed Die</label>
             <div class="field-sync-row">
-              <input type="text" id="pc-deed-die" placeholder="— (Warrior/Dwarf only)" title="Mighty Deeds of Arms (Table 1-10/1-14) - Warrior/Dwarf only. Rolled fresh with every attack and added to both that attack's to-hit and damage roll." />
+              <input type="text" id="pc-deed-die" placeholder="— (Warrior/Dwarf only)" title="Mighty Deeds of Arms (Table 1-10/1-14) - Warrior/Dwarf only. Rolled ONCE per combat round (tracked by the Combat Tracker's Round counter) and added to both to-hit and damage on every attack this character makes that round - extra Action Dice attacks and both hands of a two-weapon pair all reuse the same roll, they don't each get their own." />
               <button type="button" class="derived-sync-btn" id="pc-deed-die-sync-btn" title="Set to this Class/Level's Deed Die (Table 1-10/1-14)">↻</button>
             </div>
           </div>
@@ -1478,6 +1487,16 @@ const MONSTER_METADATA_KEY = "com.claude.monster-sheet/dcc-data";
 const PC_METADATA_KEY = "com.claude.monster-sheet/dcc-pc-data";
 const MODE_METADATA_KEY = "com.claude.monster-sheet/sheet-mode";
 const COMBAT_METADATA_KEY = "com.claude.monster-sheet/combat-data";
+// A Warrior/Dwarf's Mighty Deed of Arms die (Table 1-10/1-14) is rolled
+// ONCE per combat round, not once per attack - every attack that
+// character makes that round (extra Action Dice, both hands of a
+// two-weapon pair) reuses that same roll, per the Judge's ruling. Stored
+// as its own dedicated metadata key (same pattern as COMBAT_METADATA_KEY
+// above), rather than folded into PC_METADATA_KEY's data blob, so the
+// Sheet's own debounced saveCurrent() - which fully REPLACES that blob
+// from the current form fields on every save - can never silently drop
+// it just because an unrelated field got edited. See rollDeedDieForStats.
+const DEED_ROUND_CACHE_KEY = "com.claude.monster-sheet/deed-round-cache";
 const SCENE_STATE_KEY = "com.claude.monster-sheet/combat-state";
 const DIM_OVERLAY_METADATA_KEY = "com.claude.monster-sheet/dim-overlay";
 const CHAT_LOG_METADATA_KEY = "com.claude.monster-sheet/chat-log";
@@ -1672,6 +1691,10 @@ function fillForm(mode, data) {
     // Class/Level auto-fill.
     const pcDeedDieRestoreEl = document.getElementById("pc-deed-die");
     if (pcDeedDieRestoreEl) pcDeedDieRestoreEl.dataset.autoSynced = d.pcDeedDieAutoSynced ? "1" : "0";
+    // Same "still auto-managed?" restoration, for the Action Dice field's
+    // Class/Level auto-fill.
+    const pcActDiceRestoreEl = document.getElementById("pc-actdice");
+    if (pcActDiceRestoreEl) pcActDiceRestoreEl.dataset.autoSynced = d.pcActDiceAutoSynced ? "1" : "0";
     // Same "still auto-managed?" restoration, for the Trained Weapon
     // field's Occupation auto-fill.
     const pcTrainedWeaponRestoreEl = document.getElementById("pc-trained-weapon");
@@ -1708,6 +1731,8 @@ function readForm(mode) {
     d.pcLevelAutoSynced = pcLevelSaveEl ? pcLevelSaveEl.dataset.autoSynced === "1" : false;
     const pcDeedDieSaveEl = document.getElementById("pc-deed-die");
     d.pcDeedDieAutoSynced = pcDeedDieSaveEl ? pcDeedDieSaveEl.dataset.autoSynced === "1" : false;
+    const pcActDiceSaveEl = document.getElementById("pc-actdice");
+    d.pcActDiceAutoSynced = pcActDiceSaveEl ? pcActDiceSaveEl.dataset.autoSynced === "1" : false;
     const pcTrainedWeaponSaveEl = document.getElementById("pc-trained-weapon");
     d.pcTrainedWeaponAutoSynced = pcTrainedWeaponSaveEl ? pcTrainedWeaponSaveEl.dataset.autoSynced === "1" : false;
   }
@@ -1998,6 +2023,119 @@ const DCC_CLASS_TABLES = {
     },
   },
 };
+
+// Action Dice progression per class, by level (the "Action Dice" column of
+// Table 1-5 Cleric / 1-7 Thief / 1-10 Warrior / 1-12 Wizard / 1-14 Dwarf /
+// 1-16 Elf / 1-18 Halfling). Each entry is an array of that level's attack
+// dice SIDES, in order - e.g. a level 5 Warrior's [20, 14] is the Reference
+// Booklet's "1d20+1d14": two separate attacks per round, one at d20 and one
+// at d14. A single-entry array means one attack per round, same as every
+// 0-level/unclassed character always has (see actionDiceForClassLevel's
+// fallback). Every extra die beyond the first represents an ADDITIONAL
+// attack, not a bigger one - it's rolled and resolved completely
+// separately (see actionDieProfileForAttack/rollAttackFor), same weapon or
+// a different one. Cleric's progression isn't deity-dependent the way
+// their weapon training is (that's the one explicitly deferred piece -
+// see CLASS_WEAPON_TRAINING), so it's included here in full.
+const ACTION_DICE_TABLE = {
+  Cleric:   { 1: [20], 2: [20], 3: [20], 4: [20], 5: [20], 6: [20, 14], 7: [20, 16], 8: [20, 20], 9: [20, 20], 10: [20, 20] },
+  Thief:    { 1: [20], 2: [20], 3: [20], 4: [20], 5: [20], 6: [20, 14], 7: [20, 16], 8: [20, 20], 9: [20, 20], 10: [20, 20] },
+  Halfling: { 1: [20], 2: [20], 3: [20], 4: [20], 5: [20], 6: [20, 14], 7: [20, 16], 8: [20, 20], 9: [20, 20], 10: [20, 20] },
+  Warrior:  { 1: [20], 2: [20], 3: [20], 4: [20], 5: [20, 14], 6: [20, 16], 7: [20, 20], 8: [20, 20], 9: [20, 20], 10: [20, 20, 14] },
+  Wizard:   { 1: [20], 2: [20], 3: [20], 4: [20], 5: [20, 14], 6: [20, 16], 7: [20, 20], 8: [20, 20], 9: [20, 20], 10: [20, 20, 14] },
+  Dwarf:    { 1: [20], 2: [20], 3: [20], 4: [20], 5: [20, 14], 6: [20, 16], 7: [20, 20], 8: [20, 20], 9: [20, 20], 10: [20, 20, 14] },
+  Elf:      { 1: [20], 2: [20], 3: [20], 4: [20], 5: [20, 14], 6: [20, 16], 7: [20, 20], 8: [20, 20], 9: [20, 20], 10: [20, 20, 14] },
+};
+
+// Table 1-14's footnote: "In addition to this basic action die, the dwarf
+// receives a shield bash using a d14 action die." A flat bonus attack
+// available from 1st level on (doesn't grow with level the way the main
+// progression above does) - modeled as a separate pickable slot on an
+// attack row (see actionDieSelectOptions) rather than folded into
+// ACTION_DICE_TABLE.Dwarf itself, so it stays visibly distinct from the
+// dwarf's normal Action Dice count. This app doesn't track whether a
+// shield is actually equipped, so a Judge should rule it unavailable if
+// the character isn't carrying one.
+const DWARF_SHIELD_BASH_SIDES = 14;
+
+// Looks up this PC's class/level row in ACTION_DICE_TABLE, clamped to the
+// table's 1-10 range same as classLevelEntryFor. Falls back to a single
+// plain d20 ([20]) for 0-level/unset-class/"Other" PCs, or any level/class
+// combo missing from the table - matching every other class-table lookup's
+// "there's nothing else to draw from" default in this app.
+function actionDiceForClassLevel(cls, levelRaw) {
+  const table = ACTION_DICE_TABLE[cls];
+  if (!table) return [20];
+  const level = parseLevelNumber(levelRaw);
+  if (level === null || level < 1) return [20];
+  const clamped = Math.min(10, level);
+  return table[clamped] || [20];
+}
+
+// What the Action Dice field SHOULD read for the current Class + Level -
+// same "single source of truth an actual roll also reads from" contract as
+// computePcCritText (see actionDieProfileForAttack, which drives the real
+// roll). A Dwarf's Shield Bash is appended as a separate note rather than
+// folded into the "1d20+1d14"-style notation, since it's not part of the
+// leveled progression itself.
+function computePcActionDiceText(cls, levelRaw) {
+  const dice = actionDiceForClassLevel(cls, levelRaw);
+  const base = dice.map(sides => `1d${sides}`).join("+");
+  return cls === "Dwarf" ? `${base} (+1d${DWARF_SHIELD_BASH_SIDES} shield bash)` : base;
+}
+
+// Resolves which of this character's Action Dice a given attack row is
+// using, from the token's SAVED stats (not the live Sheet DOM) - same
+// "the Tracker can roll for a token that isn't open on the Sheet" reasoning
+// as critProfileForStats/twoWeaponProfileForStats. The FIRST slot (index 0)
+// is always the character's "main" attack and crits exactly like ordinary
+// single-weapon fighting always has (natural-max-or-above-threat-range,
+// automatic hit); every extra slot beyond it - or the Dwarf-only Shield
+// Bash - is a genuinely separate, weaker attack, treated with the same
+// "maxOnly" crit convention Table 4-3 already uses for two-weapon
+// off-hands: crits only on ITS OWN natural max, and that max is NOT an
+// automatic hit (still has to beat the target's AC - see rollAttackFor).
+// Falls back to a plain d20 "main" attack if the row has no explicit pick,
+// which covers every attack row saved before this feature existed and any
+// class/level with nothing else to choose from.
+function actionDieProfileForAttack(stats, atk) {
+  const cls = (stats.data.class || "").trim();
+  const idxRaw = atk.actionDieIndex || "";
+  if (idxRaw === "shieldbash" && cls === "Dwarf") {
+    return { sides: DWARF_SHIELD_BASH_SIDES, isMain: false, label: "Shield Bash" };
+  }
+  const dice = actionDiceForClassLevel(cls, stats.data.level);
+  const idx = idxRaw ? Math.min(dice.length - 1, Math.max(0, parseInt(idxRaw, 10) || 0)) : 0;
+  return { sides: dice[idx] || 20, isMain: idx === 0 };
+}
+
+// Same Action Die profile as actionDieProfileForAttack, but read from the
+// LIVE Sheet form (Class + Level) rather than a saved token snapshot - for
+// the per-row die badge during rendering, same split as
+// liveTwoWeaponProfile/twoWeaponProfileForStats.
+function actionDieProfileForAttackLive(atk) {
+  const classEl = document.getElementById("pc-class");
+  const levelEl = document.getElementById("pc-level");
+  return actionDieProfileForAttack({ data: { class: classEl ? classEl.value : "", level: levelEl ? levelEl.value : "" } }, atk);
+}
+
+// Which Action Die choices (if any) an attack row should offer for the
+// given class/level - empty when there's nothing to pick (a single-die
+// class/level that also isn't a Dwarf), so the selector stays hidden
+// entirely rather than showing a meaningless one-option dropdown. A Dwarf
+// always gets at least the Shield Bash option added on top, even at 1st
+// level before their main progression has grown past a single die.
+function actionDieSelectOptions(cls, levelRaw) {
+  const dice = actionDiceForClassLevel(cls, levelRaw);
+  const isDwarf = cls === "Dwarf";
+  if (dice.length <= 1 && !isDwarf) return [];
+  const options = dice.map((sides, idx) => {
+    const ord = idx === 0 ? "1st" : idx === 1 ? "2nd" : idx === 2 ? "3rd" : `${idx + 1}th`;
+    return { value: String(idx), label: `${ord} attack (d${sides})` };
+  });
+  if (isDwarf) options.push({ value: "shieldbash", label: `Shield Bash (d${DWARF_SHIELD_BASH_SIDES})` });
+  return options;
+}
 
 // Critical Hit tables (Reference Booklet Crit Tables I-V, page 20-24) and
 // the generic Fumbles table (Table 4-2, page 19). Each table is a list of
@@ -2554,6 +2692,24 @@ function recalcPcCrit(force) {
   return el.value;
 }
 
+// Keeps the Action Dice field synced to Class + Level, same "manual edit
+// wins" contract as Crit Die/Table just above: `force` (a Class or Level
+// change, or the ↻ button) always overwrites the field and re-opts it into
+// auto-sync; without it, only a still-auto-synced field is touched, so a
+// hand-typed override (a Judge-granted bonus attack, say) is never
+// silently clobbered.
+function recalcPcActionDice(force) {
+  const el = document.getElementById("pc-actdice");
+  if (!el) return "";
+  if (force || el.dataset.autoSynced === "1") {
+    const classEl = document.getElementById("pc-class");
+    const levelEl = document.getElementById("pc-level");
+    el.value = computePcActionDiceText(classEl ? classEl.value : "", levelEl ? levelEl.value : "");
+    el.dataset.autoSynced = "1";
+  }
+  return el.value;
+}
+
 // Keeps the read-only "XP to Next Lvl" field showing how much more total
 // XP (and at what level) the CURRENT Xp field's value implies, per Table
 // 1-4. Always recomputed from the live XP field - unlike Level, there's
@@ -2956,7 +3112,7 @@ function weaponOptionsHtml(selectedKey) {
 }
 
 function emptyAttack() {
-  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false, deedType: "", deedCustom: "" };
+  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false, deedType: "", deedCustom: "", actionDieIndex: "" };
 }
 
 // Which Two-Weapon Fighting roles (if any) a given weapon can fill.
@@ -3005,20 +3161,34 @@ function attackRowHtml(atk, mode) {
   const effectiveTwRole = twOptions.some(o => o.value === atk.twoWeaponRole) ? atk.twoWeaponRole : "";
   if (effectiveTwRole === "primary") badges.push(`<span class="weapon-badge weapon-badge-tw" title="Two-weapon fighting: primary hand">TW: Primary</span>`);
   if (effectiveTwRole === "offhand") badges.push(`<span class="weapon-badge weapon-badge-tw" title="Two-weapon fighting: off-hand">TW: Off-hand</span>`);
+  // Which Action Die (Table 1-5/1-7/1-10/1-12/1-14/1-16/1-18, or a Dwarf's
+  // bonus Shield Bash) this row uses - only offered/relevant when there's
+  // no two-weapon role active, since Table 4-3 already dictates that row's
+  // die once a Primary/Off-hand role is set (see actionDieSelectOptions).
+  // Same "stale pick silently falls back" contract as effectiveTwRole
+  // above - a row that no longer offers this character's current Action
+  // Dice (e.g. Class/Level changed) just shows the default 1st attack.
+  const levelElForActDie = document.getElementById("pc-level");
+  const actDieOptions = effectiveTwRole ? [] : actionDieSelectOptions(classEl ? classEl.value : "", levelElForActDie ? levelElForActDie.value : "");
+  const effectiveActionDieIndex = actDieOptions.some(o => o.value === atk.actionDieIndex) ? atk.actionDieIndex : "0";
   // Small at-a-glance reminder of the actual die this row's attack roll
   // uses right now - normally d20, but a configured Primary/Off-hand
   // two-weapon role steps it down per Table 4-3 (or the Halfling
-  // ability), and an untrained weapon (Table 4-1) steps it down ONE
-  // FURTHER step on top of that (the two penalties stack - nothing in
-  // either rule says fighting two-weapon with an unfamiliar weapon waives
-  // the other's penalty). Easy to lose track of once several rows and
-  // both penalties are in play, hence showing the actual resulting die
-  // rather than making the player recompute it.
+  // ability), an Action Die # pick other than "1st" swaps in that class's
+  // own (usually smaller) die for a higher-level extra attack, and an
+  // untrained weapon (Table 4-1) steps whichever of those it is down ONE
+  // FURTHER step on top (the penalties stack - nothing in either rule says
+  // an extra attack or fighting two-weapon with an unfamiliar weapon
+  // waives it). Easy to lose track of once several rows and modifiers are
+  // in play, hence showing the actual resulting die rather than making the
+  // player recompute it.
   const untrained = isWeaponUntrainedLive(atk);
-  let dieSidesForBadge = 20;
+  let dieSidesForBadge;
   if (effectiveTwRole === "primary" || effectiveTwRole === "offhand") {
     const twProfile = liveTwoWeaponProfile();
     dieSidesForBadge = effectiveTwRole === "primary" ? twProfile.primarySides : twProfile.offhandSides;
+  } else {
+    dieSidesForBadge = actionDieProfileForAttackLive({ ...atk, actionDieIndex: effectiveActionDieIndex }).sides;
   }
   if (untrained) dieSidesForBadge = stepDiceChainDown(dieSidesForBadge, 1);
   badges.push(`<span class="weapon-badge weapon-badge-die" title="Attack die this weapon currently rolls">d${dieSidesForBadge}</span>`);
@@ -3048,7 +3218,7 @@ function attackRowHtml(atk, mode) {
   if (pcClassHasDeedDieLive()) {
     const deedDieEl = document.getElementById("pc-deed-die");
     const deedDieText = deedDieEl && deedDieEl.value.trim() ? deedDieEl.value.trim() : "Deed Die";
-    badges.push(`<span class="weapon-badge weapon-badge-deed" title="Also rolls this character's Deed Die (see the Deed Die field above), added to both this attack's to-hit and damage roll">${escapeHtml(deedDieText)}</span>`);
+    badges.push(`<span class="weapon-badge weapon-badge-deed" title="Also applies this character's Deed Die (see the Deed Die field above) to both this attack's to-hit and damage roll - rolled once per combat round and shared with every other attack this character makes that round, not re-rolled per attack">${escapeHtml(deedDieText)}</span>`);
   }
   // A Warrior/Dwarf's designated favorite weapon (see the Favorite Weapon
   // field above) adds their Luck modifier to THIS attack's to-hit roll
@@ -3061,6 +3231,13 @@ function attackRowHtml(atk, mode) {
   const twSelectHtml = `<select class="attack-tw-role" title="Two-weapon fighting (Table 4-3) - mark this weapon as your primary or off-hand attack">${twOptions.map(o =>
     `<option value="${o.value}"${o.value === effectiveTwRole ? " selected" : ""}>${escapeHtml(o.label)}</option>`
   ).join("")}</select>`;
+  // Only rendered once there's an actual choice to make (see
+  // actionDieSelectOptions) and no two-weapon role is active - a 0-level/
+  // 1st-4th-level non-Dwarf character has nothing here but their one
+  // ordinary attack, same as before this feature existed.
+  const actDieSelectHtml = actDieOptions.length ? `<select class="attack-action-die" title="Which of this character's Action Dice this attack uses (Table 1-5/1-7/1-10/1-12/1-14/1-16/1-18). Extra dice from higher levels - or a Dwarf's Shield Bash - are separate, weaker attacks: they can still crit on their own natural max, but that max isn't an automatic hit (still has to beat the target's AC).">${actDieOptions.map(o =>
+    `<option value="${o.value}"${o.value === effectiveActionDieIndex ? " selected" : ""}>${escapeHtml(o.label)}</option>`
+  ).join("")}</select>` : "";
   const metaParts = [];
   if (entry.range) {
     metaParts.push(`Range: ${entry.range}${entry.strAtClose ? " (Str applies at close range only - shown damage assumes close range)" : ""}`);
@@ -3111,6 +3288,7 @@ function attackRowHtml(atk, mode) {
         <input type="checkbox" class="attack-equipped" ${atk.equipped ? "checked" : ""} title="Currently wielded - normally one weapon at a time, but a configured two-weapon Primary+Off-hand pair can both be equipped - this is what determines your Initiative Die" />
         <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
         ${twSelectHtml}
+        ${actDieSelectHtml}
         ${badges.join(" ")}
       </div>
       <div class="attack-row-fields">
@@ -3161,6 +3339,13 @@ function readAttacks(mode) {
       base.backstabActive = damageEl ? damageEl.dataset.backstabActive === "1" : false;
       const twRoleEl = row.querySelector(".attack-tw-role");
       base.twoWeaponRole = twRoleEl ? twRoleEl.value : "";
+      // Same "not rendered = not applicable right now" contract as
+      // effectiveTwRole/twoWeaponRole above - the select only exists when
+      // actionDieSelectOptions found something to offer (see
+      // attackRowHtml), so its absence just means this row is back to the
+      // implicit "1st/only attack" default rather than losing data.
+      const actDieEl = row.querySelector(".attack-action-die");
+      base.actionDieIndex = actDieEl ? actDieEl.value : "";
       const deedTypeEl = row.querySelector(".attack-deed-type");
       base.deedType = deedTypeEl ? deedTypeEl.value : "";
       const deedCustomEl = row.querySelector(".attack-deed-custom");
@@ -3426,6 +3611,19 @@ function attachAttackRowListeners(mode) {
           syncWeaponsIntoEquipment();
         });
       }
+      // Picking a different Action Die # (see actionDieSelectOptions) just
+      // changes which die THIS row rolls - unlike Two-Weapon role above,
+      // there's no "only one row can use it" restriction, since nothing
+      // stops declaring more than one attack with the same slot in a
+      // Judge's ruling (or simply not having gotten around to configuring
+      // every row yet).
+      const actDieSel = row.querySelector(".attack-action-die");
+      if (actDieSel) {
+        actDieSel.addEventListener("change", () => {
+          scheduleSave();
+          renderAttacks(mode, readAttacks(mode));
+        });
+      }
       const abilityToggleBtn = row.querySelector(".ability-toggle-btn");
       if (abilityToggleBtn) {
         abilityToggleBtn.addEventListener("click", () => {
@@ -3622,6 +3820,10 @@ function renderPcStatline(d) {
   // Same passive, auto-synced-only recompute as Crit Die/Table just
   // above, for the Deed Die field.
   recalcPcDeedDie(false);
+  // Same passive, auto-synced-only recompute, for the Action Dice field -
+  // used below instead of the possibly-stale `d.actdice` snapshot, same
+  // reasoning as liveCrit above.
+  const liveActDice = recalcPcActionDice(false);
   // Keeps the Trained Weapon row's visibility/label matching whichever
   // Class is currently on screen (see updatePcTrainedWeaponVisibility) -
   // needs to run on every render, not just a Class change, so it's also
@@ -3637,7 +3839,7 @@ function renderPcStatline(d) {
     `<b>AC</b> ${ac}`,
     `<b>HP</b> ${hp}`,
     `<b>Spd</b> ${speed}'`,
-    d.actdice ? `<b>Act</b> ${d.actdice}` : null,
+    liveActDice ? `<b>Act</b> ${liveActDice}` : null,
     (d.fort || d.ref || d.will) ? `<b>SV</b> Fort ${d.fort || "+0"}, Ref ${d.ref || "+0"}, Will ${d.will || "+0"}` : null,
     liveCrit ? `<b>Crit</b> ${liveCrit}` : null,
     atkSummary ? `<b>Atk</b> ${atkSummary}` : null,
@@ -3646,6 +3848,20 @@ function renderPcStatline(d) {
 }
 
 async function saveCurrent() {
+  // A fired (or cancelled-without-replacement) setTimeout ID is still a
+  // truthy number - clearTimeout() only stops the pending callback, it
+  // doesn't reset this variable back to falsy. Every "is there a save
+  // still pending?" guard in this file (the onChange live-refresh skip,
+  // the token-switch/deselect flush checks) relies on `saveTimeout` going
+  // falsy once there's genuinely nothing outstanding, so without this
+  // reset those guards would see the FIRST edit's now-stale, already-fired
+  // timer ID as "still pending" forever after, and keep skipping the
+  // refill even when nothing is actually in flight. Every call path that
+  // reaches saveCurrent() (the debounce firing naturally, or a manual
+  // clearTimeout(saveTimeout)+await saveCurrent() flush) means whatever
+  // was pending is now resolved one way or another, so this is always the
+  // right place to clear it.
+  saveTimeout = null;
   if (!currentItemId || suppressChange) return;
   const cfg = MODES[currentMode];
   const data = readForm(currentMode);
@@ -3732,6 +3948,23 @@ if (pcCritSyncBtn) {
   pcCritSyncBtn.addEventListener("click", () => {
     recalcPcCrit(true);
     scheduleSave();
+    cfgRenderFromCurrentForm("pc");
+  });
+}
+const pcActDiceEl = document.getElementById("pc-actdice");
+if (pcActDiceEl) {
+  pcActDiceEl.addEventListener("input", () => { pcActDiceEl.dataset.autoSynced = "0"; });
+}
+const pcActDiceSyncBtn = document.getElementById("pc-actdice-sync-btn");
+if (pcActDiceSyncBtn) {
+  pcActDiceSyncBtn.addEventListener("click", () => {
+    recalcPcActionDice(true);
+    scheduleSave();
+    // Same reasoning as the Crit Die/Deed Die sync buttons - rebuilds the
+    // attack rows too, since each row's Action Die # selector (see
+    // actionDieSelectOptions) offers whatever THIS Class/Level's Action
+    // Dice actually are.
+    renderAttacks("pc", readAttacks("pc"));
     cfgRenderFromCurrentForm("pc");
   });
 }
@@ -4530,15 +4763,20 @@ document.getElementById("pc-class").addEventListener("change", () => {
   // clear it, not leave a stale die behind for a class that no longer has
   // one).
   recalcPcDeedDie(true);
+  // A new Class also means a (possibly different) Action Dice progression
+  // (and whether the Dwarf-only Shield Bash option even applies) - same
+  // force-overwrite contract as Crit Die/Table and Deed Die above.
+  recalcPcActionDice(true);
   // Halfling's special two-weapon rule waives the off-hand's "light
   // weapon" restriction - switching Class in or out of Halfling can
   // change which weapons are eligible for that role, so the attack rows
   // (whose Off-hand option list is computed per-render from the current
   // Class) need a rebuild, not just the note text. This same rebuild also
   // picks up the Deed Die badge and Mighty Deed declaration row (both
-  // gated on Class) and the Untrained-weapon badge (Warriors are always
+  // gated on Class), the Untrained-weapon badge (Warriors are always
   // trained, everyone else's training didn't just change but their
-  // Deed-Die-none status might affect layout).
+  // Deed-Die-none status might affect layout), and each row's Action Die #
+  // selector (Table 1-5/.../1-18 - whose options are also class-driven).
   renderAttacks("pc", readAttacks("pc"));
   cfgRenderFromCurrentForm("pc");
   scheduleSave();
@@ -4559,6 +4797,11 @@ function cascadeLevelChangeEffects() {
   // row's Deed Die badge picks up the new die immediately instead of only
   // on the next unrelated render.
   recalcPcDeedDie(true);
+  // A Level change can also grant (or grow) a second/third Action Die
+  // (Table 1-5/.../1-18) - same force-overwrite + rebuild reasoning as
+  // Deed Die just above, so a level-up's new attack immediately shows up
+  // as a pickable option on the row's Action Die # selector.
+  recalcPcActionDice(true);
   renderAttacks("pc", readAttacks("pc"));
   cfgRenderFromCurrentForm("pc");
 }
@@ -4877,29 +5120,68 @@ function rollDamage(diceStr) {
   return { notation: `${count}d${sides}`, dieTotal, mod, total: dieTotal + mod, dice };
 }
 
-// Rolls this character's Deed Die (Table 1-10 Warrior / Table 1-14
-// Dwarf), read from the dedicated Deed Die field (stats.data["deed-die"],
-// see recalcPcDeedDie) rather than parsed out of Bonus/Damage text - that
-// annotation-based approach was fragile (broke the moment a player hand-
-// edited either field) and this app's own comments flagged it as a
-// stopgap "until Deed Die rolling is its own feature." Per the Reference
-// Booklet's Table 1-10 note, "A warrior's attack modifier is rolled anew,
-// according to the appropriate die, with each attack. The result modifies
-// both attack and damage rolls" - ONE roll, reused for both, same as
-// before. Takes `stats` (a character-wide value) rather than a specific
-// atk - callers roll one of these per ATTACK (so twice in a row for a
-// two-weapon pair, once for a single attack), matching "with each
-// attack." Returns null for any character with no Deed Die set (Cleric/
-// Thief/Wizard/Elf/Halfling/0-level/unset/"Other", or a Warrior/Dwarf
-// whose field is blank/unparseable).
+// Resolves this character's Deed Die (Table 1-10 Warrior / Table 1-14
+// Dwarf) for the CURRENT combat round, read from the dedicated Deed Die
+// field (stats.data["deed-die"], see recalcPcDeedDie) rather than parsed
+// out of Bonus/Damage text - that annotation-based approach was fragile
+// (broke the moment a player hand-edited either field) and this app's own
+// comments flagged it as a stopgap "until Deed Die rolling is its own
+// feature."
+//
+// Per the Judge's ruling for this table: a Warrior/Dwarf rolls their Deed
+// Die ONCE per combat round, not once per attack - every attack they make
+// that round (extra Action Dice from a higher level, or both hands of a
+// two-weapon pair) reuses that SAME roll, rather than each attack getting
+// its own. (This differs from Table 1-10's own footnote text - "rolled
+// anew... with each attack" - which this app followed until now; the
+// Judge's ruling supersedes it here.) "The current round" is whatever the
+// Combat Tracker's shared Round counter (sceneState.round/session) reads
+// - the same value every client at the table sees, so a roll made from
+// the Tracker and one made from this character's own Sheet stay in sync -
+// cached on the token itself (DEED_ROUND_CACHE_KEY) rather than kept only
+// in memory, precisely so two different clients agree on it. A change to
+// the Deed Die's own size/modifier (a level-up mid-round) invalidates a
+// stale cached roll even within the same round, since the old face value
+// wouldn't make sense against a different die anyway.
+//
+// Takes `stats` (a character-wide value) rather than a specific atk -
+// every attack this character makes in a round, however many rows or
+// hands that spans, resolves to this ONE call's result. Returns null for
+// any character with no Deed Die set (Cleric/Thief/Wizard/Elf/Halfling/
+// 0-level/unset/"Other", or a Warrior/Dwarf whose field is blank/
+// unparseable). The returned object's `reused` flag tells the caller
+// whether this was a brand new roll (so it should persist it back to the
+// token via DEED_ROUND_CACHE_KEY, and is worth animating as a "real" die
+// roll) or an already-rolled value from earlier this round (nothing new
+// to persist or animate - it's the same face the player already saw).
 function rollDeedDieForStats(stats) {
   const raw = String((stats.data && stats.data["deed-die"]) || "").trim();
   const m = raw.match(/^\+?d(\d+)\s*([+-]\s*\d+)?$/i);
   if (!m) return null;
   const sides = parseInt(m[1], 10);
   const mod = m[2] ? parseInt(m[2].replace(/\s+/g, ""), 10) : 0;
+  const round = sceneState.round || 1;
+  const session = sceneState.session || 1;
+  const cache = stats.deedRoundCache;
+  if (cache && cache.round === round && cache.session === session && cache.sides === sides && cache.mod === mod) {
+    return { notation: `d${sides}`, sides, roll: cache.roll, mod, total: cache.roll + mod, round, session, reused: true };
+  }
   const roll = Math.floor(Math.random() * sides) + 1;
-  return { notation: `d${sides}`, sides, roll, mod, total: roll + mod };
+  return { notation: `d${sides}`, sides, roll, mod, total: roll + mod, round, session, reused: false };
+}
+
+// Persists a freshly-rolled Deed Die (rollDeedDieForStats's `reused:
+// false` result) onto the token, so the NEXT attack this character makes
+// this round - from this same client or any other - reads it back out of
+// DEED_ROUND_CACHE_KEY and reuses it instead of rolling again. Callers
+// only need to await this when `deed.reused` is false; a reused roll has
+// nothing new to write.
+async function persistDeedRoundRoll(itemId, deed) {
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      item.metadata[DEED_ROUND_CACHE_KEY] = { round: deed.round, session: deed.session, sides: deed.sides, mod: deed.mod, roll: deed.roll };
+    });
+  });
 }
 
 // Resolves a declared Mighty Deed of Arms against the Deed Die that was
@@ -4943,6 +5225,9 @@ function getStatsForItem(item) {
     initiative: combat.initiative ?? "",
     enabled: combat.enabled !== false,
     attacks: (data.attacks || []).filter(a => a.name || a.bonus || a.damage),
+    // This round's already-rolled Deed Die (if any) - see
+    // rollDeedDieForStats/DEED_ROUND_CACHE_KEY.
+    deedRoundCache: item.metadata[DEED_ROUND_CACHE_KEY] || null,
   };
 }
 
@@ -5773,23 +6058,32 @@ async function rollAttackFor(itemId, attackId) {
   if (!atk) return;
 
   const atkMod = parseModifier(atk.bonus);
+  // Which of this character's Action Dice this attack uses (Table 1-5/
+  // .../1-18, or a Dwarf's bonus Shield Bash) - see
+  // actionDieProfileForAttack. A monster attack, or a PC row still on its
+  // default pick, resolves to the character's ordinary "1st/only" d20
+  // attack, exactly as before this feature existed.
+  const actionDieProfile = actionDieProfileForAttack(stats, atk);
   // Table 4-1: using an untrained weapon (melee or missile alike) steps
-  // the attack die down ONE step on the dice chain (d20 -> d16) - it does
-  // NOT touch damage. See isWeaponUntrained for exactly who's exempt
-  // (Warriors always are).
+  // the attack die down ONE step on the dice chain (d20 -> d16, or
+  // whichever Action Die this row is using) - it does NOT touch damage.
+  // See isWeaponUntrained for exactly who's exempt (Warriors always are).
   const untrained = isWeaponUntrained(stats, atk);
-  const atkSides = untrained ? stepDiceChainDown(20, 1) : 20;
+  const atkSides = untrained ? stepDiceChainDown(actionDieProfile.sides, 1) : actionDieProfile.sides;
   const forcedD20 = consumeForcedD20();
   const d20Roll = forcedD20 !== null ? Math.min(forcedD20, atkSides) : (Math.floor(Math.random() * atkSides) + 1);
   const wasForced = forcedD20 !== null;
   const profile = critProfileForStats(stats);
-  // profile.threatRange only reads below 20 for a Warrior (Table 1-10) -
-  // and a Warrior is never untrained (trained in the use of all weapons),
-  // so an untrained, stepped-down attack die can only ever crit on ITS
-  // OWN natural max, the same way fighting two-weapon already works; no
-  // separate "expanded range is lost" handling is needed here the way
-  // Table 4-3 spells out, because the two situations can't overlap.
-  const isCrit = d20Roll >= profile.threatRange;
+  // The character's FIRST/main Action Die crits exactly like single-weapon
+  // fighting always has (profile.threatRange only reads below 20 for a
+  // Warrior, Table 1-10) - and a Warrior is never untrained (trained in
+  // the use of all weapons), so an untrained, stepped-down main attack die
+  // can only ever crit on ITS OWN natural max, the same way fighting
+  // two-weapon already works. Any EXTRA Action Die (a second/third attack
+  // from a higher level, or a Dwarf's Shield Bash) instead uses the same
+  // "maxOnly" convention Table 4-3 already applies to a two-weapon
+  // off-hand - see actionDieProfileForAttack's comment for why.
+  const isCrit = actionDieProfile.isMain ? (d20Roll >= profile.threatRange) : (d20Roll === atkSides);
   const isFumble = d20Roll === 1;
   const rollDice = [{ sides: atkSides, value: d20Roll }];
   const untrainedNote = untrained ? " (untrained weapon, Table 4-1: -1 die)" : "";
@@ -5812,12 +6106,20 @@ async function rollAttackFor(itemId, attackId) {
     label = "💀 FUMBLE! Natural 1 — automatic miss";
   } else {
     const deed = rollDeedDieForStats(stats);
+    // A brand new roll (not one reused from earlier this round) needs to
+    // be written back to the token so the NEXT attack this character
+    // makes this round - from this client or any other - sees it too; a
+    // reused roll has nothing new to persist. See rollDeedDieForStats.
+    if (deed && !deed.reused) await persistDeedRoundRoll(itemId, deed);
     const toHit = d20Roll + atkMod + luckMod + (deed ? deed.total : 0);
     const dmg = rollDamage(atk.damage);
-    const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)})` : "";
+    const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)}${deed.reused ? ", this round's roll" : ""})` : "";
     const luckText = luckMod ? ` Lck${formatModifier(luckMod)}` : "";
     const deedLine = mightyDeedResultText(atk, deed);
-    if (deed) rollDice.push({ sides: deed.sides, value: deed.roll });
+    // Only animate/tumble the Deed Die when it was actually just rolled -
+    // replaying the same face for a reused roll would look like a fresh
+    // roll happened when nothing new was decided.
+    if (deed && !deed.reused) rollDice.push({ sides: deed.sides, value: deed.roll });
     if (dmg) rollDice.push(...dmg.dice);
 
     let dmgTotal = dmg !== null ? dmg.total + (deed ? deed.total : 0) : null;
@@ -5844,7 +6146,11 @@ async function rollAttackFor(itemId, attackId) {
         : profile.critTable
           ? `Crit Table ${profile.critTable} isn't preloaded in this app — check your Reference Booklet for the ${profile.critDie} result.`
           : `No Crit field set for this monster (try e.g. "M/d8") — rolled a plain ${profile.critDie} crit die.`;
-      critLine = ` ${markCritAlert("💥 CRITICAL HIT!")} Natural ${d20Roll}${wasForced ? " (GM-forced)" : ""} — automatic hit. ${critDieText ? `${critDieText} — ` : ""}${rowText}`;
+      // An extra Action Die's crit (see isCrit above) is NOT an automatic
+      // hit the way the character's main attack's natural max is - same
+      // wording Table 4-3 uses for a two-weapon off-hand's "maxOnly" crit.
+      const autoHitNote = actionDieProfile.isMain ? " — automatic hit" : " (not an automatic hit — must still beat the target's AC)";
+      critLine = ` ${markCritAlert("💥 CRITICAL HIT!")} Natural ${d20Roll}${wasForced ? " (GM-forced)" : ""}${autoHitNote}. ${critDieText ? `${critDieText} — ` : ""}${rowText}`;
     }
 
     const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${atkSides} ${d20Roll}${wasForced ? " forced" : ""}${formatModifier(atkMod)}${luckText}${deedText})${untrainedNote}`;
@@ -5933,6 +6239,20 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
   let anyFumble = false;
   let anyCrit = false;
 
+  // One Deed Die for the WHOLE two-weapon action, shared by both hands -
+  // per the Judge's ruling (see rollDeedDieForStats), a Warrior/Dwarf
+  // making multiple attacks in a round (including both hands of a
+  // two-weapon pair, which are one action but two attacks) rolls their
+  // Deed Die once and reuses it, rather than each hand getting its own.
+  // Resolved ONCE below (assigned before either hand is actually
+  // resolved, and left null on a total whiff - see the
+  // halflingDoubleFumble check just below where it's set - matching
+  // single-weapon rollAttackFor, which likewise never rolls a Deed Die
+  // for a fumbled attack) rather than inside resolveHand itself (which
+  // would otherwise roll it fresh per hand, exactly the "twice in one
+  // action" outcome this ruling rules out).
+  let deed = null;
+
   function resolveHand(atk, roll, sides, isPrimary) {
     const label = atk.name || (isPrimary ? "Primary hand" : "Off-hand");
     const forcedNote = isPrimary && wasForced ? " (GM-forced)" : "";
@@ -5954,18 +6274,17 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
     }
 
     const atkMod = parseModifier(atk.bonus);
-    const deed = rollDeedDieForStats(stats);
+    // Same shared `deed` for both hands - see its declaration above.
     // Same favorite-weapon Luck bonus as single-weapon rollAttackFor,
     // checked per hand since primary and off-hand weapons can differ -
     // attack roll only, never damage.
     const luckMod = isFavoriteWeaponMatch(stats, atk) ? abilityModifierFromRaw(stats.data.lck) : 0;
     const toHit = roll + atkMod + luckMod + (deed ? deed.total : 0);
     const dmg = rollDamage(atk.damage);
-    const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)})` : "";
+    const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)}${deed.reused ? ", this round's roll" : ""})` : "";
     const luckText = luckMod ? ` Lck${formatModifier(luckMod)}` : "";
     const deedLine = mightyDeedResultText(atk, deed);
     const untrainedNote = isWeaponUntrained(stats, atk) ? " (untrained weapon, Table 4-1: -1 die)" : "";
-    if (deed) rollDice.push({ sides: deed.sides, value: deed.roll });
     if (dmg) rollDice.push(...dmg.dice);
     let dmgTotal = dmg !== null ? dmg.total + (deed ? deed.total : 0) : null;
 
@@ -6018,6 +6337,19 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
 
   let fumbleNote = "";
   let primaryText, offhandText;
+  if (!halflingDoubleFumble) {
+    // At least one hand is going to actually resolve (a fumble on ONE
+    // hand still leaves the other needing it) - roll/reuse the round's
+    // Deed Die now, shared by whichever of resolveHand's two calls below
+    // end up using it.
+    deed = rollDeedDieForStats(stats);
+    if (deed && !deed.reused) {
+      await persistDeedRoundRoll(itemId, deed);
+      // Only animate/tumble the Deed Die once, and only for a genuinely
+      // fresh roll - see rollAttackFor's identical reasoning.
+      rollDice.push({ sides: deed.sides, value: deed.roll });
+    }
+  }
   if (halflingDoubleFumble) {
     anyFumble = true;
     const fumbleDie = fumbleDieForStats(stats);
@@ -6631,7 +6963,9 @@ async function nextTurn() {
   let round = sceneState.round || 1;
   idx = idx === -1 ? 0 : idx + 1;
   if (idx >= order.length) { idx = 0; round += 1; }
-  sceneState = { round, activeId: order[idx].id };
+  // session carries through untouched - see resetTracker's comment on why
+  // it exists (Deed Die round-caching).
+  sceneState = { round, activeId: order[idx].id, session: sceneState.session || 1 };
   renderTrackerRows(lastTrackerItems);
   await OBR.scene.setMetadata({ [SCENE_STATE_KEY]: sceneState });
 }
@@ -6643,13 +6977,20 @@ async function prevTurn() {
   let round = sceneState.round || 1;
   idx = idx === -1 ? 0 : idx - 1;
   if (idx < 0) { idx = order.length - 1; round = Math.max(1, round - 1); }
-  sceneState = { round, activeId: order[idx].id };
+  sceneState = { round, activeId: order[idx].id, session: sceneState.session || 1 };
   renderTrackerRows(lastTrackerItems);
   await OBR.scene.setMetadata({ [SCENE_STATE_KEY]: sceneState });
 }
 
 async function resetTracker() {
-  sceneState = { round: 1, activeId: null };
+  // Bumping `session` (rather than just resetting round back to 1) gives
+  // every Warrior/Dwarf's once-per-round Deed Die cache (see
+  // DEED_ROUND_CACHE_KEY/rollDeedDieForStats) an unambiguous "this is a
+  // brand new encounter" signal even though the round NUMBER itself is
+  // reused - without it, a token whose cached roll happened to be saved
+  // during a previous encounter's Round 1 would look identical to a fresh
+  // Round 1 here and wrongly get reused into the new fight.
+  sceneState = { round: 1, activeId: null, session: (sceneState.session || 1) + 1 };
   renderTrackerRows(lastTrackerItems);
   await OBR.scene.setMetadata({ [SCENE_STATE_KEY]: sceneState });
 }
