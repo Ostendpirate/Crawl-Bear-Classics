@@ -1235,7 +1235,7 @@
             <label>Init</label>
             <div class="field-sync-row">
               <input type="text" id="pc-init" placeholder="+1" />
-              <button type="button" class="derived-sync-btn" data-target="pc-init" title="Set to Agility modifier">↻</button>
+              <button type="button" class="derived-sync-btn" data-target="pc-init" title="Set to Agility modifier (+ character level for Warriors)">↻</button>
             </div>
             <div class="init-die-note">Die: <span id="pc-init-die">d20</span></div>
           </div>
@@ -2713,6 +2713,19 @@ function classSaveBonus(saveKey) {
   return entry ? (entry[saveKey] || 0) : 0;
 }
 
+// Warriors add their character level straight to every Initiative check -
+// a class feature of its own, separate from (and on top of) the ordinary
+// Agility modifier every class gets, and separate from the Deed Die (which
+// only ever touches Attack/Damage, not Initiative). No other class gets a
+// level bonus here - Dwarves share the Deed Die with Warriors but not
+// this. Not part of DCC_CLASS_TABLES' per-level rows since it isn't a
+// per-level value, just "current level, flat."
+function pcInitLevelBonus(cls, levelRaw) {
+  if ((cls || "").trim() !== "Warrior") return 0;
+  const level = parseLevelNumber(levelRaw);
+  return level === null ? 0 : level;
+}
+
 // What the Crit Die/Table field SHOULD read for the current Class + Level
 // (Table 1-10) - this is the exact same source critProfileForStats() pulls
 // from to resolve an actual roll, so this field and the dice a crit
@@ -3262,6 +3275,32 @@ function damageBreakdownTooltipForStats(stats, atk, lineState) {
   }
   if (lineState && lineState.backstabActive) {
     tooltip += ` Backstab is currently declared for this line - the NEXT roll will use the weapon's Backstab die instead of this Damage text (see the Backstab badge/button above).`;
+  }
+  return tooltip;
+}
+
+// Stats-based equivalent of initBreakdownTooltipLive, for the Combat
+// Tracker (which rolls Initiative for whichever token was clicked, not
+// necessarily the one open on the Sheet) - reads the token's saved
+// Agility/Class/Level and its persisted derivedAuto["pc-init"] flag (see
+// readForm/fillForm) instead of the live Sheet form. Monster tokens have
+// no ability scores/class on file to break down - callers gate this to
+// stats.mode === "pc" (see trackerRowHtml).
+function initBreakdownTooltipForStats(stats) {
+  const agiMod = abilityModifierFromRaw(stats.data.agi);
+  const cls = (stats.data.class || "").trim();
+  const lvl = String(stats.data.level || "").trim();
+  const lvlBonus = pcInitLevelBonus(cls, stats.data.level);
+  const sumParts = [`Agi ${formatSignedNumber(agiMod)}`];
+  if (lvlBonus) sumParts.push(`Warrior lvl ${lvl} ${formatSignedNumber(lvlBonus)}`);
+  const autoTotal = agiMod + lvlBonus;
+  const isAutoSynced = !!(stats.data.derivedAuto && stats.data.derivedAuto["pc-init"]);
+
+  let tooltip = isAutoSynced
+    ? `Initiative = ${sumParts.join(" + ")} = ${formatSignedNumber(autoTotal)}. This is the total bonus this token's Initiative roll uses.`
+    : `Initiative set manually (auto-calc would give ${sumParts.join(" + ")} = ${formatSignedNumber(autoTotal)}).`;
+  if (cls === "Warrior") {
+    tooltip += ` Warriors add their character level to Initiative - a separate class feature from the Deed Die, which only applies to Attack/Damage.`;
   }
   return tooltip;
 }
@@ -3959,6 +3998,13 @@ function renderPcStatline(d) {
   const speed = recalcPcSpeed();
   recalcPcFumbleDie();
   recalcPcInitiativeDie();
+  // Keeps the Init field's mouseover breakdown matching the current
+  // Agility/Class/Level on every render (including right after loading a
+  // token, before any field has been edited this session) - same
+  // "passive, every-render recompute" pattern renderPcStatline already
+  // gives Crit Die/Table etc. just below.
+  const pcInitTooltipEl = document.getElementById("pc-init");
+  if (pcInitTooltipEl) pcInitTooltipEl.title = initBreakdownTooltipLive();
   // Same passive recompute as Crit Die/Table just below - keeps Level (if
   // still auto-synced) and the "XP to Next Lvl" note matching the current
   // XP field on every render, not just right after an XP edit fires its
@@ -4284,8 +4330,10 @@ PC_ABILITY_FIELD_IDS.forEach(id => {
 
 // Maps each derived field to the ability field that feeds it, and (for
 // the three saves) the matching key into a DCC_CLASS_TABLES level row.
-// Init has no class/level base in the reference tables - only Fort/Ref/
-// Will do - so it stays ability-mod-only.
+// Init has no per-level class table entry the way Fort/Ref/Will do - its
+// only class-driven piece is the flat "Warriors add their level" feature
+// (see pcInitLevelBonus), handled as a special case in
+// derivedPcFieldValue below rather than another PC_SAVE_FIELD_KEYS entry.
 const PC_DERIVED_FIELD_SOURCES = {
   "pc-init": "pc-agi",
   "pc-fort": "pc-sta",
@@ -4299,15 +4347,54 @@ const PC_SAVE_FIELD_KEYS = {
 };
 
 // Computes what a derived field (Init/Fort/Ref/Will) SHOULD read: the
-// linked ability's modifier, plus - for Fort/Ref/Will only - this
-// character's class/level save bonus from DCC_CLASS_TABLES (0-level,
-// "Other/Homebrew", or an unset class fall back to just the ability
-// modifier, since there's no class table row to add).
+// linked ability's modifier, plus - for Fort/Ref/Will, this character's
+// class/level save bonus from DCC_CLASS_TABLES (0-level, "Other/
+// Homebrew", or an unset class fall back to just the ability modifier,
+// since there's no class table row to add), or - for Init specifically -
+// a Warrior's flat level bonus (pcInitLevelBonus; 0 for every other
+// class).
 function derivedPcFieldValue(fieldId, sourceId) {
   const abilityMod = abilityModifierFromField(sourceId);
+  if (fieldId === "pc-init") {
+    const classEl = document.getElementById("pc-class");
+    const levelEl = document.getElementById("pc-level");
+    const lvlBonus = pcInitLevelBonus(classEl ? classEl.value : "", levelEl ? levelEl.value : "");
+    return formatSignedNumber(abilityMod + lvlBonus);
+  }
   const saveKey = PC_SAVE_FIELD_KEYS[fieldId];
   if (!saveKey) return formatSignedNumber(abilityMod);
   return formatSignedNumber(abilityMod + classSaveBonus(saveKey));
+}
+
+// Mouseover breakdown for the Init field - same "spell out every term"
+// treatment attackBonusBreakdownTooltip gives the Bonus field. Every
+// class gets the Agility modifier; a Warrior additionally adds their
+// character level (pcInitLevelBonus) as a flat class feature that's NOT
+// part of their Deed Die (that only touches Attack/Damage - see the Deed
+// Die field's own tooltip/comments). There's no persisted "was this
+// auto-synced" flag for Init the way an attack row's Bonus has, so this
+// always shows what the current Agility/Class/Level would compute,
+// alongside whatever's actually sitting in the field right now.
+function initBreakdownTooltipLive() {
+  const classEl = document.getElementById("pc-class");
+  const levelEl = document.getElementById("pc-level");
+  const cls = classEl ? classEl.value.trim() : "";
+  const lvl = levelEl ? levelEl.value.trim() : "";
+  const agiMod = abilityModifierFromField("pc-agi");
+  const lvlBonus = pcInitLevelBonus(cls, lvl);
+  const sumParts = [`Agi ${formatSignedNumber(agiMod)}`];
+  if (lvlBonus) sumParts.push(`Warrior lvl ${lvl} ${formatSignedNumber(lvlBonus)}`);
+  const autoTotal = agiMod + lvlBonus;
+  const initEl = document.getElementById("pc-init");
+  const currentText = initEl ? initEl.value.trim() : "";
+  const autoText = formatSignedNumber(autoTotal);
+  let tooltip = currentText === autoText
+    ? `Initiative = ${sumParts.join(" + ")} = ${autoText}.`
+    : `Initiative set manually to ${currentText || "(blank)"} (auto-calc would give ${sumParts.join(" + ")} = ${autoText}).`;
+  if (cls === "Warrior") {
+    tooltip += ` Warriors add their character level to Initiative - a separate class feature from the Deed Die, which only applies to Attack/Damage.`;
+  }
+  return tooltip;
 }
 
 // Every derived PC field (Init/Fort/Ref/Will, and any weapon row's Bonus
@@ -4331,6 +4418,14 @@ function refreshDerivedPcFields() {
     el.value = derivedPcFieldValue(fieldId, sourceId);
     el.dataset.autoSynced = "1";
   });
+  // Refresh Init's mouseover breakdown on EVERY call, auto-synced or not -
+  // same reasoning as refreshAutoSyncedAttackBonuses refreshing every
+  // attack row's tooltip regardless of that row's own auto-sync state: a
+  // Class/Level/Agility edit changes what the breakdown (and true total)
+  // should say even for a hand-typed Init value that itself didn't get
+  // touched above.
+  const initEl = document.getElementById("pc-init");
+  if (initEl) initEl.title = initBreakdownTooltipLive();
   refreshAutoSyncedAttackBonuses();
   refreshAutoSyncedAttackDamages();
   recalcPcAC();
@@ -6166,11 +6261,17 @@ function trackerRowHtml(item, stats, isActive) {
   const hasAttacks = lines.length > 0;
   const expanded = hasAttacks && expandedAttackRows.has(item.id);
   const initDie = (stats.mode === "pc" && stats.attacks.some(a => a.equipped && dccWeaponEntry(a.weapon).twoHanded)) ? 16 : 20;
+  // Mouseover breakdown of the Initiative bonus - Agility modifier, plus a
+  // Warrior's level (see pcInitLevelBonus/initBreakdownTooltipForStats).
+  // Monster tokens have no ability scores/class on file to break down, so
+  // this stays empty for them (same "PC-only" gate as the attack-line
+  // Bonus/Damage tooltips).
+  const initTooltip = stats.mode === "pc" ? initBreakdownTooltipForStats(stats) : "";
   return `
     <div class="tracker-row${isActive ? " active" : ""}${!stats.enabled ? " inactive" : ""}" data-id="${item.id}">
       <button class="toggle-switch${stats.enabled ? " on" : ""}" title="${stats.enabled ? "Deactivate" : "Activate"} this token" aria-pressed="${stats.enabled}"></button>
-      <div class="tracker-init"><input type="number" class="init-input" value="${escapeHtml(stats.initiative)}" /></div>
-      <button class="hp-btn roll-btn" title="Roll initiative (d${initDie}${stats.initBonus ? " " + stats.initBonus : ""})">🎲</button>
+      <div class="tracker-init"><input type="number" class="init-input" value="${escapeHtml(stats.initiative)}"${initTooltip ? ` title="${escapeHtml(initTooltip)}"` : ""} /></div>
+      <button class="hp-btn roll-btn" title="${escapeHtml(`Roll initiative (d${initDie}${stats.initBonus ? " " + stats.initBonus : ""})${initTooltip ? ". " + initTooltip : ""}`)}">🎲</button>
       <div class="tracker-name" title="Select on map">${isActive ? "▶ " : ""}${escapeHtml(item.name || "Unnamed")}</div>
       <div class="tracker-hp">
         <button class="hp-btn hp-minus">−</button>
