@@ -860,6 +860,13 @@
   .attack-detail-name { flex: 1; color: var(--text); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .attack-detail-meta { color: var(--muted); white-space: nowrap; }
   .attack-roll-btn { flex: none; width: 22px; height: 22px; font-size: 11px; }
+  .attack-detail-badges {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    margin-top: 3px;
+  }
   .attack-detail-extra {
     display: flex;
     flex-wrap: wrap;
@@ -3177,6 +3184,42 @@ function attackBonusBreakdownTooltip(atk, abilitySourceId, currentBonusText, isA
     : `Bonus set manually (auto-calc would give ${sumParts.join(" + ")} = ${formatSignedNumber(autoTotal)}).`;
   if (clsLabel && lvlLabel && entry && isDeedClass) {
     tooltip += ` ${clsLabel} lvl ${lvlLabel}'s Deed Die (${entry.attack}) isn't a flat number - it rolls fresh once per combat round (see the Deed Die field above) and adds on top of this Bonus at roll time.`;
+  }
+  return tooltip;
+}
+
+// Stats-based equivalent of attackBonusBreakdownTooltip, for the Combat
+// Tracker line preview (trackerLineHtml) - the Tracker rolls for whichever
+// token was clicked, not necessarily the one open on the Sheet, so this
+// reads the token's saved stats/atk fields instead of the live Sheet form.
+// Same breakdown text and same "Deed Die isn't a flat number" callout for
+// Warrior/Dwarf, just sourced differently.
+function attackBonusBreakdownTooltipForStats(stats, atk) {
+  const entry = dccWeaponEntry(atk.weapon);
+  const abilitySourceId = atk.bonusSource || (entry.type === "ranged" ? "pc-agi" : "pc-str");
+  const abilityLabel = abilitySourceId === "pc-agi" ? "Agi" : "Str";
+  const abilityMod = abilityModifierFromRaw(stats.data[abilitySourceId === "pc-agi" ? "agi" : "str"]);
+  const classEntry = classLevelEntryFor(stats.data.class, stats.data.level);
+  const clsLabel = (stats.data.class || "").trim();
+  const lvlLabel = String(stats.data.level || "").trim();
+  const isDeedClass = classEntry && typeof classEntry.attack === "string";
+  const classAttack = classEntry && typeof classEntry.attack === "number" ? classEntry.attack : 0;
+  const isFav = isFavoriteWeaponMatch(stats, atk);
+  const lckMod = isFav ? abilityModifierFromRaw(stats.data.lck) : 0;
+
+  const sumParts = [`${abilityLabel} ${formatSignedNumber(abilityMod)}`];
+  if (clsLabel && lvlLabel && classEntry && !isDeedClass) {
+    sumParts.push(`${clsLabel} lvl ${lvlLabel} Attack ${formatSignedNumber(classAttack)}`);
+  }
+  if (isFav) sumParts.push(`Favorite Weapon Luck ${formatSignedNumber(lckMod)}`);
+  const autoTotal = abilityMod + classAttack + lckMod;
+  const isAutoSynced = !!atk.bonusAuto;
+
+  let tooltip = isAutoSynced
+    ? `Bonus = ${sumParts.join(" + ")} = ${formatSignedNumber(autoTotal)}. This is the total true to-hit bonus this attack rolls with.`
+    : `Bonus set manually (auto-calc would give ${sumParts.join(" + ")} = ${formatSignedNumber(autoTotal)}).`;
+  if (clsLabel && lvlLabel && classEntry && isDeedClass) {
+    tooltip += ` ${clsLabel} lvl ${lvlLabel}'s Deed Die (${classEntry.attack}) isn't a flat number - it rolls fresh once per combat round and adds on top of this Bonus at roll time.`;
   }
   return tooltip;
 }
@@ -5959,8 +6002,8 @@ function deriveTrackerLines(item, stats) {
     const twProfile = twoWeaponProfileForStats(stats);
     const primarySides = isWeaponUntrained(stats, primary) ? stepDiceChainDown(twProfile.primarySides, 1) : twProfile.primarySides;
     const offhandSides = isWeaponUntrained(stats, offhand) ? stepDiceChainDown(twProfile.offhandSides, 1) : twProfile.offhandSides;
-    lines.push({ atk: primary, attackId: primary.id, slotKey: "tw", isTw: true, label: `${primary.name || "Primary hand"} (Primary)`, dieSides: primarySides });
-    lines.push({ atk: offhand, attackId: offhand.id, slotKey: "tw", isTw: true, label: `${offhand.name || "Off-hand"} (Off-hand)`, dieSides: offhandSides });
+    lines.push({ atk: primary, attackId: primary.id, slotKey: "tw", isTw: true, twHand: "primary", label: `${primary.name || "Primary hand"} (Primary)`, dieSides: primarySides });
+    lines.push({ atk: offhand, attackId: offhand.id, slotKey: "tw", isTw: true, twHand: "offhand", label: `${offhand.name || "Off-hand"} (Off-hand)`, dieSides: offhandSides });
   }
   const remaining = equipped.filter(a => !twPair || (a.id !== primary.id && a.id !== offhand.id));
 
@@ -6046,8 +6089,40 @@ function trackerLineHtml(item, stats, line) {
   const hasDeedDie = stats.mode === "pc" && pcClassHasDeedDie(stats);
   const canBackstab = stats.mode === "pc" && isThief && entry && entry.backstabDamage;
   const lineState = stats.mode === "pc" && line.slotKey ? getLineDeedState(atk, line.slotKey) : { deedType: "", deedCustom: "", backstabActive: false };
-  const dieMeta = line.dieSides ? `d${line.dieSides}` : "";
   const rowKey = `${line.attackId}:${line.slotKey || "0"}`;
+
+  // Same small pill labels as the Sheet's per-row badges (attackRowHtml) -
+  // stats-based rather than live-DOM, since the Tracker rolls for
+  // whichever token was clicked, not necessarily the one open on the
+  // Sheet. The die badge replaces the old plain "dX ·" prefix on the meta
+  // line so every line shows its die the same way the Sheet does.
+  const badges = [];
+  if (line.dieSides) badges.push(`<span class="weapon-badge weapon-badge-die" title="Attack die this line rolls">d${line.dieSides}</span>`);
+  if (stats.mode === "pc" && entry) {
+    if (entry.twoHanded) badges.push(`<span class="weapon-badge weapon-badge-2h" title="Two-handed weapon: uses d16 for Initiative instead of d20 when equipped">2H</span>`);
+    if (entry.type === "ranged") badges.push(`<span class="weapon-badge weapon-badge-ranged">Ranged</span>`);
+    if (line.twHand === "primary") badges.push(`<span class="weapon-badge weapon-badge-tw" title="Two-weapon fighting: primary hand">TW: Primary</span>`);
+    if (line.twHand === "offhand") badges.push(`<span class="weapon-badge weapon-badge-tw" title="Two-weapon fighting: off-hand">TW: Off-hand</span>`);
+    if (isWeaponUntrained(stats, atk)) {
+      const cls = (stats.data.class || "").trim();
+      const trainedText = CLASS_WEAPON_TRAINING[cls]
+        ? CLASS_WEAPON_TRAINING[cls].join(", ")
+        : (String(stats.data["trained-weapon"] || "").trim() || "(none on file)");
+      badges.push(`<span class="weapon-badge weapon-badge-untrained" title="Untrained weapon (Table 4-1) - this character is only trained in ${escapeHtml(trainedText)}. -1 die step to the attack roll (not damage); Warriors (all weapons) and Clerics (deity-based, not modeled) never take this.">Untrained</span>`);
+    }
+    if (hasDeedDie) {
+      const deedDieText = String(stats.data["deed-die"] || "").trim() || "Deed Die";
+      badges.push(`<span class="weapon-badge weapon-badge-deed" title="Also applies this character's Deed Die (${escapeHtml(deedDieText)}) to both this attack's to-hit and damage roll - rolled once per combat round and shared with every other attack this character makes that round, not re-rolled per line.">${escapeHtml(deedDieText)}</span>`);
+    }
+    if (canBackstab) {
+      badges.push(`<span class="weapon-badge weapon-badge-backstab" title="This weapon has a Backstab damage die (${escapeHtml(entry.backstabDamage)}) - use the Backstab toggle below to apply it to this line's next roll.">Backstab d.: ${escapeHtml(entry.backstabDamage)}</span>`);
+    }
+    if (isFavoriteWeaponMatch(stats, atk)) {
+      const lckMod = abilityModifierFromRaw(stats.data.lck);
+      badges.push(`<span class="weapon-badge weapon-badge-favorite" title="Favorite weapon - adds this character's Luck modifier (${formatSignedNumber(lckMod)}) to the attack roll, not damage.">Favorite (Lck${formatSignedNumber(lckMod)})</span>`);
+    }
+  }
+  const bonusTooltip = stats.mode === "pc" ? attackBonusBreakdownTooltipForStats(stats, atk) : "";
 
   const extraControls = [];
   if (canBackstab) {
@@ -6070,9 +6145,10 @@ function trackerLineHtml(item, stats, line) {
     <div class="attack-detail-row-wrap">
       <div class="attack-detail-row" data-attack-id="${line.attackId}" data-slot-key="${line.slotKey || ""}">
         <span class="attack-detail-name">${escapeHtml(line.label)}</span>
-        <span class="attack-detail-meta">${dieMeta ? dieMeta + " · " : ""}${escapeHtml(atk.bonus || "+0")}${atk.damage ? " · " + escapeHtml(atk.damage) : ""}</span>
+        <span class="attack-detail-meta"${bonusTooltip ? ` title="${escapeHtml(bonusTooltip)}"` : ""}>${escapeHtml(atk.bonus || "+0")}${atk.damage ? " · " + escapeHtml(atk.damage) : ""}</span>
         <button class="hp-btn attack-roll-btn" title="Roll this attack">🎲</button>
       </div>
+      ${badges.length ? `<div class="attack-detail-badges">${badges.join(" ")}</div>` : ""}
       ${extraControls.length ? `<div class="attack-detail-extra">${extraControls.join("")}</div>` : ""}
     </div>`;
 }
