@@ -1699,6 +1699,14 @@ function fillForm(mode, data) {
     // field's Occupation auto-fill.
     const pcTrainedWeaponRestoreEl = document.getElementById("pc-trained-weapon");
     if (pcTrainedWeaponRestoreEl) pcTrainedWeaponRestoreEl.dataset.autoSynced = d.pcTrainedWeaponAutoSynced ? "1" : "0";
+    // Every attack row's Bonus field is the total true to-hit bonus this
+    // attack rolls with (see composedAttackBonusText) - resync each
+    // auto-synced row now, on load, not just on the next edit. Without
+    // this, a token saved before Favorite Weapon's Luck bonus was folded
+    // into this field would keep showing (and rolling with) a stale,
+    // luck-less number the moment its sheet is reopened, until something
+    // else happened to touch it.
+    refreshAutoSyncedAttackBonuses();
   }
   // Same "still auto-managed?" restoration as above, for the monster
   // Crit field's Monster Type + HD auto-fill.
@@ -3082,50 +3090,64 @@ function isFavoriteWeaponMatchLive(atk) {
 // field now (see computePcDeedDieText) rather than being appended here as
 // text, so their Bonus is just the ability modifier too - the actual Deed
 // Die roll is added on top of this at roll time (see rollDeedDieForStats).
-function composedAttackBonusText(abilityFieldId) {
+// The Bonus field is the total true to-hit bonus this attack rolls with -
+// ability modifier, class/level Attack bonus (a flat number for every
+// class except Warrior/Dwarf, whose swing instead comes from a separately-
+// rolled Deed Die - see attackBonusBreakdownTooltip), and a Favorite
+// Weapon's Luck modifier when atk's weapon is this character's declared
+// Favorite Weapon (Table 1-10/1-14) - folded in here rather than added
+// again at roll time, so rollAttackFor/rollTwoWeaponAttack can just read
+// this field once and trust it, the same way they already trust it for
+// ability mod and class Attack bonus.
+function composedAttackBonusText(abilityFieldId, atk) {
   const abilityMod = abilityModifierFromField(abilityFieldId);
   const entry = currentClassLevelEntry();
-  if (entry && typeof entry.attack === "number") {
-    return formatSignedNumber(abilityMod + entry.attack);
-  }
-  return formatSignedNumber(abilityMod);
+  const classAttack = entry && typeof entry.attack === "number" ? entry.attack : 0;
+  const luckMod = atk && isFavoriteWeaponMatchLive(atk) ? abilityModifierFromField("pc-lck") : 0;
+  return formatSignedNumber(abilityMod + classAttack + luckMod);
 }
 
 // Mouseover breakdown for a row's Bonus field - spells out every term that
-// feeds the auto-calculated number (ability modifier, class/level Attack
-// bonus from DCC_CLASS_TABLES), and - since a Favorite Weapon's Luck bonus
-// is added separately at roll time rather than folded into this field's
-// own text (see rollAttackFor/rollTwoWeaponAttack, same "always layered on
-// top" treatment the Deed Die gets) - calls that out too when it applies to
-// THIS row, together with the true effective to-hit total (whatever's
-// CURRENTLY in the field, plus that Luck bonus - currentBonusText, not the
-// freshly recomputed auto value, so this stays correct even when the field
-// holds a hand-typed override the auto-calc terms above don't add up to).
-// isAutoSynced flips the opening sentence between "this is what's shown"
-// and "this is what auto-calc would give you" so the breakdown never claims
-// a manually-set field equals a total it doesn't actually display.
+// sums to the number shown (ability modifier, class/level Attack bonus from
+// DCC_CLASS_TABLES, and a Favorite Weapon's Luck modifier when it applies
+// to THIS row - see composedAttackBonusText, which computes this exact same
+// total). isAutoSynced flips the opening sentence between "this is what's
+// shown" and "this is what auto-calc would give you" so the breakdown never
+// claims a manually-set field equals a total it doesn't actually display.
+//
+// Warrior/Dwarf (Table 1-10/1-14) are the one case with nothing numeric to
+// put on the class/level line - DCC_CLASS_TABLES stores their entry.attack
+// as a die notation string (e.g. "d7"), not a number, because their to-hit
+// swing comes from the Deed Die: rolled once per combat round (see
+// rollDeedDieForStats) and added on top of this field at roll time, not a
+// flat modifier this field could ever fold in. The breakdown calls that out
+// by name instead of the misleading "Attack +0" a naive numeric read would
+// otherwise show.
 function attackBonusBreakdownTooltip(atk, abilitySourceId, currentBonusText, isAutoSynced) {
   const abilityMod = abilityModifierFromField(abilitySourceId);
   const abilityLabel = abilitySourceId === "pc-agi" ? "Agi" : "Str";
   const entry = currentClassLevelEntry();
-  const classAttack = entry && typeof entry.attack === "number" ? entry.attack : 0;
   const classEl = document.getElementById("pc-class");
   const levelEl = document.getElementById("pc-level");
   const clsLabel = classEl ? classEl.value.trim() : "";
   const lvlLabel = levelEl ? levelEl.value.trim() : "";
-  const parts = [`${abilityLabel} ${formatSignedNumber(abilityMod)}`];
-  if (clsLabel && lvlLabel && entry) {
-    parts.push(`${clsLabel} lvl ${lvlLabel} Attack ${formatSignedNumber(classAttack)}`);
+  const isDeedClass = entry && typeof entry.attack === "string";
+  const classAttack = entry && typeof entry.attack === "number" ? entry.attack : 0;
+  const isFav = isFavoriteWeaponMatchLive(atk);
+  const lckMod = isFav ? abilityModifierFromField("pc-lck") : 0;
+
+  const sumParts = [`${abilityLabel} ${formatSignedNumber(abilityMod)}`];
+  if (clsLabel && lvlLabel && entry && !isDeedClass) {
+    sumParts.push(`${clsLabel} lvl ${lvlLabel} Attack ${formatSignedNumber(classAttack)}`);
   }
-  const autoTotal = abilityMod + classAttack;
+  if (isFav) sumParts.push(`Favorite Weapon Luck ${formatSignedNumber(lckMod)}`);
+  const autoTotal = abilityMod + classAttack + lckMod;
+
   let tooltip = isAutoSynced
-    ? `Bonus shown = ${parts.join(" + ")} = ${formatSignedNumber(autoTotal)}.`
-    : `Bonus set manually (auto-calc would give ${parts.join(" + ")} = ${formatSignedNumber(autoTotal)}).`;
-  if (isFavoriteWeaponMatchLive(atk)) {
-    const lckMod = abilityModifierFromField("pc-lck");
-    const shownMod = parseModifier(currentBonusText);
-    const trueTotal = shownMod + lckMod;
-    tooltip += ` Favorite Weapon: this attack also adds Luck ${formatSignedNumber(lckMod)} automatically when you roll it (not shown in this field's number) — true to-hit bonus: ${formatSignedNumber(trueTotal)}.`;
+    ? `Bonus shown = ${sumParts.join(" + ")} = ${formatSignedNumber(autoTotal)}. This field is the total true to-hit bonus this attack rolls with.`
+    : `Bonus set manually (auto-calc would give ${sumParts.join(" + ")} = ${formatSignedNumber(autoTotal)}).`;
+  if (clsLabel && lvlLabel && entry && isDeedClass) {
+    tooltip += ` ${clsLabel} lvl ${lvlLabel}'s Deed Die (${entry.attack}) isn't a flat number - it rolls fresh once per combat round (see the Deed Die field above) and adds on top of this Bonus at roll time.`;
   }
   return tooltip;
 }
@@ -3457,7 +3479,7 @@ function applyWeaponSelection(row) {
   // ability. A field the player typed into directly is never touched here.
   if (!bonusInput.value.trim() || bonusInput.dataset.autoSynced === "1") {
     const attackAbilitySource = entry.type === "ranged" ? "pc-agi" : "pc-str";
-    bonusInput.value = composedAttackBonusText(attackAbilitySource);
+    bonusInput.value = composedAttackBonusText(attackAbilitySource, { weapon: weaponSel.value });
     bonusInput.dataset.autoSynced = "1";
     bonusInput.dataset.bonusSource = attackAbilitySource;
   }
@@ -3669,14 +3691,15 @@ function attachAttackRowListeners(mode) {
         abilityToggleBtn.addEventListener("click", () => {
           const sourceId = abilityToggleBtn.dataset.mod === "agi" ? "pc-agi" : "pc-str";
           const bonusEl = row.querySelector(".attack-bonus");
-          bonusEl.value = composedAttackBonusText(sourceId);
+          const weaponSelForTooltip = row.querySelector(".attack-weapon");
+          const atkForBonus = { weapon: weaponSelForTooltip ? weaponSelForTooltip.value : "" };
+          bonusEl.value = composedAttackBonusText(sourceId, atkForBonus);
           // A click opts this row back into staying in sync - same as
           // clicking a save's ↻ button - so later class/level/ability
           // changes keep updating it until the player types over it.
           bonusEl.dataset.autoSynced = "1";
           bonusEl.dataset.bonusSource = sourceId;
-          const weaponSelForTooltip = row.querySelector(".attack-weapon");
-          bonusEl.title = attackBonusBreakdownTooltip({ weapon: weaponSelForTooltip ? weaponSelForTooltip.value : "" }, sourceId, bonusEl.value, true);
+          bonusEl.title = attackBonusBreakdownTooltip(atkForBonus, sourceId, bonusEl.value, true);
           // Flip the button in place to offer the OTHER ability next,
           // instead of a full row rebuild - same "always shows the
           // alternative" contract as the initial render in attackRowHtml.
@@ -4049,6 +4072,12 @@ if (pcTrainedWeaponSelectEl) {
       pcTrainedWeaponEl.value = pcTrainedWeaponSelectEl.value;
       pcTrainedWeaponEl.dataset.autoSynced = "0";
     }
+    // A new Favorite Weapon changes which row(s) get its Luck bonus folded
+    // into their Bonus field (see composedAttackBonusText) - resync every
+    // auto-synced row's Bonus BEFORE the rebuild below, since renderAttacks
+    // re-renders from readAttacks()'s snapshot and would otherwise just
+    // redraw whatever stale number was already sitting in the field.
+    refreshAutoSyncedAttackBonuses();
     scheduleSave();
     renderAttacks("pc", readAttacks("pc"));
     cfgRenderFromCurrentForm("pc");
@@ -4058,6 +4087,8 @@ const pcTrainedWeaponSyncBtn = document.getElementById("pc-trained-weapon-sync-b
 if (pcTrainedWeaponSyncBtn) {
   pcTrainedWeaponSyncBtn.addEventListener("click", () => {
     recalcPcTrainedWeapon(true);
+    // Same reasoning as the dropdown's own change handler just above.
+    refreshAutoSyncedAttackBonuses();
     scheduleSave();
     // Same reasoning as the Deed Die sync button above - refreshes each
     // row's Untrained badge (see attackRowHtml) against the newly-synced
@@ -4237,18 +4268,18 @@ function refreshAutoSyncedAttackBonuses() {
       const entry = weaponSel ? dccWeaponEntry(weaponSel.value) : null;
       source = (entry && entry.type === "ranged") ? "pc-agi" : "pc-str";
     }
+    const atkForBonus = { weapon: weaponSel ? weaponSel.value : "" };
     const isBlank = bonusInput.value.trim() === "";
     if (isBlank || bonusInput.dataset.autoSynced === "1") {
-      bonusInput.value = composedAttackBonusText(source);
+      bonusInput.value = composedAttackBonusText(source, atkForBonus);
       bonusInput.dataset.autoSynced = "1";
       bonusInput.dataset.bonusSource = source;
     }
     // Refresh the mouseover breakdown on EVERY row, auto-synced or not - an
     // ability score, Class/Level, or Favorite Weapon edit changes what the
-    // breakdown (and the Favorite Weapon Luck note/true total) should say
-    // even for a row whose Bonus number itself is hand-typed and skipped
-    // the resync just above.
-    bonusInput.title = attackBonusBreakdownTooltip({ weapon: weaponSel ? weaponSel.value : "" }, source, bonusInput.value, bonusInput.dataset.autoSynced === "1");
+    // breakdown (and true total) should say even for a row whose Bonus
+    // number itself is hand-typed and skipped the resync just above.
+    bonusInput.title = attackBonusBreakdownTooltip(atkForBonus, source, bonusInput.value, bonusInput.dataset.autoSynced === "1");
   });
 }
 
@@ -6136,12 +6167,12 @@ async function rollAttackFor(itemId, attackId) {
   const isFumble = d20Roll === 1;
   const rollDice = [{ sides: atkSides, value: d20Roll }];
   const untrainedNote = untrained ? " (untrained weapon, Table 4-1: -1 die)" : "";
-  // A Warrior or Dwarf's designated favorite weapon (see
-  // isFavoriteWeaponMatch) adds their Luck modifier to the attack roll
-  // ONLY - never damage, so this is never folded into dmgTotal below the
-  // way the Deed Die is.
-  const favoriteWeapon = isFavoriteWeaponMatch(stats, atk);
-  const luckMod = favoriteWeapon ? abilityModifierFromRaw(stats.data.lck) : 0;
+  // A Favorite Weapon's Luck modifier (Table 1-10/1-14) is already folded
+  // into atkMod above - it's part of the Bonus field's own number now (see
+  // composedAttackBonusText), not a separate addition here, so it's never
+  // double-counted regardless of whether this row's Bonus is auto-synced or
+  // hand-typed (same "the field is what it is" trust the ability modifier
+  // and class Attack bonus already got before this).
   let text, label;
 
   if (isFumble) {
@@ -6160,10 +6191,9 @@ async function rollAttackFor(itemId, attackId) {
     // makes this round - from this client or any other - sees it too; a
     // reused roll has nothing new to persist. See rollDeedDieForStats.
     if (deed && !deed.reused) await persistDeedRoundRoll(itemId, deed);
-    const toHit = d20Roll + atkMod + luckMod + (deed ? deed.total : 0);
+    const toHit = d20Roll + atkMod + (deed ? deed.total : 0);
     const dmg = rollDamage(atk.damage);
     const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)}${deed.reused ? ", this round's roll" : ""})` : "";
-    const luckText = luckMod ? ` Lck${formatModifier(luckMod)}` : "";
     const deedLine = mightyDeedResultText(atk, deed);
     // Only animate/tumble the Deed Die when it was actually just rolled -
     // replaying the same face for a reused roll would look like a fresh
@@ -6202,7 +6232,7 @@ async function rollAttackFor(itemId, attackId) {
       critLine = ` ${markCritAlert("💥 CRITICAL HIT!")} Natural ${d20Roll}${wasForced ? " (GM-forced)" : ""}${autoHitNote}. ${critDieText ? `${critDieText} — ` : ""}${rowText}`;
     }
 
-    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${atkSides} ${d20Roll}${wasForced ? " forced" : ""}${formatModifier(atkMod)}${luckText}${deedText})${untrainedNote}`;
+    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${atkSides} ${d20Roll}${wasForced ? " forced" : ""}${formatModifier(atkMod)}${deedText})${untrainedNote}`;
     const dmgText = dmg !== null
       ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${isCrit ? " +crit" : ""})`
       : "";
@@ -6322,16 +6352,16 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
       return `${label}: Natural 1${forcedNote} — miss (Halfling two-weapon fighting: a lone natural 1 doesn't fumble by itself).`;
     }
 
+    // Same shared `deed` for both hands - see its declaration above. A
+    // Favorite Weapon's Luck modifier (checked per hand, since primary and
+    // off-hand weapons can differ) is already folded into atk.bonus itself
+    // (see composedAttackBonusText) - same "the field is what it is" trust
+    // single-weapon rollAttackFor now gives atkMod, no separate addition
+    // needed here.
     const atkMod = parseModifier(atk.bonus);
-    // Same shared `deed` for both hands - see its declaration above.
-    // Same favorite-weapon Luck bonus as single-weapon rollAttackFor,
-    // checked per hand since primary and off-hand weapons can differ -
-    // attack roll only, never damage.
-    const luckMod = isFavoriteWeaponMatch(stats, atk) ? abilityModifierFromRaw(stats.data.lck) : 0;
-    const toHit = roll + atkMod + luckMod + (deed ? deed.total : 0);
+    const toHit = roll + atkMod + (deed ? deed.total : 0);
     const dmg = rollDamage(atk.damage);
     const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)}${deed.reused ? ", this round's roll" : ""})` : "";
-    const luckText = luckMod ? ` Lck${formatModifier(luckMod)}` : "";
     const deedLine = mightyDeedResultText(atk, deed);
     const untrainedNote = isWeaponUntrained(stats, atk) ? " (untrained weapon, Table 4-1: -1 die)" : "";
     if (dmg) rollDice.push(...dmg.dice);
@@ -6377,7 +6407,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
       critLine = ` ${markCritAlert("💥 CRITICAL HIT!")} Natural ${roll}${forcedNote}${autoHitNote}. ${critDieText ? `${critDieText} — ` : ""}${rowText}`;
     }
 
-    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${sides} ${roll}${forcedNote}${formatModifier(atkMod)}${luckText}${deedText})${untrainedNote}`;
+    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${sides} ${roll}${forcedNote}${formatModifier(atkMod)}${deedText})${untrainedNote}`;
     const dmgText = dmg !== null
       ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${critEligible ? " +crit" : ""})`
       : "";
