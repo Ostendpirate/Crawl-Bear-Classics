@@ -858,7 +858,9 @@
   .attack-detail-row-wrap:last-child { border-bottom: none; padding-bottom: 0; }
   .attack-detail-row { display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
   .attack-detail-name { flex: 1; color: var(--text); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .attack-detail-meta { color: var(--muted); white-space: nowrap; }
+  .attack-detail-meta { color: var(--muted); white-space: nowrap; display: flex; gap: 8px; }
+  .attack-detail-meta-part b { color: var(--text); font-weight: 600; }
+  .attack-detail-used-up { color: var(--muted); font-size: 11px; line-height: 1.5; padding: 4px 2px; }
   .attack-roll-btn { flex: none; width: 22px; height: 22px; font-size: 11px; }
   .attack-detail-badges {
     display: flex;
@@ -1533,6 +1535,17 @@ const COMBAT_METADATA_KEY = "com.claude.monster-sheet/combat-data";
 // from the current form fields on every save - can never silently drop
 // it just because an unrelated field got edited. See rollDeedDieForStats.
 const DEED_ROUND_CACHE_KEY = "com.claude.monster-sheet/deed-round-cache";
+// Which of a token's Combat Tracker attack LINES (attackId + Action Die
+// slot, same key shape as lineDeeds - see actionSlotKey) have already been
+// rolled THIS round - same round/session-scoped invalidation pattern as
+// DEED_ROUND_CACHE_KEY above (nextTurn/prevTurn/resetTracker are the only
+// things that ever change round/session, so a stale cache from a prior
+// round or encounter is simply ignored, never explicitly cleared). Once a
+// line is in this set, deriveTrackerLines/attackDetailHtml hide it from
+// the expanded attack list until the round advances, so a GM rolling down
+// a token's attacks for the round doesn't have to remember which ones
+// they've already used.
+const USED_ACTION_SLOTS_KEY = "com.claude.monster-sheet/used-action-slots";
 const SCENE_STATE_KEY = "com.claude.monster-sheet/combat-state";
 const DIM_OVERLAY_METADATA_KEY = "com.claude.monster-sheet/dim-overlay";
 const CHAT_LOG_METADATA_KEY = "com.claude.monster-sheet/chat-log";
@@ -3220,6 +3233,35 @@ function attackBonusBreakdownTooltipForStats(stats, atk) {
     : `Bonus set manually (auto-calc would give ${sumParts.join(" + ")} = ${formatSignedNumber(autoTotal)}).`;
   if (clsLabel && lvlLabel && classEntry && isDeedClass) {
     tooltip += ` ${clsLabel} lvl ${lvlLabel}'s Deed Die (${classEntry.attack}) isn't a flat number - it rolls fresh once per combat round and adds on top of this Bonus at roll time.`;
+  }
+  return tooltip;
+}
+
+// Explains a Tracker line's Damage text the same way
+// attackBonusBreakdownTooltipForStats explains its Bonus text - what the
+// weapon's own base die is, whether Str is folded in at this range (Table
+// 4-2: melee and "at close range" ranged weapons apply it, ordinary ranged
+// attacks don't), and a reminder that a Warrior/Dwarf's Deed Die and a
+// declared Backstab both still apply on TOP of this at roll time rather
+// than being baked into the row's stored text. atk.damageBase/
+// damageStrApplies are only ever set for a PC row whose Damage field is
+// still auto-synced to its picked weapon (see composedDamageText/
+// readAttacks) - a hand-typed or monster Damage field has neither, so this
+// falls back to just describing whatever text is actually there.
+function damageBreakdownTooltipForStats(stats, atk, lineState) {
+  const base = String(atk.damageBase || "").trim();
+  const strApplies = !!atk.damageStrApplies;
+  const strMod = strApplies ? abilityModifierFromRaw(stats.data.str) : 0;
+  const isAutoSynced = !!atk.damageAuto && !!base;
+
+  let tooltip = isAutoSynced
+    ? `Damage = ${base} base die${strApplies ? ` + Str ${formatSignedNumber(strMod)}` : " (no Str bonus at this weapon/range, Table 4-2)"} = ${base}${strMod ? formatSignedNumber(strMod) : ""}. This is the total damage this attack deals on a hit.`
+    : `Damage set manually on the Sheet (${atk.damage || "none set"}).`;
+  if (pcClassHasDeedDie(stats)) {
+    tooltip += ` This class's Deed Die also adds to damage at roll time (rolled once per combat round, shared with the To Hit roll) - it isn't included in this number.`;
+  }
+  if (lineState && lineState.backstabActive) {
+    tooltip += ` Backstab is currently declared for this line - the NEXT roll will use the weapon's Backstab die instead of this Damage text (see the Backstab badge/button above).`;
   }
   return tooltip;
 }
@@ -5312,6 +5354,51 @@ async function persistDeedRoundRoll(itemId, deed) {
   });
 }
 
+// Identifies one rollable Combat Tracker line for "used this round"
+// purposes - same (attackId, slot) shape lineDeeds/rowKey already use
+// elsewhere, collapsed to one string so it can live in a plain array in
+// metadata (a Set isn't JSON-serializable) and be compared with ordinary
+// string equality.
+function actionSlotKey(attackId, slotKey) {
+  return `${attackId}:${slotKey || "0"}`;
+}
+
+// This round's already-used attack lines for one token (see
+// USED_ACTION_SLOTS_KEY) - a Set of actionSlotKey strings, empty whenever
+// the cached round/session doesn't match the live sceneState (a new round
+// or a hard reset via resetTracker both invalidate it exactly like
+// rollDeedDieForStats does for the Deed Die cache).
+function usedActionSlotsSetForStats(stats) {
+  const cache = stats.usedSlotsCache;
+  const round = sceneState.round || 1;
+  const session = sceneState.session || 1;
+  if (cache && cache.round === round && cache.session === session && Array.isArray(cache.slots)) {
+    return new Set(cache.slots);
+  }
+  return new Set();
+}
+
+// Marks one or more attack lines on a token as used for the current round
+// - merged into whatever's already recorded for THIS round/session (a
+// fresh round/session's leftover cache, if any, is discarded first, same
+// as persistDeedRoundRoll implicitly discarding a stale Deed Die). Callers
+// pass actionSlotKey(...) strings, not raw attackId/slotKey pairs.
+async function markActionSlotsUsed(itemId, usedKeys) {
+  if (!usedKeys || !usedKeys.length) return;
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const round = sceneState.round || 1;
+      const session = sceneState.session || 1;
+      const existing = item.metadata[USED_ACTION_SLOTS_KEY];
+      const priorSlots = (existing && existing.round === round && existing.session === session && Array.isArray(existing.slots))
+        ? existing.slots
+        : [];
+      const merged = Array.from(new Set([...priorSlots, ...usedKeys]));
+      item.metadata[USED_ACTION_SLOTS_KEY] = { round, session, slots: merged };
+    });
+  });
+}
+
 // Resolves a declared Mighty Deed of Arms against the Deed Die that was
 // JUST rolled for this same attack (rollDeedDieForStats) - per the
 // Reference Booklet, a deed succeeds when the die's raw face (not
@@ -5356,6 +5443,9 @@ function getStatsForItem(item) {
     // This round's already-rolled Deed Die (if any) - see
     // rollDeedDieForStats/DEED_ROUND_CACHE_KEY.
     deedRoundCache: item.metadata[DEED_ROUND_CACHE_KEY] || null,
+    // This round's already-rolled attack lines (if any) - see
+    // usedActionSlotsSetForStats/USED_ACTION_SLOTS_KEY.
+    usedSlotsCache: item.metadata[USED_ACTION_SLOTS_KEY] || null,
   };
 }
 
@@ -5987,13 +6077,21 @@ function computeActiveOrder(items) {
 //    so a Judge should rule it unavailable if the character isn't
 //    carrying one).
 function deriveTrackerLines(item, stats) {
+  const usedSlots = usedActionSlotsSetForStats(stats);
+  const tagUsed = line => ({ ...line, used: usedSlots.has(actionSlotKey(line.attackId, line.slotKey)) });
   if (stats.mode !== "pc") {
-    return stats.attacks.map(a => ({ atk: a, attackId: a.id, slotKey: null, isTw: false, label: a.name || "Attack", dieSides: null }));
+    return stats.attacks.map(a => tagUsed({ atk: a, attackId: a.id, slotKey: null, isTw: false, label: a.name || "Attack", dieSides: null }));
   }
   const equipped = stats.attacks.filter(a => a.equipped);
   const cls = (stats.data.class || "").trim();
   const level = stats.data.level;
   const lines = [];
+
+  // Shared by both the two-weapon pair below and the single-remaining-
+  // weapon expansion further down - "shieldbash" is a Dwarf-only bonus
+  // attack (handled separately at the bottom of this function), never one
+  // of the character's ordinary Action Dice, so it's filtered out of both.
+  const actDieOptions = actionDieSelectOptions(cls, level).filter(o => o.value !== "shieldbash");
 
   const primary = equipped.find(a => a.twoWeaponRole === "primary");
   const offhand = equipped.find(a => a.twoWeaponRole === "offhand");
@@ -6002,12 +6100,33 @@ function deriveTrackerLines(item, stats) {
     const twProfile = twoWeaponProfileForStats(stats);
     const primarySides = isWeaponUntrained(stats, primary) ? stepDiceChainDown(twProfile.primarySides, 1) : twProfile.primarySides;
     const offhandSides = isWeaponUntrained(stats, offhand) ? stepDiceChainDown(twProfile.offhandSides, 1) : twProfile.offhandSides;
-    lines.push({ atk: primary, attackId: primary.id, slotKey: "tw", isTw: true, twHand: "primary", label: `${primary.name || "Primary hand"} (Primary)`, dieSides: primarySides });
-    lines.push({ atk: offhand, attackId: offhand.id, slotKey: "tw", isTw: true, twHand: "offhand", label: `${offhand.name || "Off-hand"} (Off-hand)`, dieSides: offhandSides });
+    // A two-weapon pair (Table 4-3) is one ACTION, but a character with
+    // multiple Action Dice (extra attacks from level, Table 1-x) still
+    // gets to take that action once per Action Die in a round - exactly
+    // like any other equipped weapon already expands below. Mirrors that
+    // same expansion here instead of pinning the pair to a fixed 2 lines
+    // regardless of level. The FIRST iteration keeps the plain "tw"
+    // slotKey and un-suffixed label used before this expansion existed
+    // (same condition - actDieOptions.length > 0 - as the single-weapon
+    // case below, so a single-Action-Die character, the overwhelmingly
+    // common case, is completely unaffected and every already-saved
+    // lineDeeds declaration for slot "tw" keeps working); only a SECOND
+    // (or further) Action Die gets its own ordinal slotKey ("tw1", "tw2",
+    // ...) and label.
+    if (actDieOptions.length > 0) {
+      actDieOptions.forEach((opt, i) => {
+        const slotKey = i === 0 ? "tw" : `tw${i}`;
+        const ordinal = opt.label.replace(/\s*\(d\d+\)$/, "");
+        lines.push({ atk: primary, attackId: primary.id, slotKey, isTw: true, twHand: "primary", label: `${primary.name || "Primary hand"} (Primary) — ${ordinal}`, dieSides: primarySides });
+        lines.push({ atk: offhand, attackId: offhand.id, slotKey, isTw: true, twHand: "offhand", label: `${offhand.name || "Off-hand"} (Off-hand) — ${ordinal}`, dieSides: offhandSides });
+      });
+    } else {
+      lines.push({ atk: primary, attackId: primary.id, slotKey: "tw", isTw: true, twHand: "primary", label: `${primary.name || "Primary hand"} (Primary)`, dieSides: primarySides });
+      lines.push({ atk: offhand, attackId: offhand.id, slotKey: "tw", isTw: true, twHand: "offhand", label: `${offhand.name || "Off-hand"} (Off-hand)`, dieSides: offhandSides });
+    }
   }
   const remaining = equipped.filter(a => !twPair || (a.id !== primary.id && a.id !== offhand.id));
 
-  const actDieOptions = actionDieSelectOptions(cls, level).filter(o => o.value !== "shieldbash");
   if (remaining.length === 1 && actDieOptions.length > 0) {
     const atk = remaining[0];
     const untrained = isWeaponUntrained(stats, atk);
@@ -6039,7 +6158,7 @@ function deriveTrackerLines(item, stats) {
     }
   }
 
-  return lines;
+  return lines.map(tagUsed);
 }
 
 function trackerRowHtml(item, stats, isActive) {
@@ -6068,10 +6187,23 @@ function trackerRowHtml(item, stats, isActive) {
     ${expanded ? attackDetailHtml(item, stats, lines) : ""}`;
 }
 
+// Only lines NOT yet used this round are actually shown - see
+// USED_ACTION_SLOTS_KEY/deriveTrackerLines's `used` tag. This is a display
+// filter only (the ⚔ toggle above stays available, and deriveTrackerLines
+// keeps returning every line regardless of used state) so a token that's
+// used up its whole round still shows a clear "nothing left" message
+// instead of just silently rendering an empty panel.
 function attackDetailHtml(item, stats, lines) {
+  const visibleLines = lines.filter(line => !line.used);
+  if (!visibleLines.length) {
+    return `
+      <div class="attack-detail" data-parent-id="${item.id}">
+        <div class="attack-detail-used-up">All of this token's attacks have been used this round. They'll reappear when the round advances (Next Turn) or the tracker is reset.</div>
+      </div>`;
+  }
   return `
     <div class="attack-detail" data-parent-id="${item.id}">
-      ${lines.map(line => trackerLineHtml(item, stats, line)).join("")}
+      ${visibleLines.map(line => trackerLineHtml(item, stats, line)).join("")}
     </div>`;
 }
 
@@ -6123,6 +6255,7 @@ function trackerLineHtml(item, stats, line) {
     }
   }
   const bonusTooltip = stats.mode === "pc" ? attackBonusBreakdownTooltipForStats(stats, atk) : "";
+  const dmgTooltip = stats.mode === "pc" ? damageBreakdownTooltipForStats(stats, atk, lineState) : "";
 
   const extraControls = [];
   if (canBackstab) {
@@ -6145,7 +6278,11 @@ function trackerLineHtml(item, stats, line) {
     <div class="attack-detail-row-wrap">
       <div class="attack-detail-row" data-attack-id="${line.attackId}" data-slot-key="${line.slotKey || ""}">
         <span class="attack-detail-name">${escapeHtml(line.label)}</span>
-        <span class="attack-detail-meta"${bonusTooltip ? ` title="${escapeHtml(bonusTooltip)}"` : ""}>${escapeHtml(atk.bonus || "+0")}${atk.damage ? " · " + escapeHtml(atk.damage) : ""}</span>
+        <span class="attack-detail-meta">
+          <span class="attack-detail-meta-part"${bonusTooltip ? ` title="${escapeHtml(bonusTooltip)}"` : ""}>To hit <b>${escapeHtml(atk.bonus || "+0")}</b></span>${atk.damage
+            ? `<span class="attack-detail-meta-part"${dmgTooltip ? ` title="${escapeHtml(dmgTooltip)}"` : ""}>Dmg <b>${escapeHtml(atk.damage)}</b></span>`
+            : ""}
+        </span>
         <button class="hp-btn attack-roll-btn" title="Roll this attack">🎲</button>
       </div>
       ${badges.length ? `<div class="attack-detail-badges">${badges.join(" ")}</div>` : ""}
@@ -6494,6 +6631,13 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     await applyTrackerLineFieldUpdate(itemId, attackId, effectiveSlotKey, "backstabActive", false);
   }
 
+  // This specific line has now been rolled this round - hide it from the
+  // Tracker's expanded attack list (see USED_ACTION_SLOTS_KEY/
+  // deriveTrackerLines) until the round advances or the tracker resets.
+  // Marked regardless of hit/miss/fumble - the character spent the action
+  // either way.
+  await markActionSlotsUsed(itemId, [actionSlotKey(attackId, effectiveSlotKey)]);
+
   // Attacks can be rolled from either the Sheet's own roll button or the
   // Tracker's - show the result in both status areas rather than just the
   // Tracker's, since whoever clicked it is looking at whichever one they
@@ -6532,7 +6676,15 @@ async function rollAttackFor(itemId, attackId, slotKey) {
 // to force the off-hand die, or to force the Halfling both-natural-1
 // fumble case, from that single field; a known, documented limitation of
 // the testing aid rather than of the rule itself.
-async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
+//
+// slotKey identifies WHICH of the character's Action Dice this particular
+// use of the pair is for (see deriveTrackerLines - a two-weapon pair
+// expands across Action Dice exactly like any other equipped weapon, "tw"
+// for the first/only one, "tw1"/"tw2"/... for extras from a higher level).
+// Defaults to "tw" so the Sheet's own roll button - which has no Action
+// Die picker for a TW-configured row and always rolls the character's
+// first/main pair - keeps working unchanged.
+async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slotKey = "tw") {
   const [item] = await OBR.scene.items.getItems([itemId]);
   if (!item) return;
   const stats = getStatsForItem(item);
@@ -6583,16 +6735,15 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
   // would otherwise roll it fresh per hand, exactly the "twice in one
   // action" outcome this ruling rules out).
   let deed = null;
-  // Two-weapon hands don't have their own Action-Die-slot picker the way
-  // single-weapon attacks do (Table 4-3 is always "this weapon, this
-  // hand") - both hands' Backstab/Mighty Deed declarations live under the
-  // fixed "tw" slotKey (see deriveTrackerLines/getLineDeedState). Any hand
-  // that actually rolls with Backstab active gets queued here and
+  // Both hands of a pair share ONE Backstab/Mighty Deed declaration,
+  // keyed by whichever Action Die iteration of the pair this is (see
+  // deriveTrackerLines/getLineDeedState) - the `slotKey` param above. Any
+  // hand that actually rolls with Backstab active gets queued here and
   // persisted-cleared once, after both hands are resolved below.
   const backstabRevertQueue = [];
 
   function resolveHand(atk, roll, sides, isPrimary) {
-    const lineState = getLineDeedState(atk, "tw");
+    const lineState = getLineDeedState(atk, slotKey);
     const label = atk.name || (isPrimary ? "Primary hand" : "Off-hand");
     const forcedNote = isPrimary && wasForced ? " (GM-forced)" : "";
     const isNat1 = roll === 1;
@@ -6719,8 +6870,14 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
   // Same one-shot Backstab revert as single-weapon rollAttackFor, per hand
   // that actually used one.
   for (const revertId of backstabRevertQueue) {
-    await applyTrackerLineFieldUpdate(itemId, revertId, "tw", "backstabActive", false);
+    await applyTrackerLineFieldUpdate(itemId, revertId, slotKey, "backstabActive", false);
   }
+
+  // This whole pair-at-this-Action-Die has now been used this round - both
+  // hands' lines disappear from the Tracker together, since they're one
+  // action (see USED_ACTION_SLOTS_KEY/deriveTrackerLines). Marked even on
+  // a Halfling double-fumble - the action was still spent.
+  await markActionSlotsUsed(itemId, [actionSlotKey(primaryAttackId, slotKey), actionSlotKey(offhandAttackId, slotKey)]);
 
   const rollDuration = (anyCrit || anyFumble) ? 9000 : 6500;
   showTrackerStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
@@ -6765,7 +6922,11 @@ async function rollAttackForTrackerRow(itemId, attackId, slotKey) {
     if (otherAtk) {
       const primaryId = atk.twoWeaponRole === "primary" ? atk.id : otherAtk.id;
       const offhandId = atk.twoWeaponRole === "offhand" ? atk.id : otherAtk.id;
-      rollTwoWeaponAttack(itemId, primaryId, offhandId);
+      // This specific Tracker line's own slotKey ("tw", "tw1", ...)
+      // identifies which of the character's Action Dice this click was
+      // for - see deriveTrackerLines - so it must be threaded through
+      // rather than always defaulting to the pair's first iteration.
+      rollTwoWeaponAttack(itemId, primaryId, offhandId, slotKey || "tw");
       return;
     }
   }
