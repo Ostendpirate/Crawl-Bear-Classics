@@ -3091,6 +3091,45 @@ function composedAttackBonusText(abilityFieldId) {
   return formatSignedNumber(abilityMod);
 }
 
+// Mouseover breakdown for a row's Bonus field - spells out every term that
+// feeds the auto-calculated number (ability modifier, class/level Attack
+// bonus from DCC_CLASS_TABLES), and - since a Favorite Weapon's Luck bonus
+// is added separately at roll time rather than folded into this field's
+// own text (see rollAttackFor/rollTwoWeaponAttack, same "always layered on
+// top" treatment the Deed Die gets) - calls that out too when it applies to
+// THIS row, together with the true effective to-hit total (whatever's
+// CURRENTLY in the field, plus that Luck bonus - currentBonusText, not the
+// freshly recomputed auto value, so this stays correct even when the field
+// holds a hand-typed override the auto-calc terms above don't add up to).
+// isAutoSynced flips the opening sentence between "this is what's shown"
+// and "this is what auto-calc would give you" so the breakdown never claims
+// a manually-set field equals a total it doesn't actually display.
+function attackBonusBreakdownTooltip(atk, abilitySourceId, currentBonusText, isAutoSynced) {
+  const abilityMod = abilityModifierFromField(abilitySourceId);
+  const abilityLabel = abilitySourceId === "pc-agi" ? "Agi" : "Str";
+  const entry = currentClassLevelEntry();
+  const classAttack = entry && typeof entry.attack === "number" ? entry.attack : 0;
+  const classEl = document.getElementById("pc-class");
+  const levelEl = document.getElementById("pc-level");
+  const clsLabel = classEl ? classEl.value.trim() : "";
+  const lvlLabel = levelEl ? levelEl.value.trim() : "";
+  const parts = [`${abilityLabel} ${formatSignedNumber(abilityMod)}`];
+  if (clsLabel && lvlLabel && entry) {
+    parts.push(`${clsLabel} lvl ${lvlLabel} Attack ${formatSignedNumber(classAttack)}`);
+  }
+  const autoTotal = abilityMod + classAttack;
+  let tooltip = isAutoSynced
+    ? `Bonus shown = ${parts.join(" + ")} = ${formatSignedNumber(autoTotal)}.`
+    : `Bonus set manually (auto-calc would give ${parts.join(" + ")} = ${formatSignedNumber(autoTotal)}).`;
+  if (isFavoriteWeaponMatchLive(atk)) {
+    const lckMod = abilityModifierFromField("pc-lck");
+    const shownMod = parseModifier(currentBonusText);
+    const trueTotal = shownMod + lckMod;
+    tooltip += ` Favorite Weapon: this attack also adds Luck ${formatSignedNumber(lckMod)} automatically when you roll it (not shown in this field's number) — true to-hit bonus: ${formatSignedNumber(trueTotal)}.`;
+  }
+  return tooltip;
+}
+
 // Composes a weapon row's Damage text: <base die><Str modifier, if this
 // weapon/range applies one>. A Warrior/Dwarf's Deed Die is added on top
 // of this at roll time (rollDeedDieForStats), same one roll shared with
@@ -3258,6 +3297,7 @@ function attackRowHtml(atk, mode) {
   const toggleMod = currentSource === "pc-agi" ? "str" : "agi";
   const toggleLabel = toggleMod === "agi" ? "Agi" : "Str";
   const currentLabel = currentSource === "pc-agi" ? "Agi" : "Str";
+  const bonusTooltip = attackBonusBreakdownTooltip(atk, currentSource, atk.bonus, !!atk.bonusAuto);
 
   // Mighty Deeds of Arms (Reference Booklet p.25-31) - only offered when
   // this CHARACTER currently has a Deed Die to resolve one with (see
@@ -3293,7 +3333,7 @@ function attackRowHtml(atk, mode) {
       </div>
       <div class="attack-row-fields">
         <input type="text" class="attack-name" placeholder="Custom label (optional)" value="${escapeHtml(atk.name)}" />
-        <input type="text" class="attack-bonus" placeholder="+4" value="${escapeHtml(atk.bonus)}" data-auto-synced="${atk.bonusAuto ? "1" : "0"}" data-bonus-source="${escapeHtml(atk.bonusSource || "")}" />
+        <input type="text" class="attack-bonus" placeholder="+4" value="${escapeHtml(atk.bonus)}" data-auto-synced="${atk.bonusAuto ? "1" : "0"}" data-bonus-source="${escapeHtml(atk.bonusSource || "")}" title="${escapeHtml(bonusTooltip)}" />
         <button type="button" class="attack-quick-btn ability-toggle-btn" data-mod="${toggleMod}" title="Bonus currently uses ${currentLabel} modifier + class/level Attack bonus - click to switch to ${toggleLabel}">${toggleLabel}</button>
         <input type="text" class="attack-damage" placeholder="1d6" value="${escapeHtml(atk.damage)}" data-auto-synced="${atk.damageAuto ? "1" : "0"}" data-damage-base="${escapeHtml(atk.damageBase || "")}" data-damage-str-applies="${atk.damageStrApplies ? "1" : "0"}" data-backstab-active="${atk.backstabActive ? "1" : "0"}" />
         <button type="button" class="hp-btn attack-roll-btn" title="Roll this attack">🎲</button>
@@ -3635,6 +3675,8 @@ function attachAttackRowListeners(mode) {
           // changes keep updating it until the player types over it.
           bonusEl.dataset.autoSynced = "1";
           bonusEl.dataset.bonusSource = sourceId;
+          const weaponSelForTooltip = row.querySelector(".attack-weapon");
+          bonusEl.title = attackBonusBreakdownTooltip({ weapon: weaponSelForTooltip ? weaponSelForTooltip.value : "" }, sourceId, bonusEl.value, true);
           // Flip the button in place to offer the OTHER ability next,
           // instead of a full row rebuild - same "always shows the
           // alternative" contract as the initial render in attackRowHtml.
@@ -4189,17 +4231,24 @@ function refreshAutoSyncedAttackBonuses() {
   listEl.querySelectorAll(".attack-row").forEach(row => {
     const bonusInput = row.querySelector(".attack-bonus");
     if (!bonusInput) return;
-    const isBlank = bonusInput.value.trim() === "";
-    if (!isBlank && bonusInput.dataset.autoSynced !== "1") return;
+    const weaponSel = row.querySelector(".attack-weapon");
     let source = bonusInput.dataset.bonusSource;
     if (!source) {
-      const weaponSel = row.querySelector(".attack-weapon");
       const entry = weaponSel ? dccWeaponEntry(weaponSel.value) : null;
       source = (entry && entry.type === "ranged") ? "pc-agi" : "pc-str";
     }
-    bonusInput.value = composedAttackBonusText(source);
-    bonusInput.dataset.autoSynced = "1";
-    bonusInput.dataset.bonusSource = source;
+    const isBlank = bonusInput.value.trim() === "";
+    if (isBlank || bonusInput.dataset.autoSynced === "1") {
+      bonusInput.value = composedAttackBonusText(source);
+      bonusInput.dataset.autoSynced = "1";
+      bonusInput.dataset.bonusSource = source;
+    }
+    // Refresh the mouseover breakdown on EVERY row, auto-synced or not - an
+    // ability score, Class/Level, or Favorite Weapon edit changes what the
+    // breakdown (and the Favorite Weapon Luck note/true total) should say
+    // even for a row whose Bonus number itself is hand-typed and skipped
+    // the resync just above.
+    bonusInput.title = attackBonusBreakdownTooltip({ weapon: weaponSel ? weaponSel.value : "" }, source, bonusInput.value, bonusInput.dataset.autoSynced === "1");
   });
 }
 
