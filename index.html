@@ -529,6 +529,7 @@
   .weapon-badge-die { background: var(--border); color: var(--text); font-weight: 700; }
   .weapon-badge-deed { background: #6a4fa0; color: #fff; font-weight: 700; }
   .weapon-badge-untrained { background: #a3402f; color: #fff; font-weight: 700; }
+  .weapon-badge-favorite { background: #2f7a3f; color: #fff; font-weight: 700; }
   .attack-tw-role {
     flex: none;
     width: 96px;
@@ -1243,10 +1244,10 @@
               <button type="button" class="derived-sync-btn" id="pc-deed-die-sync-btn" title="Set to this Class/Level's Deed Die (Table 1-10/1-14)">↻</button>
             </div>
           </div>
-          <div>
-            <label>Trained Weapon (0-level)</label>
+          <div id="pc-trained-weapon-wrap">
+            <label id="pc-trained-weapon-label">Trained Weapon (0-level)</label>
             <div class="field-sync-row">
-              <input type="text" id="pc-trained-weapon" placeholder="e.g. Dagger, or Hammer (as club)" title="Table 1-3's Occupation grants training in one weapon - but only applies to a 0-level character (no Class yet). The moment a character is classed, their class's own fixed weapon list takes over instead (Warrior: all weapons; Cleric: deity-based, not tracked here; Thief/Wizard/Dwarf/Elf/Halfling: a fixed list per class) and this field stops mattering for the Table 4-1 untrained-weapon penalty. Still kept around as a record of the character's starting Occupation weapon." />
+              <input type="text" id="pc-trained-weapon" placeholder="e.g. Dagger, or Hammer (as club)" title="Table 1-3's Occupation grants training in one weapon - but only applies to a 0-level character (no Class yet). The moment a character is classed, their class's own fixed weapon list takes over instead (Warrior: all weapons; Cleric: deity-based, not tracked here; Thief/Wizard/Elf/Halfling: a fixed list per class) and this field stops mattering for the Table 4-1 untrained-weapon penalty - so it's hidden once classed, except for Dwarves (see the ↻ button)." />
               <button type="button" class="derived-sync-btn" id="pc-trained-weapon-sync-btn" title="Set to this Occupation's Trained Weapon (Table 1-3)">↻</button>
             </div>
           </div>
@@ -2666,6 +2667,42 @@ function recalcPcTrainedWeapon(force) {
   return el.value;
 }
 
+// Warrior and Dwarf both designate one favorite weapon and add their Luck
+// modifier to the ATTACK roll (never damage) whenever they use it - see
+// isFavoriteWeaponMatch below. Shared by updatePcTrainedWeaponVisibility
+// (which of these two classes keeps the field visible) and the roll-time
+// bonus check, so the two can't drift out of sync with each other.
+const FAVORITE_WEAPON_CLASSES = ["Warrior", "Dwarf"];
+
+// Shows/hides the Trained Weapon row and relabels it for whichever
+// character is on screen. It only ever DOES something for two cases: a
+// 0-level character (no Class - Table 1-3's Occupation is their only
+// weapon training source, see isWeaponUntrained) and a Warrior or Dwarf
+// (FAVORITE_WEAPON_CLASSES - see isFavoriteWeaponMatch for the Luck-bonus
+// mechanic this field drives for them). Every other class's training is a
+// static, fixed list with nothing for the player to enter, so showing an
+// input that no longer affects anything would just be confusing clutter -
+// it's hidden for them entirely.
+function updatePcTrainedWeaponVisibility() {
+  const wrap = document.getElementById("pc-trained-weapon-wrap");
+  const label = document.getElementById("pc-trained-weapon-label");
+  const el = document.getElementById("pc-trained-weapon");
+  if (!wrap || !label) return;
+  const classEl = document.getElementById("pc-class");
+  const cls = classEl ? classEl.value.trim() : "";
+  if (FAVORITE_WEAPON_CLASSES.includes(cls)) {
+    wrap.style.display = "";
+    label.textContent = `Favorite Weapon (${cls})`;
+    if (el) el.title = `A ${cls} picks one favorite weapon and adds their Luck modifier to the ATTACK roll (not damage) whenever they use it - see the weapon row's own badge for the live bonus.`;
+  } else if (cls === "") {
+    wrap.style.display = "";
+    label.textContent = "Trained Weapon (0-level)";
+    if (el) el.title = "Table 1-3's Occupation grants training in one weapon - only applies to a 0-level character (no Class yet). The moment a character is classed, their class's own fixed weapon list takes over instead for the Table 4-1 untrained-weapon penalty.";
+  } else {
+    wrap.style.display = "none";
+  }
+}
+
 // A handful of Table 1-3 "Trained Weapon" flavor names don't map to a
 // weapon-table category by their own text alone even after stripping an
 // "(as X)" annotation - "axe" (e.g. Butcher's "Cleaver (as axe)") has no
@@ -2766,6 +2803,37 @@ function isWeaponUntrainedLive(atk) {
   const classEl = document.getElementById("pc-class");
   const trainedEl = document.getElementById("pc-trained-weapon");
   return isWeaponUntrained({ mode: "pc", data: { class: classEl ? classEl.value : "", "trained-weapon": trainedEl ? trainedEl.value : "" } }, atk);
+}
+
+// A Warrior or Dwarf (FAVORITE_WEAPON_CLASSES) who's designated a
+// favorite weapon in the same field Table 1-3's 0-level Trained Weapon
+// uses (see updatePcTrainedWeaponVisibility) adds their Luck modifier to
+// the ATTACK roll - never damage - whenever they use it. Reuses the exact
+// same matching logic as the 0-level Occupation case (isWeaponUntrained):
+// same "trained-weapon" data key, same normalized weapon-training keys,
+// just checked for a different pair of classes and applied as a bonus
+// instead of a penalty. Unarmed and "Custom / Other" are excluded the
+// same way isWeaponUntrained excludes them - nothing on file to match a
+// generic "fists" or homebrew entry against.
+function isFavoriteWeaponMatch(stats, atk) {
+  if (stats.mode !== "pc") return false;
+  const cls = (stats.data.class || "").trim();
+  if (!FAVORITE_WEAPON_CLASSES.includes(cls)) return false;
+  const entry = dccWeaponEntry(atk.weapon);
+  if (!entry || entry.key === "unarmed" || entry.key === "custom") return false;
+  const favRaw = String(stats.data["trained-weapon"] || "").trim();
+  if (!favRaw) return false;
+  return occupationTrainedWeaponKey(favRaw) === dccWeaponTrainingKey(entry);
+}
+
+// Live-form equivalent of isFavoriteWeaponMatch, for rendering the
+// per-row Favorite-weapon badge (attackRowHtml) against whatever Class/
+// Favorite Weapon is currently on screen rather than the token's last-
+// saved snapshot - same pattern as isWeaponUntrainedLive.
+function isFavoriteWeaponMatchLive(atk) {
+  const classEl = document.getElementById("pc-class");
+  const favEl = document.getElementById("pc-trained-weapon");
+  return isFavoriteWeaponMatch({ mode: "pc", data: { class: classEl ? classEl.value : "", "trained-weapon": favEl ? favEl.value : "" } }, atk);
 }
 
 // Combines an ability modifier with this class/level's Attack bonus into
@@ -2898,6 +2966,14 @@ function attackRowHtml(atk, mode) {
     const deedDieEl = document.getElementById("pc-deed-die");
     const deedDieText = deedDieEl && deedDieEl.value.trim() ? deedDieEl.value.trim() : "Deed Die";
     badges.push(`<span class="weapon-badge weapon-badge-deed" title="Also rolls this character's Deed Die (see the Deed Die field above), added to both this attack's to-hit and damage roll">${escapeHtml(deedDieText)}</span>`);
+  }
+  // A Warrior/Dwarf's designated favorite weapon (see the Favorite Weapon
+  // field above) adds their Luck modifier to THIS attack's to-hit roll
+  // only, never damage - see isFavoriteWeaponMatch.
+  if (isFavoriteWeaponMatchLive(atk)) {
+    const lckMod = abilityModifierFromField("pc-lck");
+    const lckModDisplay = lckMod >= 0 ? `+${lckMod}` : `${lckMod}`;
+    badges.push(`<span class="weapon-badge weapon-badge-favorite" title="Favorite weapon - adds this character's Luck modifier (${lckModDisplay}) to the attack roll, not damage.">Favorite (Lck${lckModDisplay})</span>`);
   }
   const twSelectHtml = `<select class="attack-tw-role" title="Two-weapon fighting (Table 4-3) - mark this weapon as your primary or off-hand attack">${twOptions.map(o =>
     `<option value="${o.value}"${o.value === effectiveTwRole ? " selected" : ""}>${escapeHtml(o.label)}</option>`
@@ -3463,6 +3539,11 @@ function renderPcStatline(d) {
   // Same passive, auto-synced-only recompute as Crit Die/Table just
   // above, for the Deed Die field.
   recalcPcDeedDie(false);
+  // Keeps the Trained Weapon row's visibility/label matching whichever
+  // Class is currently on screen (see updatePcTrainedWeaponVisibility) -
+  // needs to run on every render, not just a Class change, so it's also
+  // correct right after loading a different token.
+  updatePcTrainedWeaponVisibility();
   const hp = d.hpMax ? `${d.hpCurrent || d.hpMax}/${d.hpMax}` : (d.hpCurrent || "—");
   const classLevel = [d.class || d.occupation || null, d.level ? `Lvl ${d.level}` : null].filter(Boolean).join(" ");
   const atkSummary = formatAttacksSummary(d.attacks);
@@ -3664,11 +3745,21 @@ function parseAbilityScore(raw) {
   return m ? parseInt(m[0], 10) : null;
 }
 
+// Same conversion abilityModifierFromField does, but from a raw stored
+// value (e.g. a token's saved stats.data.lck) rather than a live DOM
+// field - needed anywhere a roll has to work off a token that isn't
+// necessarily the one currently open on the Sheet tab (the Combat
+// Tracker can roll for any token), same reasoning as isWeaponUntrained
+// reading stats.data instead of the live form.
+function abilityModifierFromRaw(raw) {
+  const score = parseAbilityScore(raw);
+  return score === null ? 0 : dccAbilityModifier(score);
+}
+
 function abilityModifierFromField(id) {
   const el = document.getElementById(id);
   if (!el) return 0;
-  const score = parseAbilityScore(el.value);
-  return score === null ? 0 : dccAbilityModifier(score);
+  return abilityModifierFromRaw(el.value);
 }
 
 const PC_ABILITY_FIELD_IDS = ["pc-str", "pc-agi", "pc-sta", "pc-per", "pc-int", "pc-lck"];
@@ -5602,6 +5693,12 @@ async function rollAttackFor(itemId, attackId) {
   const isFumble = d20Roll === 1;
   const rollDice = [{ sides: atkSides, value: d20Roll }];
   const untrainedNote = untrained ? " (untrained weapon, Table 4-1: -1 die)" : "";
+  // A Warrior or Dwarf's designated favorite weapon (see
+  // isFavoriteWeaponMatch) adds their Luck modifier to the attack roll
+  // ONLY - never damage, so this is never folded into dmgTotal below the
+  // way the Deed Die is.
+  const favoriteWeapon = isFavoriteWeaponMatch(stats, atk);
+  const luckMod = favoriteWeapon ? abilityModifierFromRaw(stats.data.lck) : 0;
   let text, label;
 
   if (isFumble) {
@@ -5615,9 +5712,10 @@ async function rollAttackFor(itemId, attackId) {
     label = "💀 FUMBLE! Natural 1 — automatic miss";
   } else {
     const deed = rollDeedDieForStats(stats);
-    const toHit = d20Roll + atkMod + (deed ? deed.total : 0);
+    const toHit = d20Roll + atkMod + luckMod + (deed ? deed.total : 0);
     const dmg = rollDamage(atk.damage);
     const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)})` : "";
+    const luckText = luckMod ? ` Lck${formatModifier(luckMod)}` : "";
     const deedLine = mightyDeedResultText(atk, deed);
     if (deed) rollDice.push({ sides: deed.sides, value: deed.roll });
     if (dmg) rollDice.push(...dmg.dice);
@@ -5649,7 +5747,7 @@ async function rollAttackFor(itemId, attackId) {
       critLine = ` ${markCritAlert("💥 CRITICAL HIT!")} Natural ${d20Roll}${wasForced ? " (GM-forced)" : ""} — automatic hit. ${critDieText ? `${critDieText} — ` : ""}${rowText}`;
     }
 
-    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${atkSides} ${d20Roll}${wasForced ? " forced" : ""}${formatModifier(atkMod)}${deedText})${untrainedNote}`;
+    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${atkSides} ${d20Roll}${wasForced ? " forced" : ""}${formatModifier(atkMod)}${luckText}${deedText})${untrainedNote}`;
     const dmgText = dmg !== null
       ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${isCrit ? " +crit" : ""})`
       : "";
@@ -5757,9 +5855,14 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
 
     const atkMod = parseModifier(atk.bonus);
     const deed = rollDeedDieForStats(stats);
-    const toHit = roll + atkMod + (deed ? deed.total : 0);
+    // Same favorite-weapon Luck bonus as single-weapon rollAttackFor,
+    // checked per hand since primary and off-hand weapons can differ -
+    // attack roll only, never damage.
+    const luckMod = isFavoriteWeaponMatch(stats, atk) ? abilityModifierFromRaw(stats.data.lck) : 0;
+    const toHit = roll + atkMod + luckMod + (deed ? deed.total : 0);
     const dmg = rollDamage(atk.damage);
     const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)})` : "";
+    const luckText = luckMod ? ` Lck${formatModifier(luckMod)}` : "";
     const deedLine = mightyDeedResultText(atk, deed);
     const untrainedNote = isWeaponUntrained(stats, atk) ? " (untrained weapon, Table 4-1: -1 die)" : "";
     if (deed) rollDice.push({ sides: deed.sides, value: deed.roll });
@@ -5806,7 +5909,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
       critLine = ` ${markCritAlert("💥 CRITICAL HIT!")} Natural ${roll}${forcedNote}${autoHitNote}. ${critDieText ? `${critDieText} — ` : ""}${rowText}`;
     }
 
-    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${sides} ${roll}${forcedNote}${formatModifier(atkMod)}${deedText})${untrainedNote}`;
+    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${sides} ${roll}${forcedNote}${formatModifier(atkMod)}${luckText}${deedText})${untrainedNote}`;
     const dmgText = dmg !== null
       ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${critEligible ? " +crit" : ""})`
       : "";
