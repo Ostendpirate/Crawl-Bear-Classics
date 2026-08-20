@@ -1244,9 +1244,9 @@
             </div>
           </div>
           <div>
-            <label>Trained Weapon</label>
+            <label>Trained Weapon (0-level)</label>
             <div class="field-sync-row">
-              <input type="text" id="pc-trained-weapon" placeholder="e.g. Dagger, or Hammer (as club)" title="Table 1-3's Occupation grants training in one weapon. Attacking with anything else takes Table 4-1's untrained penalty (-1 die step to the attack roll) - Warriors are trained in the use of all weapons and never take it." />
+              <input type="text" id="pc-trained-weapon" placeholder="e.g. Dagger, or Hammer (as club)" title="Table 1-3's Occupation grants training in one weapon - but only applies to a 0-level character (no Class yet). The moment a character is classed, their class's own fixed weapon list takes over instead (Warrior: all weapons; Cleric: deity-based, not tracked here; Thief/Wizard/Dwarf/Elf/Halfling: a fixed list per class) and this field stops mattering for the Table 4-1 untrained-weapon penalty. Still kept around as a record of the character's starting Occupation weapon." />
               <button type="button" class="derived-sync-btn" id="pc-trained-weapon-sync-btn" title="Set to this Occupation's Trained Weapon (Table 1-3)">↻</button>
             </div>
           </div>
@@ -2705,22 +2705,55 @@ function dccWeaponTrainingKey(entry) {
   return WEAPON_TRAINING_ALIASES[key] || key;
 }
 
+// Table 1-3's Occupation-derived Trained Weapon only governs a 0-level
+// character. The moment a character has a class, DCC replaces that with
+// the class's own fixed weapon list (player-supplied, not printed in the
+// Reference Booklet - it only has the raw tables, not each class's prose
+// writeup). Warrior isn't listed here because it's trained in the use of
+// ALL weapons and is special-cased to always exempt in isWeaponUntrained;
+// Cleric isn't listed because DCC ties a cleric's weapon training to
+// their deity rather than a fixed class-wide list, which this app doesn't
+// model (no deity field) - see isWeaponUntrained's Cleric case. Every key
+// here is already normalized the same way dccWeaponTrainingKey() (and
+// occupationTrainedWeaponKey()) produce their keys - lowercased, no
+// parentheticals - so they compare directly with no further lookup.
+const CLASS_WEAPON_TRAINING = {
+  Thief: ["blackjack", "blowgun", "crossbow", "dagger", "dart", "garrote", "longsword", "short sword", "sling", "staff"],
+  Wizard: ["dagger", "longbow", "longsword", "shortbow", "short sword", "staff"],
+  Dwarf: ["battleaxe", "club", "dagger", "handaxe", "longsword", "mace", "short sword", "spear", "two-handed sword", "warhammer", "crossbow", "javelin", "shortbow", "sling"],
+  Elf: ["dagger", "javelin", "lance", "longbow", "longsword", "shortbow", "short sword", "staff", "spear", "two-handed sword"],
+  Halfling: ["club", "crossbow", "dagger", "handaxe", "javelin", "shortbow", "short sword", "sling", "staff"],
+};
+
 // Table 4-1's "Using an untrained weapon" penalty (-1d to the attack
-// roll, melee AND missile fire alike) - applies unless: this weapon
-// matches the character's Trained Weapon (Table 1-3, player-editable, see
-// recalcPcTrainedWeapon); the weapon is Unarmed (everyone's assumed
-// trained in their own fists) or "Custom / Other" (nothing on file to
-// judge training against - left to the Judge); the character is a
-// Warrior (per the class's own writeup, Warriors are trained in the use
-// of all weapons and never take this penalty); or there's no Trained
-// Weapon on file at all (a blank field skips the penalty rather than
-// guessing untrained by default - same "missing data isn't a penalty"
-// stance the rest of this app takes, e.g. a blank HD field).
+// roll, melee AND missile fire alike) - applies unless: the weapon is
+// Unarmed (everyone's assumed trained in their own fists) or "Custom /
+// Other" (nothing on file to judge training against - left to the
+// Judge); the character is a Warrior (trained in the use of ALL weapons,
+// per the class's own writeup - never takes this penalty regardless of
+// level or weapon); the character is a Cleric (DCC ties cleric weapon
+// training to their deity rather than a fixed list - not modeled here,
+// so Clerics are exempt for now rather than guessing wrong); the
+// character has some OTHER class (Thief/Wizard/Dwarf/Elf/Halfling) and
+// the weapon is on that class's own CLASS_WEAPON_TRAINING list; or the
+// character has no class yet (0-level) and the weapon matches Table 1-3's
+// Occupation-derived Trained Weapon field (recalcPcTrainedWeapon) - which
+// ONLY applies pre-class, per DCC's rule that a class's own weapon
+// training supersedes the 0-level Occupation weapon the moment a
+// character is classed. A blank Trained Weapon field (0-level, nothing
+// on file) or an unrecognized/homebrew "Other" class (no list on file to
+// judge against) both skip the penalty rather than guessing untrained by
+// default - same "missing data isn't a penalty" stance this app takes
+// elsewhere (e.g. a blank HD field).
 function isWeaponUntrained(stats, atk) {
   if (stats.mode !== "pc") return false;
-  if ((stats.data.class || "").trim() === "Warrior") return false;
   const entry = dccWeaponEntry(atk.weapon);
   if (!entry || entry.key === "unarmed" || entry.key === "custom") return false;
+  const cls = (stats.data.class || "").trim();
+  if (cls === "Warrior" || cls === "Cleric") return false;
+  const classWeapons = CLASS_WEAPON_TRAINING[cls];
+  if (classWeapons) return !classWeapons.includes(dccWeaponTrainingKey(entry));
+  if (cls !== "") return false; // "Other/Homebrew" - nothing on file to judge.
   const trainedRaw = String(stats.data["trained-weapon"] || "").trim();
   if (!trainedRaw) return false;
   return occupationTrainedWeaponKey(trainedRaw) !== dccWeaponTrainingKey(entry);
@@ -2839,9 +2872,22 @@ function attackRowHtml(atk, mode) {
   if (untrained) dieSidesForBadge = stepDiceChainDown(dieSidesForBadge, 1);
   badges.push(`<span class="weapon-badge weapon-badge-die" title="Attack die this weapon currently rolls">d${dieSidesForBadge}</span>`);
   if (untrained) {
-    const trainedEl = document.getElementById("pc-trained-weapon");
-    const trainedText = trainedEl && trainedEl.value.trim() ? trainedEl.value.trim() : "(none on file)";
-    badges.push(`<span class="weapon-badge weapon-badge-untrained" title="Untrained weapon (Table 4-1) - this character is only trained in ${escapeHtml(trainedText)}. -1 die step to the attack roll (not damage); Warriors are trained in the use of all weapons and never take this.">Untrained</span>`);
+    // Below 1st level, "trained in" means Table 1-3's Occupation-derived
+    // Trained Weapon field; classed (1st level+) Thief/Wizard/Dwarf/Elf/
+    // Halfling instead read from that class's own fixed weapon list
+    // (CLASS_WEAPON_TRAINING) - see isWeaponUntrained for why this badge
+    // never shows for Warriors (trained in all weapons) or Clerics
+    // (deity-based, not modeled).
+    const classElForBadge = document.getElementById("pc-class");
+    const clsForBadge = classElForBadge ? classElForBadge.value.trim() : "";
+    let trainedText;
+    if (CLASS_WEAPON_TRAINING[clsForBadge]) {
+      trainedText = CLASS_WEAPON_TRAINING[clsForBadge].join(", ");
+    } else {
+      const trainedEl = document.getElementById("pc-trained-weapon");
+      trainedText = trainedEl && trainedEl.value.trim() ? trainedEl.value.trim() : "(none on file)";
+    }
+    badges.push(`<span class="weapon-badge weapon-badge-untrained" title="Untrained weapon (Table 4-1) - this character is only trained in ${escapeHtml(trainedText)}. -1 die step to the attack roll (not damage); Warriors (all weapons) and Clerics (deity-based, not modeled) never take this.">Untrained</span>`);
   }
   // Mighty Deeds of Arms is character-wide (see pcClassHasDeedDieLive), so
   // every attack row for a Warrior/Dwarf gets this reminder that a Deed
