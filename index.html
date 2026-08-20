@@ -530,6 +530,7 @@
   .weapon-badge-deed { background: #6a4fa0; color: #fff; font-weight: 700; }
   .weapon-badge-untrained { background: #a3402f; color: #fff; font-weight: 700; }
   .weapon-badge-favorite { background: #2f7a3f; color: #fff; font-weight: 700; }
+  .weapon-badge-backstab { background: #8a2d5c; color: #fff; font-weight: 700; }
   .attack-tw-role {
     flex: none;
     width: 96px;
@@ -850,10 +851,38 @@
     flex-direction: column;
     gap: 4px;
   }
+  .attack-detail-row-wrap {
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .attack-detail-row-wrap:last-child { border-bottom: none; padding-bottom: 0; }
   .attack-detail-row { display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
   .attack-detail-name { flex: 1; color: var(--text); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .attack-detail-meta { color: var(--muted); white-space: nowrap; }
   .attack-roll-btn { flex: none; width: 22px; height: 22px; font-size: 11px; }
+  .attack-detail-extra {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+    margin-top: 3px;
+  }
+  .attack-detail-extra .attack-deed-row {
+    flex: 1 1 100%;
+    margin-top: 0;
+  }
+  .backstab-toggle-btn {
+    flex: none;
+    padding: 2px 6px;
+    font-size: 10px;
+    white-space: nowrap;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .backstab-toggle-btn.on { background: #8a2d5c; color: #fff; border-color: #8a2d5c; }
   .toggle-switch {
     flex: none;
     width: 30px;
@@ -3173,7 +3202,68 @@ function weaponOptionsHtml(selectedKey) {
 }
 
 function emptyAttack() {
-  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false, deedType: "", deedCustom: "", actionDieIndex: "" };
+  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false, deedType: "", deedCustom: "", actionDieIndex: "", lineDeeds: {} };
+}
+
+// Backstab (Thief, Table 3-1) and Mighty Deed of Arms (Warrior/Dwarf,
+// Table 1-10/1-14) declarations now live in the Combat Tracker, one
+// independent declaration per attack LINE - i.e. per (weapon row, Action
+// Die slot) pair, since a character with multiple Action Dice can declare
+// a different deed (or backstab) on each separate attack they make this
+// round (see rollDeedDieForStats's "multiple mighty deeds per round"
+// ruling), not just once for the whole weapon. `lineDeeds` stores this as
+// `{ [slotKey]: { deedType, deedCustom, backstabActive } }`, keyed by the
+// same slot values actionDieSelectOptions already uses ("0", "1", ...,
+// "shieldbash"), or "tw" for a two-weapon-configured row (which only ever
+// represents one slot - see actDieOptions in attackRowHtml).
+//
+// migratedLineDeeds() is the read-time normalizer every consumer goes
+// through: a row saved before this feature existed still has its
+// declaration sitting in the OLD flat deedType/deedCustom/backstabActive
+// fields (never removed from emptyAttack/readAttacks for exactly this
+// reason) - this carries that one declaration over into lineDeeds under
+// whichever slot the row's own actionDieIndex names, so it isn't silently
+// dropped the first time this version reads it. Idempotent: once lineDeeds
+// itself has any entries, the legacy fields are ignored entirely.
+function migratedLineDeeds(atk) {
+  if (atk.lineDeeds && Object.keys(atk.lineDeeds).length) return atk.lineDeeds;
+  if (atk.deedType || atk.backstabActive) {
+    const slot = atk.actionDieIndex || "0";
+    return { [slot]: { deedType: atk.deedType || "", deedCustom: atk.deedCustom || "", backstabActive: !!atk.backstabActive } };
+  }
+  return {};
+}
+
+// The declared deed/backstab state for one specific attack line (see
+// migratedLineDeeds above) - always returns a complete, safe-to-read
+// object even when nothing's been declared for this slot yet.
+function getLineDeedState(atk, slotKey) {
+  const merged = migratedLineDeeds(atk);
+  return merged[slotKey] || { deedType: "", deedCustom: "", backstabActive: false };
+}
+
+// Does this character's class roll a Deed Die at all - stats-based
+// equivalent of pcClassHasDeedDieLive, for the Combat Tracker (which rolls
+// for whichever token was clicked, not necessarily the one open on the
+// Sheet).
+function pcClassHasDeedDie(stats) {
+  const table = DCC_CLASS_TABLES[(stats.data.class || "").trim()];
+  return !!(table && table.deedDie);
+}
+
+// A weapon's Backstab damage die (Thief-only, Table 3-1), with this
+// character's Str modifier applied the same way composedDamageText does -
+// stats-based (not live-DOM) equivalent, since a backstab declaration now
+// resolves at actual roll time (see rollAttackFor/rollTwoWeaponAttack)
+// rather than being pre-baked into the row's stored Damage text the way
+// the old Sheet-side backstab button used to work. Returns null for a
+// weapon with no backstab die on file (see DCC_WEAPONS).
+function backstabDamageNotationForStats(stats, atk) {
+  const entry = dccWeaponEntry(atk.weapon);
+  if (!entry.backstabDamage) return null;
+  const damageStrApplies = entry.type === "melee" || entry.strAtClose;
+  const mod = damageStrApplies ? abilityModifierFromRaw(stats.data.str) : 0;
+  return `${entry.backstabDamage}${mod ? formatSignedNumber(mod) : ""}`;
 }
 
 // Which Two-Weapon Fighting roles (if any) a given weapon can fill.
@@ -3276,10 +3366,19 @@ function attackRowHtml(atk, mode) {
   // Die also rolls alongside this attack - reads straight off the Deed
   // Die field above rather than recomputing it, so it always matches
   // whatever that field currently says (including a hand-typed override).
+  // Declaring an actual Mighty Deed for a specific attack happens in the
+  // Combat Tracker now (see attackDetailHtml/trackerLineHtml), not here -
+  // this badge is just an FYI that the die applies to this weapon.
   if (pcClassHasDeedDieLive()) {
     const deedDieEl = document.getElementById("pc-deed-die");
     const deedDieText = deedDieEl && deedDieEl.value.trim() ? deedDieEl.value.trim() : "Deed Die";
-    badges.push(`<span class="weapon-badge weapon-badge-deed" title="Also applies this character's Deed Die (see the Deed Die field above) to both this attack's to-hit and damage roll - rolled once per combat round and shared with every other attack this character makes that round, not re-rolled per attack">${escapeHtml(deedDieText)}</span>`);
+    badges.push(`<span class="weapon-badge weapon-badge-deed" title="Also applies this character's Deed Die (see the Deed Die field above) to both this attack's to-hit and damage roll - rolled once per combat round and shared with every other attack this character makes that round, not re-rolled per attack. Declare a specific Mighty Deed for an attack in the Combat Tracker tab.">${escapeHtml(deedDieText)}</span>`);
+  }
+  // Backstab damage (Thief, Table 3-1) is declared per-attack in the
+  // Combat Tracker now too (see trackerLineHtml) - this is just an FYI
+  // that this weapon has one on file.
+  if (entry.backstabDamage && isThief) {
+    badges.push(`<span class="weapon-badge weapon-badge-backstab" title="This weapon has a Backstab damage die (${escapeHtml(entry.backstabDamage)}) - declare a backstab for a specific attack in the Combat Tracker tab.">Backstab d.: ${escapeHtml(entry.backstabDamage)}</span>`);
   }
   // A Warrior/Dwarf's designated favorite weapon (see the Favorite Weapon
   // field above) adds their Luck modifier to THIS attack's to-hit roll
@@ -3303,9 +3402,6 @@ function attackRowHtml(atk, mode) {
   if (entry.range) {
     metaParts.push(`Range: ${entry.range}${entry.strAtClose ? " (Str applies at close range only - shown damage assumes close range)" : ""}`);
   }
-  if (entry.backstabDamage && isThief) {
-    metaParts.push(`<button type="button" class="backstab-btn" data-backstab="${escapeHtml(entry.backstabDamage)}" title="Use this weapon's backstab damage">Backstab dmg: ${escapeHtml(entry.backstabDamage)} [Use]</button>`);
-  }
 
   // Weapon selection already auto-picks the right ability for Bonus (Str
   // for melee, Agi for ranged) and keeps it live-synced - so for a normal
@@ -3320,32 +3416,21 @@ function attackRowHtml(atk, mode) {
   const toggleLabel = toggleMod === "agi" ? "Agi" : "Str";
   const currentLabel = currentSource === "pc-agi" ? "Agi" : "Str";
   const bonusTooltip = attackBonusBreakdownTooltip(atk, currentSource, atk.bonus, !!atk.bonusAuto);
-
-  // Mighty Deeds of Arms (Reference Booklet p.25-31) - only offered when
-  // this CHARACTER currently has a Deed Die to resolve one with (see
-  // pcClassHasDeedDieLive - a character-wide check now, since the Deed
-  // Die itself is a character stat, not something parsed per-row out of
-  // Bonus/Damage text anymore). Declaring one of the book's seven named
-  // types shows its full example table in a collapsible ⓘ panel right
-  // away, so a player can see what a 3 vs. a 7+ does before committing to
-  // it; "Custom deed…" instead opens a free-text field for a deed the
-  // book didn't print an example for - it still gets the same Deed-Die-
-  // roll success check when the attack is rolled, just without book
-  // flavor text.
-  const deedType = atk.deedType || "";
-  const deedOptionsHtml = DCC_MIGHTY_DEED_OPTIONS.map(([v, l]) =>
-    `<option value="${v}"${v === deedType ? " selected" : ""}>${escapeHtml(l)}</option>`
-  ).join("");
-  const deedBlockHtml = pcClassHasDeedDieLive() ? `
-      <div class="attack-deed-row">
-        <select class="attack-deed-type" title="Declare a Mighty Deed of Arms for this attack (Reference Booklet p.25) - rolled automatically with your Deed Die. A roll of 3+ succeeds, if the attack also hits.">${deedOptionsHtml}</select>
-        <input type="text" class="attack-deed-custom" placeholder="Describe your own deed…" value="${escapeHtml(atk.deedCustom || "")}" ${deedType === "custom" ? "" : "hidden"} />
-        <button type="button" class="attack-deed-info-btn" title="Show example results for this deed">ⓘ</button>
-      </div>
-      <div class="attack-deed-info" hidden>${mightyDeedInfoText(deedType)}</div>` : "";
+  // Backstab/Mighty Deed declarations live in the Combat Tracker now (see
+  // trackerLineHtml), not on this row - but this row is still where they're
+  // PERSISTED (lineDeeds, part of this same attack object), and the
+  // Sheet's own readAttacks() does a full field-by-field rebuild of every
+  // attack on every save, which would silently drop any field with no
+  // corresponding form input. Stashing the current value in a hidden data
+  // attribute (same trick data-damage-base/data-bonus-source already use
+  // for other non-visible per-row state) is what lets readAttacks() carry
+  // it forward untouched. migratedLineDeeds() also doubles as this row's
+  // one-time upgrade path for a declaration saved under the old flat
+  // deedType/deedCustom/backstabActive fields, before lineDeeds existed.
+  const lineDeedsAttr = escapeHtml(JSON.stringify(migratedLineDeeds(atk)));
 
   return `
-    <div class="attack-row pc-attack-row${atk.equipped ? " equipped" : ""}" data-id="${atk.id}">
+    <div class="attack-row pc-attack-row${atk.equipped ? " equipped" : ""}" data-id="${atk.id}" data-line-deeds="${lineDeedsAttr}">
       <div class="attack-weapon-line">
         <input type="checkbox" class="attack-equipped" ${atk.equipped ? "checked" : ""} title="Currently wielded - normally one weapon at a time, but a configured two-weapon Primary+Off-hand pair can both be equipped - this is what determines your Initiative Die" />
         <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
@@ -3357,12 +3442,11 @@ function attackRowHtml(atk, mode) {
         <input type="text" class="attack-name" placeholder="Custom label (optional)" value="${escapeHtml(atk.name)}" />
         <input type="text" class="attack-bonus" placeholder="+4" value="${escapeHtml(atk.bonus)}" data-auto-synced="${atk.bonusAuto ? "1" : "0"}" data-bonus-source="${escapeHtml(atk.bonusSource || "")}" title="${escapeHtml(bonusTooltip)}" />
         <button type="button" class="attack-quick-btn ability-toggle-btn" data-mod="${toggleMod}" title="Bonus currently uses ${currentLabel} modifier + class/level Attack bonus - click to switch to ${toggleLabel}">${toggleLabel}</button>
-        <input type="text" class="attack-damage" placeholder="1d6" value="${escapeHtml(atk.damage)}" data-auto-synced="${atk.damageAuto ? "1" : "0"}" data-damage-base="${escapeHtml(atk.damageBase || "")}" data-damage-str-applies="${atk.damageStrApplies ? "1" : "0"}" data-backstab-active="${atk.backstabActive ? "1" : "0"}" />
+        <input type="text" class="attack-damage" placeholder="1d6" value="${escapeHtml(atk.damage)}" data-auto-synced="${atk.damageAuto ? "1" : "0"}" data-damage-base="${escapeHtml(atk.damageBase || "")}" data-damage-str-applies="${atk.damageStrApplies ? "1" : "0"}" />
         <button type="button" class="hp-btn attack-roll-btn" title="Roll this attack">🎲</button>
         <button type="button" class="attack-remove-btn" title="Remove attack">×</button>
       </div>
       ${metaParts.length ? `<div class="attack-row-meta">${metaParts.join(" · ")}</div>` : ""}
-      ${deedBlockHtml}
     </div>`;
 }
 
@@ -3398,7 +3482,6 @@ function readAttacks(mode) {
       base.damageAuto = damageEl ? damageEl.dataset.autoSynced === "1" : false;
       base.damageBase = damageEl ? (damageEl.dataset.damageBase || "") : "";
       base.damageStrApplies = damageEl ? damageEl.dataset.damageStrApplies === "1" : false;
-      base.backstabActive = damageEl ? damageEl.dataset.backstabActive === "1" : false;
       const twRoleEl = row.querySelector(".attack-tw-role");
       base.twoWeaponRole = twRoleEl ? twRoleEl.value : "";
       // Same "not rendered = not applicable right now" contract as
@@ -3408,10 +3491,16 @@ function readAttacks(mode) {
       // implicit "1st/only attack" default rather than losing data.
       const actDieEl = row.querySelector(".attack-action-die");
       base.actionDieIndex = actDieEl ? actDieEl.value : "";
-      const deedTypeEl = row.querySelector(".attack-deed-type");
-      base.deedType = deedTypeEl ? deedTypeEl.value : "";
-      const deedCustomEl = row.querySelector(".attack-deed-custom");
-      base.deedCustom = deedCustomEl ? deedCustomEl.value : "";
+      // Backstab/Mighty Deed declarations are edited in the Combat Tracker
+      // now, not on this row (see attackRowHtml's data-line-deeds comment)
+      // - this just carries whatever's already there forward unchanged, so
+      // an unrelated Sheet edit (typing in HP, say) can never clobber a
+      // declaration the Tracker just set.
+      try {
+        base.lineDeeds = JSON.parse(row.dataset.lineDeeds || "{}");
+      } catch (e) {
+        base.lineDeeds = {};
+      }
     }
     return base;
   });
@@ -3466,11 +3555,6 @@ function applyWeaponSelection(row) {
     damageInput.dataset.autoSynced = "0";
     damageInput.dataset.damageBase = "";
   }
-  // A weapon change means any pending "revert to normal after this roll"
-  // backstab flag (see revertBackstabIfActive) is stale - Damage just got
-  // reset to this (possibly different) weapon's own die above, so there's
-  // nothing left to revert to something else later.
-  damageInput.dataset.backstabActive = "0";
   // Resync the Bonus field if it's blank, OR if it's still tagged as
   // auto-managed (set by a prior weapon pick or a Str/Agi quick-button
   // click, and not hand-edited since) - that second case is what lets
@@ -3513,35 +3597,6 @@ function equipAttackRow(mode, row) {
   });
 }
 
-// A weapon's Backstab damage (Thief-only, Table 3-1) applies to exactly
-// the one sneak-attack roll it was set up for, not to every attack with
-// this weapon from now on - so once a roll actually goes out with it
-// active, the Damage field snaps back to the weapon's normal die
-// (recomputed the same way picking the weapon fresh would) instead of
-// silently staying overridden. Only fires if the backstabActive flag is
-// still set - a manual edit to Damage, or picking a different weapon,
-// already clears that flag itself (see their own listeners), so this
-// never clobbers a value the player deliberately changed in between.
-function revertBackstabIfActive(row) {
-  const damageEl = row.querySelector(".attack-damage");
-  if (!damageEl || damageEl.dataset.backstabActive !== "1") return;
-  const weaponSel = row.querySelector(".attack-weapon");
-  const entry = dccWeaponEntry(weaponSel ? weaponSel.value : "");
-  const damageStrApplies = entry.type === "melee" || entry.strAtClose;
-  damageEl.value = entry.damage ? composedDamageText(entry.damage, damageStrApplies) : "";
-  damageEl.dataset.backstabActive = "0";
-  if (entry.damage) {
-    damageEl.dataset.autoSynced = "1";
-    damageEl.dataset.damageBase = entry.damage;
-    damageEl.dataset.damageStrApplies = damageStrApplies ? "1" : "0";
-  } else {
-    damageEl.dataset.autoSynced = "0";
-    damageEl.dataset.damageBase = "";
-  }
-  scheduleSave();
-  cfgRenderFromCurrentForm("pc");
-}
-
 function attachAttackRowListeners(mode) {
   attackListEl(mode).querySelectorAll(".attack-row").forEach(row => {
     row.querySelectorAll("input").forEach(inp => inp.addEventListener("input", () => {
@@ -3557,15 +3612,11 @@ function attachAttackRowListeners(mode) {
     }
     // Same contract for Damage: typing directly into it (e.g. adding a
     // magic weapon's damage bonus by hand) untags it, so a later Str edit
-    // stops overwriting what the player just typed. It also cancels any
-    // pending backstab revert (see revertBackstabIfActive) - the player
-    // just told this field what it should say, so a roll going out
-    // shouldn't then override that back to anything, backstab or normal.
+    // stops overwriting what the player just typed.
     const damageInputEl = row.querySelector(".attack-damage");
     if (damageInputEl) {
       damageInputEl.addEventListener("input", () => {
         damageInputEl.dataset.autoSynced = "0";
-        damageInputEl.dataset.backstabActive = "0";
       });
     }
     row.querySelector(".attack-remove-btn").addEventListener("click", () => {
@@ -3604,18 +3655,11 @@ function attachAttackRowListeners(mode) {
               const primaryId = thisAtk.twoWeaponRole === "primary" ? thisAtk.id : otherAtk.id;
               const offhandId = thisAtk.twoWeaponRole === "offhand" ? thisAtk.id : otherAtk.id;
               rollTwoWeaponAttack(currentItemId, primaryId, offhandId);
-              // A backstab set up on EITHER hand of a two-weapon pair
-              // reverts once the combined roll goes out - check both rows,
-              // not just the one that was clicked.
-              revertBackstabIfActive(row);
-              const otherRowEl = attackListEl(mode).querySelector(`.attack-row[data-id="${otherAtk.id}"]`);
-              if (otherRowEl) revertBackstabIfActive(otherRowEl);
               return;
             }
           }
         }
         rollAttackFor(currentItemId, row.dataset.id);
-        if (mode === "pc") revertBackstabIfActive(row);
       });
     }
     if (mode === "pc") {
@@ -3713,48 +3757,9 @@ function attachAttackRowListeners(mode) {
           cfgRenderFromCurrentForm(mode);
         });
       }
-      const backstabBtn = row.querySelector(".backstab-btn");
-      if (backstabBtn) {
-        backstabBtn.addEventListener("click", () => {
-          const damageEl = row.querySelector(".attack-damage");
-          damageEl.value = composedDamageText(backstabBtn.dataset.backstab, true);
-          // Backstab damage always uses Str, same auto-sync opt-in as the
-          // Str/Agi Bonus quick buttons - but ALSO flagged as pending
-          // revert, so the next roll made with this row snaps Damage back
-          // to the weapon's normal die afterward instead of leaving the
-          // sneak-attack damage active for every future attack.
-          damageEl.dataset.autoSynced = "1";
-          damageEl.dataset.damageBase = backstabBtn.dataset.backstab;
-          damageEl.dataset.damageStrApplies = "1";
-          damageEl.dataset.backstabActive = "1";
-          scheduleSave();
-          cfgRenderFromCurrentForm(mode);
-        });
-      }
-      // Picking a deed type both persists it (scheduleSave) and updates
-      // the row in place - shows/hides the free-text field for "Custom
-      // deed…", and refreshes the ⓘ info panel's content to match the
-      // newly-picked type (without touching whether the panel is
-      // currently expanded - see the info-button handler below).
-      const deedTypeSel = row.querySelector(".attack-deed-type");
-      if (deedTypeSel) {
-        deedTypeSel.addEventListener("change", () => {
-          const customInput = row.querySelector(".attack-deed-custom");
-          if (customInput) customInput.hidden = deedTypeSel.value !== "custom";
-          const infoEl = row.querySelector(".attack-deed-info");
-          if (infoEl) infoEl.innerHTML = mightyDeedInfoText(deedTypeSel.value);
-          scheduleSave();
-        });
-      }
-      // Purely a local expand/collapse toggle for the examples panel - not
-      // persisted, and doesn't affect what deed (if any) actually rolls.
-      const deedInfoBtn = row.querySelector(".attack-deed-info-btn");
-      if (deedInfoBtn) {
-        deedInfoBtn.addEventListener("click", () => {
-          const infoEl = row.querySelector(".attack-deed-info");
-          if (infoEl) infoEl.hidden = !infoEl.hidden;
-        });
-      }
+      // Backstab and Mighty Deed declarations now live in the Combat
+      // Tracker tab (see trackerLineHtml/attachTrackerRowListeners), not on
+      // this Sheet row - nothing to wire up here anymore.
     }
   });
 }
@@ -5275,11 +5280,11 @@ async function persistDeedRoundRoll(itemId, deed) {
 // deed with no Deed Die actually rolled (deed === null - e.g. the player
 // hand-edited the Deed Die annotation out of Bonus/Damage) is reported as
 // unresolved rather than silently dropped.
-function mightyDeedResultText(atk, deed) {
-  const type = atk.deedType;
+function mightyDeedResultText(deedType, deedCustom, deed) {
+  const type = deedType;
   if (!type) return "";
   const label = type === "custom"
-    ? (atk.deedCustom && atk.deedCustom.trim() ? atk.deedCustom.trim() : "Custom deed")
+    ? (deedCustom && deedCustom.trim() ? deedCustom.trim() : "Custom deed")
     : (DCC_MIGHTY_DEEDS[type] ? DCC_MIGHTY_DEEDS[type].label : "Mighty Deed");
   if (!deed) {
     return ` ⚔️ Mighty Deed declared (${label}), but no Deed Die was rolled for this attack — check the character's Deed Die field.`;
@@ -5899,8 +5904,104 @@ function computeActiveOrder(items) {
   return computeOrder(items).filter(item => getStatsForItem(item).enabled);
 }
 
+// Builds the list of individually-rollable "lines" the Combat Tracker's
+// expanded attack panel shows for one token - see trackerLineHtml. A
+// monster/NPC's stats.attacks are already exactly what should be shown,
+// one line per entry, same as before this feature existed (no equipped/
+// Action-Die concept for monsters). A PC's REAL number of attacks per
+// round almost never matches its number of attack rows 1:1 though - a
+// single equipped weapon can represent 1, 2, or more separate attacks
+// (Table 1-5/.../1-18's Action Dice), each rolling its own die - so a
+// PC's lines are derived rather than shown as-is:
+//
+//  - Not-equipped rows are skipped entirely - you can't attack with a
+//    weapon that isn't in your hands.
+//  - A configured, BOTH-hands-equipped Primary/Off-hand two-weapon pair
+//    (Table 4-3) becomes exactly 2 lines, one per hand, sharing slotKey
+//    "tw" for their independent Backstab/Mighty Deed declarations - one
+//    action with two dice, not two separate actions. Rolling EITHER
+//    line's button rolls both hands together, same TW-pairing check
+//    rollAttackForTrackerRow already had before this rewrite. A row that
+//    still has a leftover Primary/Off-hand role from before its pairmate
+//    was unequipped is treated as an ordinary single weapon instead, same
+//    "stale pick falls back" contract the Sheet's own row rendering uses.
+//  - If exactly ONE equipped (non-TW) weapon remains, it's expanded into
+//    one line per Action Die this class/level gets (actionDieSelectOptions)
+//    - the common case of "swing the same weapon N times a round" - each
+//    line showing its own die and independently declarable.
+//  - If MORE than one equipped weapon remains, there's no single weapon
+//    to expand across every Action Die - each instead gets exactly one
+//    line, at whatever Action Die slot its own row is set to (the Sheet's
+//    per-row Action Die picker), trusting the player's own assignment of
+//    "this weapon is my Nth attack" rather than guessing.
+//  - A Dwarf always gets one extra Shield Bash line tacked on (Table
+//    1-14's footnote - available from 1st level, doesn't grow with level,
+//    not tied to any specific equipped weapon), anchored to an equipped
+//    row for its Bonus/Damage fields - same "the player sets Damage to
+//    the shield bash die by hand" convention this app used for Shield
+//    Bash before the Tracker took over rolling it (this app doesn't track
+//    whether a shield is actually equipped, see DWARF_SHIELD_BASH_SIDES,
+//    so a Judge should rule it unavailable if the character isn't
+//    carrying one).
+function deriveTrackerLines(item, stats) {
+  if (stats.mode !== "pc") {
+    return stats.attacks.map(a => ({ atk: a, attackId: a.id, slotKey: null, isTw: false, label: a.name || "Attack", dieSides: null }));
+  }
+  const equipped = stats.attacks.filter(a => a.equipped);
+  const cls = (stats.data.class || "").trim();
+  const level = stats.data.level;
+  const lines = [];
+
+  const primary = equipped.find(a => a.twoWeaponRole === "primary");
+  const offhand = equipped.find(a => a.twoWeaponRole === "offhand");
+  const twPair = primary && offhand ? [primary, offhand] : null;
+  if (twPair) {
+    const twProfile = twoWeaponProfileForStats(stats);
+    const primarySides = isWeaponUntrained(stats, primary) ? stepDiceChainDown(twProfile.primarySides, 1) : twProfile.primarySides;
+    const offhandSides = isWeaponUntrained(stats, offhand) ? stepDiceChainDown(twProfile.offhandSides, 1) : twProfile.offhandSides;
+    lines.push({ atk: primary, attackId: primary.id, slotKey: "tw", isTw: true, label: `${primary.name || "Primary hand"} (Primary)`, dieSides: primarySides });
+    lines.push({ atk: offhand, attackId: offhand.id, slotKey: "tw", isTw: true, label: `${offhand.name || "Off-hand"} (Off-hand)`, dieSides: offhandSides });
+  }
+  const remaining = equipped.filter(a => !twPair || (a.id !== primary.id && a.id !== offhand.id));
+
+  const actDieOptions = actionDieSelectOptions(cls, level).filter(o => o.value !== "shieldbash");
+  if (remaining.length === 1 && actDieOptions.length > 0) {
+    const atk = remaining[0];
+    const untrained = isWeaponUntrained(stats, atk);
+    actDieOptions.forEach(opt => {
+      const profile = actionDieProfileForAttack(stats, { ...atk, actionDieIndex: opt.value });
+      lines.push({
+        atk, attackId: atk.id, slotKey: opt.value, isTw: false,
+        label: `${atk.name || "Attack"} — ${opt.label.replace(/\s*\(d\d+\)$/, "")}`,
+        dieSides: untrained ? stepDiceChainDown(profile.sides, 1) : profile.sides,
+      });
+    });
+  } else {
+    remaining.forEach(atk => {
+      const slotKey = actDieOptions.some(o => o.value === atk.actionDieIndex) ? atk.actionDieIndex : "0";
+      const untrained = isWeaponUntrained(stats, atk);
+      const profile = actionDieProfileForAttack(stats, { ...atk, actionDieIndex: slotKey });
+      lines.push({
+        atk, attackId: atk.id, slotKey, isTw: false,
+        label: atk.name || "Attack",
+        dieSides: untrained ? stepDiceChainDown(profile.sides, 1) : profile.sides,
+      });
+    });
+  }
+
+  if (cls === "Dwarf") {
+    const anchor = remaining[0] || (twPair ? twPair[0] : null) || equipped[0];
+    if (anchor) {
+      lines.push({ atk: anchor, attackId: anchor.id, slotKey: "shieldbash", isTw: false, label: "Shield Bash", dieSides: DWARF_SHIELD_BASH_SIDES });
+    }
+  }
+
+  return lines;
+}
+
 function trackerRowHtml(item, stats, isActive) {
-  const hasAttacks = stats.attacks.length > 0;
+  const lines = deriveTrackerLines(item, stats);
+  const hasAttacks = lines.length > 0;
   const expanded = hasAttacks && expandedAttackRows.has(item.id);
   const initDie = (stats.mode === "pc" && stats.attacks.some(a => a.equipped && dccWeaponEntry(a.weapon).twoHanded)) ? 16 : 20;
   return `
@@ -5921,18 +6022,58 @@ function trackerRowHtml(item, stats, isActive) {
         ? `<button class="hp-btn atk-toggle-btn${expanded ? " on" : ""}" title="Show attacks">⚔</button>`
         : `<div style="width:22px;"></div>`}
     </div>
-    ${expanded ? attackDetailHtml(item, stats.attacks) : ""}`;
+    ${expanded ? attackDetailHtml(item, stats, lines) : ""}`;
 }
 
-function attackDetailHtml(item, attacks) {
+function attackDetailHtml(item, stats, lines) {
   return `
     <div class="attack-detail" data-parent-id="${item.id}">
-      ${attacks.map(a => `
-        <div class="attack-detail-row" data-attack-id="${a.id}">
-          <span class="attack-detail-name">${escapeHtml(a.name || "Attack")}</span>
-          <span class="attack-detail-meta">${escapeHtml(a.bonus || "+0")}${a.damage ? " · " + escapeHtml(a.damage) : ""}</span>
-          <button class="hp-btn attack-roll-btn" title="Roll this attack">🎲</button>
-        </div>`).join("")}
+      ${lines.map(line => trackerLineHtml(item, stats, line)).join("")}
+    </div>`;
+}
+
+// One rollable line in the Combat Tracker's expanded attack panel - see
+// deriveTrackerLines for how a PC's equipped weapons/Action Dice become
+// these. Each line carries its own Backstab (Thief) and Mighty Deed
+// (Warrior/Dwarf) declaration, keyed by `line.slotKey` into that attack's
+// `lineDeeds` (see migratedLineDeeds/getLineDeedState) - independent of
+// every other line, including other lines sharing the same underlying
+// weapon row.
+function trackerLineHtml(item, stats, line) {
+  const atk = line.atk;
+  const entry = stats.mode === "pc" ? dccWeaponEntry(atk.weapon) : null;
+  const isThief = stats.mode === "pc" && (stats.data.class || "").trim() === "Thief";
+  const hasDeedDie = stats.mode === "pc" && pcClassHasDeedDie(stats);
+  const canBackstab = stats.mode === "pc" && isThief && entry && entry.backstabDamage;
+  const lineState = stats.mode === "pc" && line.slotKey ? getLineDeedState(atk, line.slotKey) : { deedType: "", deedCustom: "", backstabActive: false };
+  const dieMeta = line.dieSides ? `d${line.dieSides}` : "";
+  const rowKey = `${line.attackId}:${line.slotKey || "0"}`;
+
+  const extraControls = [];
+  if (canBackstab) {
+    extraControls.push(`<button type="button" class="hp-btn backstab-toggle-btn${lineState.backstabActive ? " on" : ""}" data-row-key="${rowKey}" title="Declare a Backstab (Table 3-1: ${escapeHtml(entry.backstabDamage)}) for this specific attack - swaps in the sneak-attack damage die for the next roll of this line only, then automatically reverts.">🗡️${lineState.backstabActive ? " Backstab ON" : " Backstab"}</button>`);
+  }
+  if (hasDeedDie) {
+    const customHidden = lineState.deedType !== "custom";
+    extraControls.push(`
+      <div class="attack-deed-row" data-row-key="${rowKey}">
+        <select class="attack-deed-type" title="Declare a Mighty Deed of Arms for this specific attack">${DCC_MIGHTY_DEED_OPTIONS.map(([val, label]) =>
+          `<option value="${val}"${val === lineState.deedType ? " selected" : ""}>${escapeHtml(label)}</option>`
+        ).join("")}</select>
+        <input type="text" class="attack-deed-custom" placeholder="Describe the deed…" value="${escapeHtml(lineState.deedCustom || "")}" ${customHidden ? "hidden" : ""} />
+        <button type="button" class="attack-deed-info-btn" title="Show example deed results">ⓘ</button>
+      </div>
+      <div class="attack-deed-info" hidden>${mightyDeedInfoText(lineState.deedType)}</div>`);
+  }
+
+  return `
+    <div class="attack-detail-row-wrap">
+      <div class="attack-detail-row" data-attack-id="${line.attackId}" data-slot-key="${line.slotKey || ""}">
+        <span class="attack-detail-name">${escapeHtml(line.label)}</span>
+        <span class="attack-detail-meta">${dieMeta ? dieMeta + " · " : ""}${escapeHtml(atk.bonus || "+0")}${atk.damage ? " · " + escapeHtml(atk.damage) : ""}</span>
+        <button class="hp-btn attack-roll-btn" title="Roll this attack">🎲</button>
+      </div>
+      ${extraControls.length ? `<div class="attack-detail-extra">${extraControls.join("")}</div>` : ""}
     </div>`;
 }
 
@@ -6130,12 +6271,27 @@ function consumeForcedD20() {
 // including rolling the appropriate Crit Table (or Fumble Table) row and
 // any "+NdM" bonus damage a crit result calls for, and builds a clearly
 // marked alert into both the Tracker toast and the persisted Log entry.
-async function rollAttackFor(itemId, attackId) {
+async function rollAttackFor(itemId, attackId, slotKey) {
   const [item] = await OBR.scene.items.getItems([itemId]);
   if (!item) return;
   const stats = getStatsForItem(item);
   const atk = stats.attacks.find(a => a.id === attackId);
   if (!atk) return;
+
+  // Which Action Die slot this particular roll is for - the Tracker now
+  // shows one line per equipped weapon x Action Die (see
+  // deriveTrackerLines), each with its own Backstab/Mighty Deed
+  // declaration (lineDeeds, keyed by slotKey) and each rollable
+  // independently, so the slot actually being rolled can differ from
+  // whatever this attack's own actionDieIndex field last saved on the
+  // Sheet. Falls back to the row's saved pick (or "0") when called
+  // without one, e.g. from the Sheet's own single roll button.
+  const effectiveSlotKey = slotKey || atk.actionDieIndex || "0";
+  const lineState = getLineDeedState(atk, effectiveSlotKey);
+  // A pinned copy of this attack with actionDieIndex forced to the slot
+  // being rolled, so actionDieProfileForAttack resolves THIS line's die
+  // rather than the row's last-saved default.
+  const atkForDie = { ...atk, actionDieIndex: effectiveSlotKey };
 
   const atkMod = parseModifier(atk.bonus);
   // Which of this character's Action Dice this attack uses (Table 1-5/
@@ -6143,7 +6299,7 @@ async function rollAttackFor(itemId, attackId) {
   // actionDieProfileForAttack. A monster attack, or a PC row still on its
   // default pick, resolves to the character's ordinary "1st/only" d20
   // attack, exactly as before this feature existed.
-  const actionDieProfile = actionDieProfileForAttack(stats, atk);
+  const actionDieProfile = actionDieProfileForAttack(stats, atkForDie);
   // Table 4-1: using an untrained weapon (melee or missile alike) steps
   // the attack die down ONE step on the dice chain (d20 -> d16, or
   // whichever Action Die this row is using) - it does NOT touch damage.
@@ -6192,9 +6348,19 @@ async function rollAttackFor(itemId, attackId) {
     // reused roll has nothing new to persist. See rollDeedDieForStats.
     if (deed && !deed.reused) await persistDeedRoundRoll(itemId, deed);
     const toHit = d20Roll + atkMod + (deed ? deed.total : 0);
-    const dmg = rollDamage(atk.damage);
+    // A Backstab declared on this specific slot (Combat Tracker, Thief
+    // only) swaps in the weapon's sneak-attack die for THIS roll instead
+    // of the row's normal stored Damage text - computed fresh here rather
+    // than ever mutating atk.damage itself, so there's nothing left over
+    // to revert afterward (the actual fix for the old "damage doesn't
+    // revert to normal" bug: the base data was never touched to begin
+    // with). Falls back to the normal Damage text if this weapon has no
+    // Backstab die on file.
+    const backstabNotation = lineState.backstabActive ? backstabDamageNotationForStats(stats, atk) : null;
+    const dmg = rollDamage(backstabNotation || atk.damage);
     const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)}${deed.reused ? ", this round's roll" : ""})` : "";
-    const deedLine = mightyDeedResultText(atk, deed);
+    const deedLine = mightyDeedResultText(lineState.deedType, lineState.deedCustom, deed);
+    const backstabLine = backstabNotation ? ` 🗡️ Backstab (${backstabNotation}) applied to this attack's damage.` : "";
     // Only animate/tumble the Deed Die when it was actually just rolled -
     // replaying the same face for a reused roll would look like a fresh
     // roll happened when nothing new was decided.
@@ -6236,10 +6402,20 @@ async function rollAttackFor(itemId, attackId) {
     const dmgText = dmg !== null
       ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${isCrit ? " +crit" : ""})`
       : "";
-    text = `${atk.name || "Attack"}: ${toHitText}${dmgText}${critLine}${deedLine}`;
+    text = `${atk.name || "Attack"}: ${toHitText}${dmgText}${critLine}${deedLine}${backstabLine}`;
     label = isCrit
       ? `💥 CRITICAL HIT! ${toHit} to hit${dmg !== null ? `, ${dmgTotal} dmg` : ""}`
       : (dmg !== null ? `${toHit} to hit, ${dmgTotal} dmg` : `${toHit} to hit`);
+  }
+
+  // A Backstab is a one-shot sneak attack, not a standing bonus - once
+  // this roll actually went out with it active, clear the flag on the
+  // token so the NEXT roll of this same slot (from any client) goes back
+  // to the weapon's normal damage, instead of silently staying a backstab
+  // forever. This is the actual fix for the old bug: there's no Sheet-DOM
+  // state left to fall out of sync, just this one persisted flag.
+  if (lineState.backstabActive) {
+    await applyTrackerLineFieldUpdate(itemId, attackId, effectiveSlotKey, "backstabActive", false);
   }
 
   // Attacks can be rolled from either the Sheet's own roll button or the
@@ -6331,8 +6507,16 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
   // would otherwise roll it fresh per hand, exactly the "twice in one
   // action" outcome this ruling rules out).
   let deed = null;
+  // Two-weapon hands don't have their own Action-Die-slot picker the way
+  // single-weapon attacks do (Table 4-3 is always "this weapon, this
+  // hand") - both hands' Backstab/Mighty Deed declarations live under the
+  // fixed "tw" slotKey (see deriveTrackerLines/getLineDeedState). Any hand
+  // that actually rolls with Backstab active gets queued here and
+  // persisted-cleared once, after both hands are resolved below.
+  const backstabRevertQueue = [];
 
   function resolveHand(atk, roll, sides, isPrimary) {
+    const lineState = getLineDeedState(atk, "tw");
     const label = atk.name || (isPrimary ? "Primary hand" : "Off-hand");
     const forcedNote = isPrimary && wasForced ? " (GM-forced)" : "";
     const isNat1 = roll === 1;
@@ -6360,9 +6544,14 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
     // needed here.
     const atkMod = parseModifier(atk.bonus);
     const toHit = roll + atkMod + (deed ? deed.total : 0);
-    const dmg = rollDamage(atk.damage);
+    // Same on-the-fly Backstab swap as single-weapon rollAttackFor, per
+    // hand - see its comment for why this never mutates atk.damage itself.
+    const backstabNotation = lineState.backstabActive ? backstabDamageNotationForStats(stats, atk) : null;
+    const dmg = rollDamage(backstabNotation || atk.damage);
     const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)}${deed.reused ? ", this round's roll" : ""})` : "";
-    const deedLine = mightyDeedResultText(atk, deed);
+    const deedLine = mightyDeedResultText(lineState.deedType, lineState.deedCustom, deed);
+    const backstabLine = backstabNotation ? ` 🗡️ Backstab (${backstabNotation}) applied to this hand's damage.` : "";
+    if (lineState.backstabActive) backstabRevertQueue.push(atk.id);
     const untrainedNote = isWeaponUntrained(stats, atk) ? " (untrained weapon, Table 4-1: -1 die)" : "";
     if (dmg) rollDice.push(...dmg.dice);
     let dmgTotal = dmg !== null ? dmg.total + (deed ? deed.total : 0) : null;
@@ -6411,7 +6600,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
     const dmgText = dmg !== null
       ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${critEligible ? " +crit" : ""})`
       : "";
-    return `${label}: ${toHitText}${dmgText}${critLine}${deedLine}`;
+    return `${label}: ${toHitText}${dmgText}${critLine}${deedLine}${backstabLine}`;
   }
 
   let fumbleNote = "";
@@ -6451,6 +6640,12 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
     ? "💀 Two-Weapon Attack — fumble"
     : (anyCrit ? "💥 Two-Weapon Attack — CRITICAL HIT!" : "Two-Weapon Attack");
 
+  // Same one-shot Backstab revert as single-weapon rollAttackFor, per hand
+  // that actually used one.
+  for (const revertId of backstabRevertQueue) {
+    await applyTrackerLineFieldUpdate(itemId, revertId, "tw", "backstabActive", false);
+  }
+
   const rollDuration = (anyCrit || anyFumble) ? 9000 : 6500;
   showTrackerStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
   showStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
@@ -6483,7 +6678,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId) {
 // from the token's own saved attacks (getStatsForItem) since the Tracker
 // rolls for whichever token was clicked, not necessarily the one open on
 // the Sheet tab.
-async function rollAttackForTrackerRow(itemId, attackId) {
+async function rollAttackForTrackerRow(itemId, attackId, slotKey) {
   const [item] = await OBR.scene.items.getItems([itemId]);
   if (!item) return;
   const stats = getStatsForItem(item);
@@ -6498,15 +6693,66 @@ async function rollAttackForTrackerRow(itemId, attackId) {
       return;
     }
   }
-  rollAttackFor(itemId, attackId);
+  rollAttackFor(itemId, attackId, slotKey);
 }
 
 function attachTrackerRowListeners() {
   document.querySelectorAll("#tracker-list .attack-detail").forEach(detail => {
     const parentId = detail.dataset.parentId;
-    detail.querySelectorAll(".attack-detail-row").forEach(row => {
+    detail.querySelectorAll(".attack-detail-row-wrap").forEach(wrap => {
+      const row = wrap.querySelector(".attack-detail-row");
       const attackId = row.dataset.attackId;
-      row.querySelector(".attack-roll-btn").addEventListener("click", () => rollAttackForTrackerRow(parentId, attackId));
+      const slotKey = row.dataset.slotKey || null;
+      row.querySelector(".attack-roll-btn").addEventListener("click", () => rollAttackForTrackerRow(parentId, attackId, slotKey));
+
+      // Backstab and Mighty Deed are one declaration per LINE (attack +
+      // Action Die slot), not per weapon - see trackerLineHtml/lineDeeds -
+      // so every write here targets this specific attackId+slotKey pair
+      // via applyTrackerLineFieldUpdate/scheduleTrackerLineUpdate, never
+      // the whole attack row.
+      const backstabBtn = wrap.querySelector(".backstab-toggle-btn");
+      if (backstabBtn) {
+        backstabBtn.addEventListener("click", () => {
+          const next = !backstabBtn.classList.contains("on");
+          backstabBtn.classList.toggle("on", next);
+          backstabBtn.textContent = next ? "🗡️ Backstab ON" : "🗡️ Backstab";
+          applyTrackerLineFieldUpdate(parentId, attackId, slotKey, "backstabActive", next);
+        });
+      }
+      // Picking a deed type both persists it and updates the row in place
+      // - shows/hides the free-text field for "Custom deed…", and
+      // refreshes the ⓘ info panel's content to match the newly-picked
+      // type (without touching whether the panel is currently expanded -
+      // see the info-button handler below).
+      const deedTypeSel = wrap.querySelector(".attack-deed-type");
+      if (deedTypeSel) {
+        deedTypeSel.addEventListener("change", () => {
+          const customInput = wrap.querySelector(".attack-deed-custom");
+          if (customInput) customInput.hidden = deedTypeSel.value !== "custom";
+          const infoEl = wrap.querySelector(".attack-deed-info");
+          if (infoEl) infoEl.innerHTML = mightyDeedInfoText(deedTypeSel.value);
+          applyTrackerLineFieldUpdate(parentId, attackId, slotKey, "deedType", deedTypeSel.value);
+        });
+      }
+      const deedCustomInput = wrap.querySelector(".attack-deed-custom");
+      if (deedCustomInput) {
+        // Debounced, same 300ms-coalescing contract as every other typed
+        // Tracker field - a full Tracker rebuild on every keystroke would
+        // otherwise steal focus/cursor position while the player is still
+        // typing.
+        deedCustomInput.addEventListener("input", () => {
+          scheduleTrackerLineUpdate(parentId, attackId, slotKey, "deedCustom", deedCustomInput.value);
+        });
+      }
+      // Purely a local expand/collapse toggle for the examples panel - not
+      // persisted, and doesn't affect what deed (if any) actually rolls.
+      const deedInfoBtn = wrap.querySelector(".attack-deed-info-btn");
+      if (deedInfoBtn) {
+        deedInfoBtn.addEventListener("click", () => {
+          const infoEl = wrap.querySelector(".attack-deed-info");
+          if (infoEl) infoEl.hidden = !infoEl.hidden;
+        });
+      }
     });
   });
   document.querySelectorAll("#tracker-list .tracker-row[data-id]").forEach(row => {
@@ -6573,6 +6819,47 @@ async function applyTrackerUpdate(id, field, value) {
       const data = { ...(item.metadata[key] || defaultData(mode)) };
       data[field] = value;
       item.metadata[key] = data;
+    });
+  });
+  await refreshTracker();
+}
+
+// Debounced write for one field of one attack line's Backstab/Mighty Deed
+// declaration - same 300ms-coalescing pattern as scheduleTrackerUpdate,
+// but keyed per attack+slot so typing in one line's custom-deed text
+// doesn't clobber a pending write for another line/attack on the same
+// token.
+function scheduleTrackerLineUpdate(itemId, attackId, slotKey, field, value) {
+  const key = itemId + ":" + attackId + ":" + slotKey + ":" + field;
+  clearTimeout(trackerSaveTimeouts[key]);
+  trackerSaveTimeouts[key] = setTimeout(() => applyTrackerLineFieldUpdate(itemId, attackId, slotKey, field, value), 300);
+}
+
+// Persists a single field of one attack line's Backstab/Mighty Deed
+// declaration (see the `lineDeeds` doc comment above migratedLineDeeds) -
+// e.g. toggling Backstab on for one Action Die slot, or picking a Mighty
+// Deed type/custom text for it. Unlike applyTrackerUpdate (which replaces
+// a whole top-level data field), this reaches into ONE attack's
+// lineDeeds[slotKey] and only touches the one field named, leaving every
+// other field on that attack - and every other attack/slot on the token -
+// untouched. PC-only (monsters have no lineDeeds concept); silently a
+// no-op for a monster token.
+async function applyTrackerLineFieldUpdate(itemId, attackId, slotKey, field, value) {
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      if (mode !== "pc") return;
+      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+      const attacks = (data.attacks || []).map(a => {
+        if (a.id !== attackId) return a;
+        const lineDeeds = { ...migratedLineDeeds(a) };
+        const slotState = { deedType: "", deedCustom: "", backstabActive: false, ...(lineDeeds[slotKey] || {}) };
+        slotState[field] = value;
+        lineDeeds[slotKey] = slotState;
+        return { ...a, lineDeeds };
+      });
+      data.attacks = attacks;
+      item.metadata[PC_METADATA_KEY] = data;
     });
   });
   await refreshTracker();
