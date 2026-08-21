@@ -1525,26 +1525,16 @@ const MONSTER_METADATA_KEY = "com.claude.monster-sheet/dcc-data";
 const PC_METADATA_KEY = "com.claude.monster-sheet/dcc-pc-data";
 const MODE_METADATA_KEY = "com.claude.monster-sheet/sheet-mode";
 const COMBAT_METADATA_KEY = "com.claude.monster-sheet/combat-data";
-// A Warrior/Dwarf's Mighty Deed of Arms die (Table 1-10/1-14) is rolled
-// ONCE per combat round, not once per attack - every attack that
-// character makes that round (extra Action Dice, both hands of a
-// two-weapon pair) reuses that same roll, per the Judge's ruling. Stored
-// as its own dedicated metadata key (same pattern as COMBAT_METADATA_KEY
-// above), rather than folded into PC_METADATA_KEY's data blob, so the
-// Sheet's own debounced saveCurrent() - which fully REPLACES that blob
-// from the current form fields on every save - can never silently drop
-// it just because an unrelated field got edited. See rollDeedDieForStats.
-const DEED_ROUND_CACHE_KEY = "com.claude.monster-sheet/deed-round-cache";
 // Which of a token's Combat Tracker attack LINES (attackId + Action Die
 // slot, same key shape as lineDeeds - see actionSlotKey) have already been
-// rolled THIS round - same round/session-scoped invalidation pattern as
-// DEED_ROUND_CACHE_KEY above (nextTurn/prevTurn/resetTracker are the only
-// things that ever change round/session, so a stale cache from a prior
-// round or encounter is simply ignored, never explicitly cleared). Once a
-// line is in this set, deriveTrackerLines/attackDetailHtml hide it from
-// the expanded attack list until the round advances, so a GM rolling down
-// a token's attacks for the round doesn't have to remember which ones
-// they've already used.
+// rolled THIS round - round/session-scoped, invalidated whenever
+// sceneState.round/session no longer match what was cached (nextTurn/
+// prevTurn/resetTracker are the only things that ever change either, so a
+// stale cache from a prior round or encounter is simply ignored, never
+// explicitly cleared). Once a line is in this set,
+// deriveTrackerLines/attackDetailHtml hide it from the expanded attack
+// list until the round advances, so a GM rolling down a token's attacks
+// for the round doesn't have to remember which ones they've already used.
 const USED_ACTION_SLOTS_KEY = "com.claude.monster-sheet/used-action-slots";
 const SCENE_STATE_KEY = "com.claude.monster-sheet/combat-state";
 const DIM_OVERLAY_METADATA_KEY = "com.claude.monster-sheet/dim-overlay";
@@ -3180,7 +3170,7 @@ function composedAttackBonusText(abilityFieldId, atk) {
 // Warrior/Dwarf (Table 1-10/1-14) are the one case with nothing numeric to
 // put on the class/level line - DCC_CLASS_TABLES stores their entry.attack
 // as a die notation string (e.g. "d7"), not a number, because their to-hit
-// swing comes from the Deed Die: rolled once per combat round (see
+// swing comes from the Deed Die: rolled fresh with each attack (see
 // rollDeedDieForStats) and added on top of this field at roll time, not a
 // flat modifier this field could ever fold in. The breakdown calls that out
 // by name instead of the misleading "Attack +0" a naive numeric read would
@@ -3209,7 +3199,7 @@ function attackBonusBreakdownTooltip(atk, abilitySourceId, currentBonusText, isA
     ? `Bonus shown = ${sumParts.join(" + ")} = ${formatSignedNumber(autoTotal)}. This field is the total true to-hit bonus this attack rolls with.`
     : `Bonus set manually (auto-calc would give ${sumParts.join(" + ")} = ${formatSignedNumber(autoTotal)}).`;
   if (clsLabel && lvlLabel && entry && isDeedClass) {
-    tooltip += ` ${clsLabel} lvl ${lvlLabel}'s Deed Die (${entry.attack}) isn't a flat number - it rolls fresh once per combat round (see the Deed Die field above) and adds on top of this Bonus at roll time.`;
+    tooltip += ` ${clsLabel} lvl ${lvlLabel}'s Deed Die (${entry.attack}) isn't a flat number - it rolls fresh with EVERY attack (see the Deed Die field above) and adds on top of this Bonus at roll time.`;
   }
   return tooltip;
 }
@@ -3245,7 +3235,7 @@ function attackBonusBreakdownTooltipForStats(stats, atk) {
     ? `Bonus = ${sumParts.join(" + ")} = ${formatSignedNumber(autoTotal)}. This is the total true to-hit bonus this attack rolls with.`
     : `Bonus set manually (auto-calc would give ${sumParts.join(" + ")} = ${formatSignedNumber(autoTotal)}).`;
   if (clsLabel && lvlLabel && classEntry && isDeedClass) {
-    tooltip += ` ${clsLabel} lvl ${lvlLabel}'s Deed Die (${classEntry.attack}) isn't a flat number - it rolls fresh once per combat round and adds on top of this Bonus at roll time.`;
+    tooltip += ` ${clsLabel} lvl ${lvlLabel}'s Deed Die (${classEntry.attack}) isn't a flat number - it rolls fresh with EVERY attack and adds on top of this Bonus at roll time.`;
   }
   return tooltip;
 }
@@ -3271,7 +3261,7 @@ function damageBreakdownTooltipForStats(stats, atk, lineState) {
     ? `Damage = ${base} base die${strApplies ? ` + Str ${formatSignedNumber(strMod)}` : " (no Str bonus at this weapon/range, Table 4-2)"} = ${base}${strMod ? formatSignedNumber(strMod) : ""}. This is the total damage this attack deals on a hit.`
     : `Damage set manually on the Sheet (${atk.damage || "none set"}).`;
   if (pcClassHasDeedDie(stats)) {
-    tooltip += ` This class's Deed Die also adds to damage at roll time (rolled once per combat round, shared with the To Hit roll) - it isn't included in this number.`;
+    tooltip += ` This class's Deed Die also adds to damage at roll time (rolled fresh with every attack, shared with that same attack's To Hit roll) - it isn't included in this number.`;
   }
   if (lineState && lineState.backstabActive) {
     tooltip += ` Backstab is currently declared for this line - the NEXT roll will use the weapon's Backstab die instead of this Damage text (see the Backstab badge/button above).`;
@@ -3334,8 +3324,7 @@ function emptyAttack() {
 // independent declaration per attack LINE - i.e. per (weapon row, Action
 // Die slot) pair, since a character with multiple Action Dice can declare
 // a different deed (or backstab) on each separate attack they make this
-// round (see rollDeedDieForStats's "multiple mighty deeds per round"
-// ruling), not just once for the whole weapon. `lineDeeds` stores this as
+// round, not just once for the whole weapon. `lineDeeds` stores this as
 // `{ [slotKey]: { deedType, deedCustom, backstabActive } }`, keyed by the
 // same slot values actionDieSelectOptions already uses ("0", "1", ...,
 // "shieldbash"), or "tw" for a two-weapon-configured row (which only ever
@@ -3496,7 +3485,7 @@ function attackRowHtml(atk, mode) {
   if (pcClassHasDeedDieLive()) {
     const deedDieEl = document.getElementById("pc-deed-die");
     const deedDieText = deedDieEl && deedDieEl.value.trim() ? deedDieEl.value.trim() : "Deed Die";
-    badges.push(`<span class="weapon-badge weapon-badge-deed" title="Also applies this character's Deed Die (see the Deed Die field above) to both this attack's to-hit and damage roll - rolled once per combat round and shared with every other attack this character makes that round, not re-rolled per attack. Declare a specific Mighty Deed for an attack in the Combat Tracker tab.">${escapeHtml(deedDieText)}</span>`);
+    badges.push(`<span class="weapon-badge weapon-badge-deed" title="Also applies this character's Deed Die (see the Deed Die field above) to both this attack's to-hit and damage roll - rolled fresh with every single attack (Table 1-10's own rule), never shared or reused. Declare a specific Mighty Deed for an attack in the Combat Tracker tab.">${escapeHtml(deedDieText)}</span>`);
   }
   // Backstab damage (Thief, Table 3-1) is declared per-attack in the
   // Combat Tracker now too (see trackerLineHtml) - this is just an FYI
@@ -5393,60 +5382,28 @@ function rollDamage(diceStr) {
 // comments flagged it as a stopgap "until Deed Die rolling is its own
 // feature."
 //
-// Per the Judge's ruling for this table: a Warrior/Dwarf rolls their Deed
-// Die ONCE per combat round, not once per attack - every attack they make
-// that round (extra Action Dice from a higher level, or both hands of a
-// two-weapon pair) reuses that SAME roll, rather than each attack getting
-// its own. (This differs from Table 1-10's own footnote text - "rolled
-// anew... with each attack" - which this app followed until now; the
-// Judge's ruling supersedes it here.) "The current round" is whatever the
-// Combat Tracker's shared Round counter (sceneState.round/session) reads
-// - the same value every client at the table sees, so a roll made from
-// the Tracker and one made from this character's own Sheet stay in sync -
-// cached on the token itself (DEED_ROUND_CACHE_KEY) rather than kept only
-// in memory, precisely so two different clients agree on it. A change to
-// the Deed Die's own size/modifier (a level-up mid-round) invalidates a
-// stale cached roll even within the same round, since the old face value
-// wouldn't make sense against a different die anyway.
+// Per Table 1-10's own footnote: "A warrior's attack modifier is rolled
+// anew, according to the appropriate die, with each attack." A Warrior/
+// Dwarf's Deed Die is rolled completely fresh for THIS one attack - it is
+// NOT shared or reused across other attacks the same character makes the
+// same round (an earlier version of this app cached one roll per combat
+// round and reused it everywhere; that's been reverted back to RAW here).
+// Every separate attack line, and each hand of a two-weapon pair, gets its
+// own independent roll.
 //
-// Takes `stats` (a character-wide value) rather than a specific atk -
-// every attack this character makes in a round, however many rows or
-// hands that spans, resolves to this ONE call's result. Returns null for
-// any character with no Deed Die set (Cleric/Thief/Wizard/Elf/Halfling/
-// 0-level/unset/"Other", or a Warrior/Dwarf whose field is blank/
-// unparseable). The returned object's `reused` flag tells the caller
-// whether this was a brand new roll (so it should persist it back to the
-// token via DEED_ROUND_CACHE_KEY, and is worth animating as a "real" die
-// roll) or an already-rolled value from earlier this round (nothing new
-// to persist or animate - it's the same face the player already saw).
+// Takes `stats` (a character-wide value) rather than a specific atk just
+// to read this character's Deed Die field - it doesn't otherwise persist
+// or share anything between calls. Returns null for any character with no
+// Deed Die set (Cleric/Thief/Wizard/Elf/Halfling/0-level/unset/"Other", or
+// a Warrior/Dwarf whose field is blank/unparseable).
 function rollDeedDieForStats(stats) {
   const raw = String((stats.data && stats.data["deed-die"]) || "").trim();
   const m = raw.match(/^\+?d(\d+)\s*([+-]\s*\d+)?$/i);
   if (!m) return null;
   const sides = parseInt(m[1], 10);
   const mod = m[2] ? parseInt(m[2].replace(/\s+/g, ""), 10) : 0;
-  const round = sceneState.round || 1;
-  const session = sceneState.session || 1;
-  const cache = stats.deedRoundCache;
-  if (cache && cache.round === round && cache.session === session && cache.sides === sides && cache.mod === mod) {
-    return { notation: `d${sides}`, sides, roll: cache.roll, mod, total: cache.roll + mod, round, session, reused: true };
-  }
   const roll = Math.floor(Math.random() * sides) + 1;
-  return { notation: `d${sides}`, sides, roll, mod, total: roll + mod, round, session, reused: false };
-}
-
-// Persists a freshly-rolled Deed Die (rollDeedDieForStats's `reused:
-// false` result) onto the token, so the NEXT attack this character makes
-// this round - from this same client or any other - reads it back out of
-// DEED_ROUND_CACHE_KEY and reuses it instead of rolling again. Callers
-// only need to await this when `deed.reused` is false; a reused roll has
-// nothing new to write.
-async function persistDeedRoundRoll(itemId, deed) {
-  await OBR.scene.items.updateItems([itemId], items => {
-    items.forEach(item => {
-      item.metadata[DEED_ROUND_CACHE_KEY] = { round: deed.round, session: deed.session, sides: deed.sides, mod: deed.mod, roll: deed.roll };
-    });
-  });
+  return { notation: `d${sides}`, sides, roll, mod, total: roll + mod };
 }
 
 // Identifies one rollable Combat Tracker line for "used this round"
@@ -5475,9 +5432,8 @@ function usedActionSlotsSetForStats(stats) {
 
 // Marks one or more attack lines on a token as used for the current round
 // - merged into whatever's already recorded for THIS round/session (a
-// fresh round/session's leftover cache, if any, is discarded first, same
-// as persistDeedRoundRoll implicitly discarding a stale Deed Die). Callers
-// pass actionSlotKey(...) strings, not raw attackId/slotKey pairs.
+// fresh round/session's leftover cache, if any, is discarded first).
+// Callers pass actionSlotKey(...) strings, not raw attackId/slotKey pairs.
 async function markActionSlotsUsed(itemId, usedKeys) {
   if (!usedKeys || !usedKeys.length) return;
   await OBR.scene.items.updateItems([itemId], items => {
@@ -5535,9 +5491,6 @@ function getStatsForItem(item) {
     initiative: combat.initiative ?? "",
     enabled: combat.enabled !== false,
     attacks: (data.attacks || []).filter(a => a.name || a.bonus || a.damage),
-    // This round's already-rolled Deed Die (if any) - see
-    // rollDeedDieForStats/DEED_ROUND_CACHE_KEY.
-    deedRoundCache: item.metadata[DEED_ROUND_CACHE_KEY] || null,
     // This round's already-rolled attack lines (if any) - see
     // usedActionSlotsSetForStats/USED_ACTION_SLOTS_KEY.
     usedSlotsCache: item.metadata[USED_ACTION_SLOTS_KEY] || null,
@@ -6353,7 +6306,7 @@ function trackerLineHtml(item, stats, line) {
     }
     if (hasDeedDie) {
       const deedDieText = String(stats.data["deed-die"] || "").trim() || "Deed Die";
-      badges.push(`<span class="weapon-badge weapon-badge-deed" title="Also applies this character's Deed Die (${escapeHtml(deedDieText)}) to both this attack's to-hit and damage roll - rolled once per combat round and shared with every other attack this character makes that round, not re-rolled per line.">${escapeHtml(deedDieText)}</span>`);
+      badges.push(`<span class="weapon-badge weapon-badge-deed" title="Also applies this character's Deed Die (${escapeHtml(deedDieText)}) to both this attack's to-hit and damage roll - rolled fresh with every single attack (Table 1-10's own rule), never shared or reused across other lines.">${escapeHtml(deedDieText)}</span>`);
     }
     if (canBackstab) {
       badges.push(`<span class="weapon-badge weapon-badge-backstab" title="This weapon has a Backstab damage die (${escapeHtml(entry.backstabDamage)}) - use the Backstab toggle below to apply it to this line's next roll.">Backstab d.: ${escapeHtml(entry.backstabDamage)}</span>`);
@@ -6663,12 +6616,9 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     text = `${atk.name || "Attack"}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${wasForced ? " (GM-forced)" : ""} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}).${untrainedNote} ${rowText}`;
     label = "💀 FUMBLE! Natural 1 — automatic miss";
   } else {
+    // Fresh Deed Die roll for THIS attack - see rollDeedDieForStats (no
+    // longer shared/cached across other attacks the same round).
     const deed = rollDeedDieForStats(stats);
-    // A brand new roll (not one reused from earlier this round) needs to
-    // be written back to the token so the NEXT attack this character
-    // makes this round - from this client or any other - sees it too; a
-    // reused roll has nothing new to persist. See rollDeedDieForStats.
-    if (deed && !deed.reused) await persistDeedRoundRoll(itemId, deed);
     const toHit = d20Roll + atkMod + (deed ? deed.total : 0);
     // A Backstab declared on this specific slot (Combat Tracker, Thief
     // only) swaps in the weapon's sneak-attack die for THIS roll instead
@@ -6680,13 +6630,10 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     // Backstab die on file.
     const backstabNotation = lineState.backstabActive ? backstabDamageNotationForStats(stats, atk) : null;
     const dmg = rollDamage(backstabNotation || atk.damage);
-    const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)}${deed.reused ? ", this round's roll" : ""})` : "";
+    const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)})` : "";
     const deedLine = mightyDeedResultText(lineState.deedType, lineState.deedCustom, deed);
     const backstabLine = backstabNotation ? ` 🗡️ Backstab (${backstabNotation}) applied to this attack's damage.` : "";
-    // Only animate/tumble the Deed Die when it was actually just rolled -
-    // replaying the same face for a reused roll would look like a fresh
-    // roll happened when nothing new was decided.
-    if (deed && !deed.reused) rollDice.push({ sides: deed.sides, value: deed.roll });
+    if (deed) rollDice.push({ sides: deed.sides, value: deed.roll });
     if (dmg) rollDice.push(...dmg.dice);
 
     let dmgTotal = dmg !== null ? dmg.total + (deed ? deed.total : 0) : null;
@@ -6831,19 +6778,6 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
   let anyFumble = false;
   let anyCrit = false;
 
-  // One Deed Die for the WHOLE two-weapon action, shared by both hands -
-  // per the Judge's ruling (see rollDeedDieForStats), a Warrior/Dwarf
-  // making multiple attacks in a round (including both hands of a
-  // two-weapon pair, which are one action but two attacks) rolls their
-  // Deed Die once and reuses it, rather than each hand getting its own.
-  // Resolved ONCE below (assigned before either hand is actually
-  // resolved, and left null on a total whiff - see the
-  // halflingDoubleFumble check just below where it's set - matching
-  // single-weapon rollAttackFor, which likewise never rolls a Deed Die
-  // for a fumbled attack) rather than inside resolveHand itself (which
-  // would otherwise roll it fresh per hand, exactly the "twice in one
-  // action" outcome this ruling rules out).
-  let deed = null;
   // Both hands of a pair share ONE Backstab/Mighty Deed declaration,
   // keyed by whichever Action Die iteration of the pair this is (see
   // deriveTrackerLines/getLineDeedState) - the `slotKey` param above. Any
@@ -6872,19 +6806,24 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
       return `${label}: Natural 1${forcedNote} — miss (Halfling two-weapon fighting: a lone natural 1 doesn't fumble by itself).`;
     }
 
-    // Same shared `deed` for both hands - see its declaration above. A
-    // Favorite Weapon's Luck modifier (checked per hand, since primary and
-    // off-hand weapons can differ) is already folded into atk.bonus itself
-    // (see composedAttackBonusText) - same "the field is what it is" trust
-    // single-weapon rollAttackFor now gives atkMod, no separate addition
-    // needed here.
+    // A Favorite Weapon's Luck modifier (checked per hand, since primary
+    // and off-hand weapons can differ) is already folded into atk.bonus
+    // itself (see composedAttackBonusText) - same "the field is what it
+    // is" trust single-weapon rollAttackFor now gives atkMod, no separate
+    // addition needed here.
     const atkMod = parseModifier(atk.bonus);
+    // Each hand rolls its OWN fresh Deed Die (see rollDeedDieForStats) -
+    // per Table 1-10's footnote, it's rolled anew with each attack, and
+    // both hands of a two-weapon pair are two separate attacks even
+    // though they're one action.
+    const deed = rollDeedDieForStats(stats);
+    if (deed) rollDice.push({ sides: deed.sides, value: deed.roll });
     const toHit = roll + atkMod + (deed ? deed.total : 0);
     // Same on-the-fly Backstab swap as single-weapon rollAttackFor, per
     // hand - see its comment for why this never mutates atk.damage itself.
     const backstabNotation = lineState.backstabActive ? backstabDamageNotationForStats(stats, atk) : null;
     const dmg = rollDamage(backstabNotation || atk.damage);
-    const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)}${deed.reused ? ", this round's roll" : ""})` : "";
+    const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)})` : "";
     const deedLine = mightyDeedResultText(lineState.deedType, lineState.deedCustom, deed);
     const backstabLine = backstabNotation ? ` 🗡️ Backstab (${backstabNotation}) applied to this hand's damage.` : "";
     if (lineState.backstabActive) backstabRevertQueue.push(atk.id);
@@ -6941,19 +6880,6 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
 
   let fumbleNote = "";
   let primaryText, offhandText;
-  if (!halflingDoubleFumble) {
-    // At least one hand is going to actually resolve (a fumble on ONE
-    // hand still leaves the other needing it) - roll/reuse the round's
-    // Deed Die now, shared by whichever of resolveHand's two calls below
-    // end up using it.
-    deed = rollDeedDieForStats(stats);
-    if (deed && !deed.reused) {
-      await persistDeedRoundRoll(itemId, deed);
-      // Only animate/tumble the Deed Die once, and only for a genuinely
-      // fresh roll - see rollAttackFor's identical reasoning.
-      rollDice.push({ sides: deed.sides, value: deed.roll });
-    }
-  }
   if (halflingDoubleFumble) {
     anyFumble = true;
     const fumbleDie = fumbleDieForStats(stats);
@@ -7702,12 +7628,12 @@ async function prevTurn() {
 
 async function resetTracker() {
   // Bumping `session` (rather than just resetting round back to 1) gives
-  // every Warrior/Dwarf's once-per-round Deed Die cache (see
-  // DEED_ROUND_CACHE_KEY/rollDeedDieForStats) an unambiguous "this is a
-  // brand new encounter" signal even though the round NUMBER itself is
-  // reused - without it, a token whose cached roll happened to be saved
-  // during a previous encounter's Round 1 would look identical to a fresh
-  // Round 1 here and wrongly get reused into the new fight.
+  // every token's "used this round" attack-line cache (see
+  // USED_ACTION_SLOTS_KEY/usedActionSlotsSetForStats) an unambiguous "this
+  // is a brand new encounter" signal even though the round NUMBER itself
+  // is reused - without it, a token whose lines were marked used during a
+  // previous encounter's Round 1 would look identical to a fresh Round 1
+  // here and wrongly stay hidden in the new fight.
   sceneState = { round: 1, activeId: null, session: (sceneState.session || 1) + 1 };
   renderTrackerRows(lastTrackerItems);
   await OBR.scene.setMetadata({ [SCENE_STATE_KEY]: sceneState });
