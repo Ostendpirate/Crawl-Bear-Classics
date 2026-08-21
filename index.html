@@ -644,6 +644,24 @@
     line-height: 1;
   }
   .attack-remove-btn:hover { background: #a5453a; }
+  .armor-list-header {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    padding: 0 6px;
+    margin-bottom: 4px;
+  }
+  .armor-list-header span {
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--muted);
+  }
+  .armor-header-spacer { flex: none; width: 16px; }
+  .armor-header-type { flex: 1.3; min-width: 0; }
+  .armor-header-bonus { flex: 0.5; min-width: 0; text-align: center; }
+  .armor-header-cp { flex: 0.5; min-width: 0; text-align: center; }
+  .armor-header-remove-spacer { flex: none; width: 20px; }
   .armor-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
   .armor-row {
     display: flex;
@@ -1252,16 +1270,23 @@
         <div class="row">
           <div>
             <label>Misc AC</label>
-            <input type="text" id="pc-ac-misc" placeholder="+0" />
+            <input type="text" id="pc-ac-misc" placeholder="+0" title="Any AC bonus that isn't Agility or an equipped armor/shield row above - a ring of protection, a Judge's house-ruled bonus, etc. Added straight into the AC total below; see that field's own tooltip for the full breakdown." />
           </div>
         </div>
 
         <fieldset>
           <legend>Armor &amp; Shields</legend>
+          <div class="armor-list-header">
+            <span class="armor-header-spacer"></span>
+            <span class="armor-header-type">Type</span>
+            <span class="armor-header-bonus" title="AC Bonus - added into the AC field above, but only while this row's Equipped box is checked.">AC Bonus</span>
+            <span class="armor-header-cp" title="Check Penalty - a negative die-step penalty to Climb/Jump/Balance/Swim/Move Silently (and for some classes, spellcasting) applied only while this row's Equipped box is checked.">Check Pen.</span>
+            <span class="armor-header-remove-spacer"></span>
+          </div>
           <div class="armor-list" id="armor-list-pc"></div>
           <button type="button" class="add-attack-btn" id="add-armor-pc">+ Add Armor / Shield</button>
           <div class="armor-check-penalty-line">
-            Check Penalty: <span id="pc-check-penalty">0</span>
+            <span title="The combined Check Penalty from every armor/shield row above marked Equipped - see each row's own Check Pen. column.">Check Penalty:</span> <span id="pc-check-penalty">0</span>
             <span class="armor-check-penalty-note" id="pc-check-penalty-note">Climb, jump, balance, swim, move silently.</span>
           </div>
         </fieldset>
@@ -4556,10 +4581,10 @@ function emptyArmorItem() {
 function armorRowHtml(item) {
   return `
     <div class="armor-row${item.equipped ? " equipped" : ""}" data-id="${item.id}">
-      <input type="checkbox" class="armor-equipped" ${item.equipped ? "checked" : ""} title="Equipped" />
-      <select class="armor-type" title="Armor/Shield type">${armorTypeOptionsHtml(item.type)}</select>
-      <input type="text" class="armor-bonus" placeholder="+0" title="AC Bonus" value="${escapeHtml(item.bonus)}" />
-      <input type="text" class="armor-check-penalty" placeholder="0" title="Check Penalty" value="${escapeHtml(item.checkPenalty)}" />
+      <input type="checkbox" class="armor-equipped" ${item.equipped ? "checked" : ""} title="Equipped - only an Equipped row's AC Bonus/Check Penalty/speed penalty/fumble die actually count toward this character's totals below. One body-armor row and one shield row can be equipped at the same time; equipping a second row in the same slot un-equips the first." />
+      <select class="armor-type" title="Armor/Shield type - picking one fills in this row's AC Bonus and Check Penalty from the table (Reference Booklet), but both stay freely editable afterward (for non-standard materials, magic items, etc).">${armorTypeOptionsHtml(item.type)}</select>
+      <input type="text" class="armor-bonus" placeholder="+0" title="AC Bonus - this piece's contribution to Armor Class. Only counts while Equipped is checked above; see the total AC field's own tooltip for the full breakdown." value="${escapeHtml(item.bonus)}" />
+      <input type="text" class="armor-check-penalty" placeholder="0" title="Check Penalty - this piece's penalty to Climb/Jump/Balance/Swim/Move Silently (and, for some classes, spellcasting). Only counts while Equipped is checked above; see the Check Penalty line below the list for the full breakdown." value="${escapeHtml(item.checkPenalty)}" />
       <button type="button" class="attack-remove-btn" title="Remove">×</button>
     </div>`;
 }
@@ -4671,13 +4696,25 @@ function recalcPcAC() {
   const miscEl = document.getElementById("pc-ac-misc");
   if (!acEl) return 10;
   const agiMod = abilityModifierFromField("pc-agi");
-  const equippedBonus = readArmorItems()
-    .filter(item => item.equipped)
-    .reduce((sum, item) => sum + (parseInt(item.bonus, 10) || 0), 0);
+  const equippedItems = readArmorItems().filter(item => item.equipped);
+  const equippedBonus = equippedItems.reduce((sum, item) => sum + (parseInt(item.bonus, 10) || 0), 0);
   const miscMatch = String(miscEl ? miscEl.value : "").match(/-?\d+/);
   const miscBonus = miscMatch ? parseInt(miscMatch[0], 10) : 0;
   const total = 10 + agiMod + equippedBonus + miscBonus;
   acEl.value = total;
+
+  // Mouseover breakdown - names each EQUIPPED item's own contribution
+  // (by its Type label) rather than a lump "Armor" sum, so a two-item
+  // loadout (body armor + shield) shows exactly which piece is
+  // contributing what, and an armor/shield row that's NOT checked
+  // Equipped is visibly absent from the math.
+  const sumParts = ["10 base", `Agi ${formatSignedNumber(agiMod)}`];
+  equippedItems.forEach(item => {
+    const bonus = parseInt(item.bonus, 10) || 0;
+    sumParts.push(`${armorTypeEntry(item.type).label} ${formatSignedNumber(bonus)}`);
+  });
+  if (miscBonus) sumParts.push(`Misc ${formatSignedNumber(miscBonus)}`);
+  acEl.title = `AC = ${sumParts.join(" + ")} = ${total}.${equippedItems.length ? "" : " No armor/shield is currently marked Equipped."}`;
   return total;
 }
 
@@ -4696,10 +4733,21 @@ function recalcPcCheckPenalty() {
   const el = document.getElementById("pc-check-penalty");
   const noteEl = document.getElementById("pc-check-penalty-note");
   if (!el) return 0;
-  const total = readArmorItems()
-    .filter(item => item.equipped)
-    .reduce((sum, item) => sum + (parseInt(item.checkPenalty, 10) || 0), 0);
+  const equippedItems = readArmorItems().filter(item => item.equipped);
+  const total = equippedItems.reduce((sum, item) => sum + (parseInt(item.checkPenalty, 10) || 0), 0);
   el.textContent = total === 0 ? "0" : formatSignedNumber(total);
+
+  // Mouseover breakdown, one term per equipped item (same "name each
+  // piece's own contribution" treatment recalcPcAC gives the AC field) -
+  // an item that isn't Equipped simply doesn't appear here, same as it
+  // doesn't count toward the total.
+  const cpParts = equippedItems.map(item => {
+    const cp = parseInt(item.checkPenalty, 10) || 0;
+    return `${armorTypeEntry(item.type).label} ${formatSignedNumber(cp)}`;
+  });
+  el.title = cpParts.length
+    ? `Check Penalty = ${cpParts.join(" + ")} = ${formatSignedNumber(total)}.`
+    : "No armor/shield is currently marked Equipped.";
 
   if (noteEl) {
     const classEl = document.getElementById("pc-class");
