@@ -3731,6 +3731,18 @@ function dccWeaponEntry(key) {
   return DCC_WEAPONS.find(w => w.key === key) || DCC_WEAPONS[DCC_WEAPONS.length - 1];
 }
 
+// How many of a character's two hands a given weapon claims once
+// Equipped - a two-handed weapon (melee OR ranged, e.g. a longbow/
+// crossbow - see each DCC_WEAPONS entry's own twoHanded flag) claims
+// both, everything else claims just one. Shared by the hand-economy
+// enforcement below (enforceShieldCapacityAfterWeaponEquip/
+// enforceWeaponCapacityForShieldEquip) - a Shield always claims the other
+// one, so a two-handed weapon and a Shield can never both be Equipped,
+// and neither can a Shield alongside two separate one-handed weapons.
+function weaponHandCost(weaponKey) {
+  return dccWeaponEntry(weaponKey).twoHanded ? 2 : 1;
+}
+
 function weaponOptionsHtml(selectedKey) {
   return DCC_WEAPONS.map(w =>
     `<option value="${w.key}"${w.key === selectedKey ? " selected" : ""}>${escapeHtml(w.label)}</option>`
@@ -4168,6 +4180,74 @@ function equipAttackRow(mode, row) {
       otherBox.checked = false;
       other.classList.remove("equipped");
     }
+  });
+  // A two-handed weapon equipped alone, or a completed two-weapon
+  // Primary+Off-hand pair (two one-handed weapons, one in each hand),
+  // already claims both hands - there's no hand left for a Shield, so
+  // un-equip one if it's currently marked Equipped (see weaponHandCost).
+  if (mode === "pc") enforceShieldCapacityAfterWeaponEquip();
+}
+
+// Drops an Equipped Shield the moment this character's equipped weapons
+// alone already claim both hands (weaponHandCost - a lone two-handed
+// weapon, or a completed two-weapon Primary+Off-hand pair) - there's
+// nothing left for it to occupy. Called after equipAttackRow settles
+// which weapon row(s) just became Equipped.
+function enforceShieldCapacityAfterWeaponEquip() {
+  const attackList = attackListEl("pc");
+  const armorList = armorListEl();
+  if (!attackList || !armorList) return;
+  const weaponHands = Array.from(attackList.querySelectorAll(".attack-row")).reduce((sum, row) => {
+    const box = row.querySelector(".attack-equipped");
+    if (!box || !box.checked) return sum;
+    const weaponSel = row.querySelector(".attack-weapon");
+    return sum + weaponHandCost(weaponSel ? weaponSel.value : "");
+  }, 0);
+  if (weaponHands < 2) return;
+  const shieldRow = Array.from(armorList.querySelectorAll(".armor-row")).find(row => {
+    const box = row.querySelector(".armor-equipped");
+    const typeSel = row.querySelector(".armor-type");
+    return box && box.checked && typeSel && armorTypeEntry(typeSel.value).slot === "shield";
+  });
+  if (!shieldRow) return;
+  shieldRow.querySelector(".armor-equipped").checked = false;
+  shieldRow.classList.remove("equipped");
+  recalcPcAC();
+  recalcPcCheckPenalty();
+  recalcPcSpeed();
+  recalcPcFumbleDie();
+  syncArmorIntoEquipment();
+}
+
+// The mirror image of enforceShieldCapacityAfterWeaponEquip, run when a
+// Shield is the thing that just became Equipped: drops any equipped
+// two-handed weapon first (it alone already needs both hands), then - if
+// two one-handed weapons are still equipped alongside it (a two-weapon
+// Primary+Off-hand pair configured before the Shield went on) - drops
+// every one beyond the first, since a Shield in one hand only leaves room
+// for exactly one weapon in the other. Purely a DOM-state fixup (the
+// caller re-reads and re-renders the attack rows immediately after), so
+// this doesn't call renderAttacks/scheduleSave itself.
+function enforceWeaponCapacityForShieldEquip() {
+  const attackList = attackListEl("pc");
+  if (!attackList) return;
+  const weaponRows = Array.from(attackList.querySelectorAll(".attack-row"));
+  weaponRows.forEach(row => {
+    const box = row.querySelector(".attack-equipped");
+    if (!box || !box.checked) return;
+    const weaponSel = row.querySelector(".attack-weapon");
+    if (weaponHandCost(weaponSel ? weaponSel.value : "") === 2) {
+      box.checked = false;
+      row.classList.remove("equipped");
+    }
+  });
+  const stillEquipped = weaponRows.filter(row => {
+    const box = row.querySelector(".attack-equipped");
+    return box && box.checked;
+  });
+  stillEquipped.slice(1).forEach(row => {
+    row.querySelector(".attack-equipped").checked = false;
+    row.classList.remove("equipped");
   });
 }
 
@@ -5217,12 +5297,18 @@ function attachArmorRowListeners() {
       syncArmorIntoEquipment();
       // A type change on an already-Equipped row can move it in or out of
       // the "shield" slot (e.g. Shield -> Custom Shield stays put, but
-      // nothing stops picking a body-armor type here instead) - rebuild
-      // the attack rows so the Primary/Off-hand dropdown and the
-      // Two-Weapon Fighting note (see twoWeaponRoleOptions/
-      // updateTwoWeaponNote) immediately reflect whichever way that moved,
-      // same as the Equipped checkbox's own listener just below.
-      if (equippedBox.checked) renderAttacks("pc", readAttacks("pc"));
+      // nothing stops picking a body-armor type here instead) - same
+      // two-hand-economy reconciliation (see enforceWeaponCapacityForShieldEquip)
+      // and attack-row rebuild (Primary/Off-hand dropdown, Two-Weapon
+      // Fighting note - see twoWeaponRoleOptions/updateTwoWeaponNote) as
+      // the Equipped checkbox's own listener just below, for whichever way
+      // this just moved.
+      if (equippedBox.checked) {
+        if (armorTypeEntry(typeSel.value).slot === "shield") enforceWeaponCapacityForShieldEquip();
+        renderAttacks("pc", readAttacks("pc"));
+        recalcPcInitiativeDie();
+        syncWeaponsIntoEquipment();
+      }
     });
     bonusInput.addEventListener("input", () => {
       scheduleSave();
@@ -5245,6 +5331,11 @@ function attachArmorRowListeners() {
             other.classList.remove("equipped");
           }
         });
+        // A Shield only leaves room for exactly one one-handed weapon
+        // (see weaponHandCost) - drop a two-handed weapon, or any second
+        // one-handed weapon from an already-configured Primary+Off-hand
+        // pair, that's currently equipped alongside it.
+        if (slot === "shield") enforceWeaponCapacityForShieldEquip();
       }
       scheduleSave();
       recalcPcAC();
@@ -5256,11 +5347,14 @@ function attachArmorRowListeners() {
       // eligibility (Table 4-3 - see shieldEquippedLive/twoWeaponRoleOptions)
       // - rebuild the attack rows immediately so the Primary/Off-hand
       // dropdown and note reflect it right away, and any Primary/Off-hand
-      // role that a newly-equipped Shield just invalidated is cleared and
-      // persisted (readAttacks below picks up the cleared DOM value) rather
-      // than lingering stale until some unrelated edit happens to trigger
-      // a rebuild.
+      // role (or, per enforceWeaponCapacityForShieldEquip just above, any
+      // weapon itself) that a newly-equipped Shield just invalidated is
+      // cleared and persisted (readAttacks below picks up the cleared DOM
+      // value) rather than lingering stale until some unrelated edit
+      // happens to trigger a rebuild.
       renderAttacks("pc", readAttacks("pc"));
+      recalcPcInitiativeDie();
+      syncWeaponsIntoEquipment();
       scheduleSave();
     });
     row.querySelector(".attack-remove-btn").addEventListener("click", () => {
