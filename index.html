@@ -119,6 +119,27 @@
     color: #1e1b18;
     border-color: var(--accent);
   }
+  .equip-tabs { margin-bottom: 8px; }
+  .equip-tabs .tab-btn {
+    position: relative;
+    font-size: 9.5px;
+    padding: 6px 3px;
+    letter-spacing: 0.2px;
+  }
+  .equip-tab-dot {
+    display: none;
+    position: absolute;
+    top: 3px;
+    right: 4px;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--good);
+  }
+  .equip-tab-dot.show { display: block; }
+  .equip-tabs .tab-btn.active .equip-tab-dot { background: #1e1b18; }
+  .equip-panel { display: none; }
+  .equip-panel.active { display: block; }
   .saves {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1404,29 +1425,30 @@
           <div class="fumble-die-note" id="pc-tw-note" style="margin-top:6px;">Mark one attack "Primary" and another "Off-hand" to fight with two weapons (Table 4-3).</div>
         </fieldset>
 
-        <fieldset>
-          <legend>Armor (Equipment)</legend>
-          <textarea id="pc-equip-armor" rows="3" placeholder="Auto-filled from the Armor &amp; Shields list above - add magic properties, condition notes, spares, etc. here" title="The top lines here auto-sync from the Armor &amp; Shields fieldset above (every owned piece, flagged if Equipped) - add your own extra notes below that block and they're preserved on the next resync."></textarea>
-        </fieldset>
-
-        <fieldset>
-          <legend>Weapons (Equipment)</legend>
-          <textarea id="pc-equip-weapons" rows="4" placeholder="Auto-filled from the Attacks list above - add ammunition counts, spares, magic properties, etc. here" title="The top lines here auto-sync from the Attacks fieldset above (every configured weapon, flagged if Equipped) - add your own extra notes below that block and they're preserved on the next resync."></textarea>
-        </fieldset>
-
-        <fieldset>
-          <legend>Adventuring Gear</legend>
-          <textarea id="pc-equip-gear" rows="8" placeholder="Backpack, torches, 50' rope, iron rations, holy water, thieves' tools, lantern &amp; oil, 10' pole..."></textarea>
-        </fieldset>
-
-        <fieldset>
-          <legend>Food &amp; Drink</legend>
-          <textarea id="pc-equip-food" rows="4" placeholder="Iron rations (3 days), wineskin, dried meat, waterskin..."></textarea>
-        </fieldset>
-
-        <fieldset>
-          <legend>Treasure</legend>
-          <textarea id="pc-equip-treasure" rows="6" placeholder="15 gp, 40 sp, a small pouch of gems, an ornate silver ring..."></textarea>
+        <fieldset class="equip-fieldset">
+          <legend>Equipment</legend>
+          <div class="tabs equip-tabs" id="equip-tabs">
+            <button type="button" class="tab-btn equip-tab-btn active" data-equip-tab="armor" title="Armor &amp; Shields you own - auto-synced from the fieldset above">Armor<span class="equip-tab-dot" id="equip-dot-armor"></span></button>
+            <button type="button" class="tab-btn equip-tab-btn" data-equip-tab="weapons" title="Weapons you own - auto-synced from the Attacks list above">Weapons<span class="equip-tab-dot" id="equip-dot-weapons"></span></button>
+            <button type="button" class="tab-btn equip-tab-btn" data-equip-tab="gear" title="Adventuring Gear - free text">Gear<span class="equip-tab-dot" id="equip-dot-gear"></span></button>
+            <button type="button" class="tab-btn equip-tab-btn" data-equip-tab="food" title="Food &amp; Drink - free text">Food<span class="equip-tab-dot" id="equip-dot-food"></span></button>
+            <button type="button" class="tab-btn equip-tab-btn" data-equip-tab="treasure" title="Treasure - free text">Treasure<span class="equip-tab-dot" id="equip-dot-treasure"></span></button>
+          </div>
+          <div class="equip-panel active" data-equip-panel="armor">
+            <textarea id="pc-equip-armor" rows="6" placeholder="Auto-filled from the Armor &amp; Shields list above - add magic properties, condition notes, spares, etc. here" title="The top lines here auto-sync from the Armor &amp; Shields fieldset above (every owned piece, flagged if Equipped) - add your own extra notes below that block and they're preserved on the next resync."></textarea>
+          </div>
+          <div class="equip-panel" data-equip-panel="weapons">
+            <textarea id="pc-equip-weapons" rows="6" placeholder="Auto-filled from the Attacks list above - add ammunition counts, spares, magic properties, etc. here" title="The top lines here auto-sync from the Attacks fieldset above (every configured weapon, flagged if Equipped) - add your own extra notes below that block and they're preserved on the next resync."></textarea>
+          </div>
+          <div class="equip-panel" data-equip-panel="gear">
+            <textarea id="pc-equip-gear" rows="8" placeholder="Backpack, torches, 50' rope, iron rations, holy water, thieves' tools, lantern &amp; oil, 10' pole..."></textarea>
+          </div>
+          <div class="equip-panel" data-equip-panel="food">
+            <textarea id="pc-equip-food" rows="6" placeholder="Iron rations (3 days), wineskin, dried meat, waterskin..."></textarea>
+          </div>
+          <div class="equip-panel" data-equip-panel="treasure">
+            <textarea id="pc-equip-treasure" rows="6" placeholder="15 gp, 40 sp, a small pouch of gems, an ornate silver ring..."></textarea>
+          </div>
         </fieldset>
 
         <fieldset>
@@ -1797,6 +1819,7 @@ function fillForm(mode, data) {
     syncArmorIntoEquipment();
     syncWeaponsIntoEquipment();
   }
+  if (mode === "pc") { setEquipTab("armor"); refreshEquipTabDots(); }
   // Restores which of Init/Fort/Ref/Will were still auto-managed (as
   // opposed to hand-typed) when this token was last saved, so that flag
   // - and therefore live Class/Level/ability updates to those fields -
@@ -5390,6 +5413,47 @@ function setMode(mode, persist = true) {
 
 document.getElementById("tab-monster").addEventListener("click", () => setMode("monster"));
 document.getElementById("tab-pc").addEventListener("click", () => setMode("pc"));
+
+// ---- Equipment sub-tabs (Armor/Weapons/Gear/Food/Treasure) ----
+// The 5 equipment fields (split out from one shared Equipment blob) now
+// live inside a single fieldset behind their own small tab bar instead of
+// each getting a whole fieldset of vertical space. A small dot lights up
+// on a tab whose field has content, so switching tabs isn't the only way
+// to notice something's stored there.
+const EQUIP_TABS = ["armor", "weapons", "gear", "food", "treasure"];
+const EQUIP_TAB_FIELD_IDS = {
+  armor: "pc-equip-armor",
+  weapons: "pc-equip-weapons",
+  gear: "pc-equip-gear",
+  food: "pc-equip-food",
+  treasure: "pc-equip-treasure",
+};
+function setEquipTab(tab) {
+  EQUIP_TABS.forEach(key => {
+    const isActive = key === tab;
+    const btn = document.querySelector(`.equip-tab-btn[data-equip-tab="${key}"]`);
+    const panel = document.querySelector(`.equip-panel[data-equip-panel="${key}"]`);
+    if (btn) btn.classList.toggle("active", isActive);
+    if (panel) panel.classList.toggle("active", isActive);
+  });
+}
+function refreshEquipTabDots() {
+  EQUIP_TABS.forEach(key => {
+    const fieldId = EQUIP_TAB_FIELD_IDS[key];
+    const el = document.getElementById(fieldId);
+    const dot = document.getElementById(`equip-dot-${key}`);
+    if (!el || !dot) return;
+    dot.classList.toggle("show", el.value.trim().length > 0);
+  });
+}
+document.querySelectorAll(".equip-tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => setEquipTab(btn.dataset.equipTab));
+});
+EQUIP_TABS.forEach(key => {
+  const el = document.getElementById(EQUIP_TAB_FIELD_IDS[key]);
+  if (el) el.addEventListener("input", refreshEquipTabDots);
+});
+refreshEquipTabDots();
 
 // ---- Sticky tab-bar stacking ----
 // Keeps the Monster/Player sub-tabs pinned directly beneath the sticky
