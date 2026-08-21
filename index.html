@@ -498,6 +498,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
+    flex-wrap: wrap;
   }
   .attack-equipped {
     flex: none;
@@ -507,10 +508,29 @@
     accent-color: var(--good);
   }
   .attack-weapon {
-    flex: 1;
-    min-width: 0;
+    /* A weapon name (e.g. "Two-Handed Sword (2H)") needs real room to stay
+       readable - flex:1 alone will happily let a plain flex item shrink to
+       near-zero once the row's other fixed-width items (the Two-Weapon
+       role and Action Die selects) don't all fit, since a <select>'s
+       default min-width:auto only protects it down to ITS OWN longest
+       option text, not a sane floor for the row as a whole. Giving it a
+       concrete min-width (and flex-wrap above on the row) means the TW/
+       Action-Die selects wrap to their own line on a narrow panel instead
+       of squeezing this one down to an unreadable sliver.
+       Weapon-specific badges (2H/Ranged/Deed Die/etc.) live in their own
+       separate wrapping row below (.attack-row-badges) rather than
+       competing for space on this line at all - see attackRowHtml. */
+    flex: 1 1 140px;
+    min-width: 100px;
     padding: 4px 6px;
     font-size: 12px;
+  }
+  .attack-row-badges {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    margin-top: 2px;
   }
   .weapon-badge {
     flex: none;
@@ -3574,8 +3594,8 @@ function attackRowHtml(atk, mode) {
         <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
         ${twSelectHtml}
         ${actDieSelectHtml}
-        ${badges.join(" ")}
       </div>
+      ${badges.length ? `<div class="attack-row-badges">${badges.join(" ")}</div>` : ""}
       <div class="attack-row-fields">
         <input type="text" class="attack-name" placeholder="Custom label (optional)" value="${escapeHtml(atk.name)}" />
         <input type="text" class="attack-bonus" placeholder="+4" value="${escapeHtml(atk.bonus)}" data-auto-synced="${atk.bonusAuto ? "1" : "0"}" data-bonus-source="${escapeHtml(atk.bonusSource || "")}" title="${escapeHtml(bonusTooltip)}" />
