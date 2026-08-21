@@ -1315,6 +1315,16 @@
           </div>
         </div>
 
+        <div class="row">
+          <div>
+            <label>Title</label>
+            <div class="field-sync-row">
+              <input type="text" id="pc-title" placeholder="e.g. Squire, Wildling, Bandit…" title="This class/level/alignment's Title. Auto-fills for levels 1-5 (independently verified against Goodman Games' own free Quick Start Rules and the user's own Core Rulebook) - levels 6-10 aren't confirmed yet, so they're left blank for you to fill in from your own Core Rulebook rather than guess. Type over this any time; a manual entry is never overwritten except by clicking ↻." />
+              <button type="button" class="derived-sync-btn" id="pc-title-sync-btn" title="Set to this Class/Level/Alignment's Title, if known">↻</button>
+            </div>
+          </div>
+        </div>
+
         <fieldset>
           <legend>Abilities</legend>
           <div class="ability-grid">
@@ -1674,7 +1684,7 @@ const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al", "montype"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-spells","pc-languages","pc-notes","pc-ac-misc"];
+const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-spells","pc-languages","pc-notes","pc-ac-misc"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
 const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
@@ -1893,6 +1903,10 @@ function fillForm(mode, data) {
     // field's Occupation auto-fill.
     const pcTrainedWeaponRestoreEl = document.getElementById("pc-trained-weapon");
     if (pcTrainedWeaponRestoreEl) pcTrainedWeaponRestoreEl.dataset.autoSynced = d.pcTrainedWeaponAutoSynced ? "1" : "0";
+    // Same "still auto-managed?" restoration, for the Title field's
+    // Class/Level/Alignment auto-fill (see dccClassTitle).
+    const pcTitleRestoreEl = document.getElementById("pc-title");
+    if (pcTitleRestoreEl) pcTitleRestoreEl.dataset.autoSynced = d.pcTitleAutoSynced ? "1" : "0";
     // Every attack row's Bonus field is the total true to-hit bonus this
     // attack rolls with (see composedAttackBonusText) - resync each
     // auto-synced row now, on load, not just on the next edit. Without
@@ -1937,6 +1951,8 @@ function readForm(mode) {
     d.pcActDiceAutoSynced = pcActDiceSaveEl ? pcActDiceSaveEl.dataset.autoSynced === "1" : false;
     const pcTrainedWeaponSaveEl = document.getElementById("pc-trained-weapon");
     d.pcTrainedWeaponAutoSynced = pcTrainedWeaponSaveEl ? pcTrainedWeaponSaveEl.dataset.autoSynced === "1" : false;
+    const pcTitleSaveEl = document.getElementById("pc-title");
+    d.pcTitleAutoSynced = pcTitleSaveEl ? pcTitleSaveEl.dataset.autoSynced === "1" : false;
   }
   if (mode === "monster") {
     const critEl = document.getElementById("crit");
@@ -2225,6 +2241,108 @@ const DCC_CLASS_TABLES = {
     },
   },
 };
+
+// Each class's "Title" by level (and, for most classes, by alignment) -
+// the flavor name a character goes by before earning a proper reputation,
+// e.g. a 1st-level Lawful Warrior is a "Squire." This is NOT part of the
+// Reference Booklet this app's other tables are drawn from (that booklet
+// only reprints the numbered mechanical tables - Table 1-5/1-7/1-10/etc -
+// titles live in each class's separate prose write-up in the full Core
+// Rulebook, which isn't included here). Levels 1-2 were first independently
+// verified against Goodman Games' own free Quick Start Rules PDF and
+// cross-checked against the open-source Foundry VTT DCC system's test
+// suite (both agree exactly, e.g. Warrior 1: Squire/Wildling/Bandit).
+// Levels 3-5 were then supplied directly from the user's own Core Rulebook
+// (photographed table pages: Table 1-6 Cleric Titles, Table 1-8 Thief
+// Titles, Table 1-11 Warrior Titles, Table 1-13 Wizard Titles, Table 1-15
+// Dwarf Titles, Table 1-17 Elf Titles, Table 1-19 Halfling Titles), and
+// match the levels 1-2 data already on file exactly, confirming both
+// sources. Levels 6-10 remain undocumented - not fabricated - since no
+// legitimately accessible source (free or otherwise) has been provided or
+// found for them yet. dccClassTitle()'s "not documented" status (see below)
+// is what drives the Sheet into leaving the Title field for the player to
+// fill in by hand once they've checked their own Core Rulebook, instead of
+// silently showing nothing with no explanation.
+// Elf and Halfling titles do NOT vary by alignment (a single title per
+// level covers all three) - Cleric/Thief/Warrior/Wizard/Dwarf all do,
+// keyed by the same "L"/"N"/"C" values pc-alignment's <select> already
+// uses.
+const DCC_CLASS_TITLES = {
+  Cleric: {
+    1: { L: "Acolyte", N: "Witness", C: "Zealot" },
+    2: { L: "Heathen-slayer", N: "Pupil", C: "Convert" },
+    3: { L: "Brother", N: "Chronicler", C: "Cultist" },
+    4: { L: "Curate", N: "Judge", C: "Apostle" },
+    5: { L: "Father", N: "Druid", C: "High priest" },
+  },
+  Thief: {
+    1: { L: "Bravo", N: "Beggar", C: "Thug" },
+    2: { L: "Apprentice", N: "Cutpurse", C: "Murderer" },
+    3: { L: "Rogue", N: "Burglar", C: "Cutthroat" },
+    4: { L: "Capo", N: "Robber", C: "Executioner" },
+    5: { L: "Boss", N: "Swindler", C: "Assassin" },
+  },
+  Warrior: {
+    1: { L: "Squire", N: "Wildling", C: "Bandit" },
+    2: { L: "Champion", N: "Barbarian", C: "Brigand" },
+    3: { L: "Knight", N: "Berserker", C: "Marauder" },
+    4: { L: "Cavalier", N: "Headman/Headwoman", C: "Ravager" },
+    5: { L: "Paladin", N: "Chieftain", C: "Reaver" },
+  },
+  Wizard: {
+    1: { L: "Evoker", N: "Astrologist", C: "Cultist" },
+    2: { L: "Controller", N: "Enchanter", C: "Shaman" },
+    3: { L: "Conjurer", N: "Magician", C: "Diabolist" },
+    4: { L: "Summoner", N: "Thaumaturgist", C: "Warlock / Witch" },
+    5: { L: "Elementalist", N: "Sorcerer", C: "Necromancer" },
+  },
+  Dwarf: {
+    1: { L: "Agent", N: "Apprentice", C: "Rebel" },
+    2: { L: "Broker", N: "Novice", C: "Dissident" },
+    3: { L: "Delegate", N: "Journeyer", C: "Exile" },
+    4: { L: "Envoy", N: "Crafter", C: "Iconoclast" },
+    5: { L: "Syndic", N: "Thegn", C: "Renegade" },
+  },
+  Elf: {
+    1: { any: "Wanderer" },
+    2: { any: "Seer" },
+    3: { any: "Quester" },
+    4: { any: "Savant" },
+    5: { any: "Elder" },
+  },
+  Halfling: {
+    1: { any: "Wanderer" },
+    2: { any: "Explorer" },
+    3: { any: "Collector" },
+    4: { any: "Accumulator" },
+    5: { any: "Wise one" },
+  },
+};
+
+// Resolves a Title for a given class/level/alignment against
+// DCC_CLASS_TITLES, returning a {title, status} pair rather than just a
+// string - the Sheet needs to tell "no title at this level" (0-level/no
+// class/"Other") apart from "needs an Alignment picked first" and from
+// "this level just isn't documented yet" (see the table's own comment),
+// since each of those gets different placeholder text rather than one
+// generic blank.
+// status: "ok" (title is set), "no-class" (0-level/unset/Other),
+// "needs-alignment" (class+level found, but this class's titles vary by
+// alignment and none is picked), or "not-documented" (class found, but no
+// entry for this level - i.e. level 6+ for every class right now).
+function dccClassTitle(cls, levelRaw, alignmentRaw) {
+  const classData = DCC_CLASS_TITLES[cls];
+  if (!classData) return { title: "", status: "no-class" };
+  const level = parseLevelNumber(levelRaw);
+  if (level === null || level < 1) return { title: "", status: "no-class" };
+  const entry = classData[level];
+  if (!entry) return { title: "", status: "not-documented" };
+  if (entry.any) return { title: entry.any, status: "ok" };
+  const align = String(alignmentRaw || "").trim();
+  if (!align) return { title: "", status: "needs-alignment" };
+  const title = entry[align];
+  return title ? { title, status: "ok" } : { title: "", status: "not-documented" };
+}
 
 // Action Dice progression per class, by level (the "Action Dice" column of
 // Table 1-5 Cleric / 1-7 Thief / 1-10 Warrior / 1-12 Wizard / 1-14 Dwarf /
@@ -2995,6 +3113,65 @@ function recalcPcDeedDie(force) {
     el.value = computePcDeedDieText();
     el.dataset.autoSynced = "1";
   }
+  return el.value;
+}
+
+// What the Title field SHOULD read for the current Class + Level +
+// Alignment (see DCC_CLASS_TITLES/dccClassTitle for the data and why
+// levels 3-10 are absent from it). Returns "" whenever there's nothing to
+// auto-fill (0-level/no class, an undocumented level, or a class whose
+// titles vary by alignment with none picked yet) - recalcPcTitlePlaceholder
+// below is what explains WHY to the player in that case, since a blank
+// auto-filled field and a genuinely-blank-because-nothing-typed field
+// would otherwise look identical.
+function computePcTitleText() {
+  const classEl = document.getElementById("pc-class");
+  const levelEl = document.getElementById("pc-level");
+  const alignmentEl = document.getElementById("pc-alignment");
+  const result = dccClassTitle(classEl ? classEl.value : "", levelEl ? levelEl.value : "", alignmentEl ? alignmentEl.value : "");
+  return result.title;
+}
+
+// Keeps the Title field's placeholder text explaining the CURRENT reason
+// it's blank (when it is) - distinct from computePcTitleText's actual
+// auto-fill value, since "nothing to show yet" has three different causes
+// a player would otherwise have no way to tell apart: no class/level yet,
+// this class needs an Alignment picked first, or (levels 3+ right now)
+// this app simply doesn't have that level's title on file at all.
+function refreshPcTitlePlaceholder() {
+  const el = document.getElementById("pc-title");
+  if (!el) return;
+  const classEl = document.getElementById("pc-class");
+  const levelEl = document.getElementById("pc-level");
+  const alignmentEl = document.getElementById("pc-alignment");
+  const result = dccClassTitle(classEl ? classEl.value : "", levelEl ? levelEl.value : "", alignmentEl ? alignmentEl.value : "");
+  if (el.value.trim()) return; // player already has something typed/filled - no placeholder needed
+  if (result.status === "needs-alignment") {
+    el.placeholder = "Pick an Alignment above to auto-fill this class's Title";
+  } else if (result.status === "not-documented") {
+    el.placeholder = "Not on file for this level (only Lvl 1-5 are verified) - check your Core Rulebook";
+  } else {
+    el.placeholder = "e.g. Squire, Wildling, Bandit…";
+  }
+}
+
+// Keeps the Title field synced to Class + Level + Alignment, same "manual
+// edit wins" contract as Crit Die/Table and Deed Die above: `force` (a
+// Class/Level/Alignment change, or the ↻ button) always overwrites the
+// field and re-opts it into auto-sync; without it, only a still-auto-
+// synced field is touched, so a hand-typed Title (a house-ruled name, or
+// the correct level 3+ title copied in from the player's own Core
+// Rulebook) is never silently clobbered by an unrelated re-render. Never
+// overwrites with an empty string when nothing resolves and the field
+// already has something in it, for the same reason.
+function recalcPcTitle(force) {
+  const el = document.getElementById("pc-title");
+  if (!el) return "";
+  if (force || el.dataset.autoSynced === "1") {
+    el.value = computePcTitleText();
+    el.dataset.autoSynced = "1";
+  }
+  refreshPcTitlePlaceholder();
   return el.value;
 }
 
@@ -4243,6 +4420,14 @@ function renderPcStatline(d) {
   // Same passive, auto-synced-only recompute as Crit Die/Table just
   // above, for the Deed Die field.
   recalcPcDeedDie(false);
+  // Same passive, auto-synced-only recompute, for the Title field - also
+  // keeps its placeholder text (see refreshPcTitlePlaceholder) matching
+  // whatever Class/Level/Alignment is on screen even when the field itself
+  // is a hand-typed value this pass leaves untouched. Captured (rather
+  // than just called for effect) so the statline preview below can show
+  // the live value instead of the possibly-stale `d.title` snapshot, same
+  // reasoning as liveCrit/liveActDice.
+  const liveTitle = recalcPcTitle(false);
   // Same passive, auto-synced-only recompute, for the Action Dice field -
   // used below instead of the possibly-stale `d.actdice` snapshot, same
   // reasoning as liveCrit above.
@@ -4257,6 +4442,7 @@ function renderPcStatline(d) {
   const atkSummary = formatAttacksSummary(d.attacks);
   const parts = [
     classLevel ? `<b>${classLevel}</b>` : null,
+    liveTitle ? `<i>${liveTitle}</i>` : null,
     d.alignment ? `<b>AL</b> ${d.alignment}` : null,
     d.init ? `<b>Init</b> ${d.init}` : null,
     `<b>AC</b> ${ac}`,
@@ -4412,6 +4598,25 @@ if (pcDeedDieSyncBtn) {
     // render pass) to match the newly-synced value right away.
     renderAttacks("pc", readAttacks("pc"));
     cfgRenderFromCurrentForm("pc");
+  });
+}
+const pcTitleEl = document.getElementById("pc-title");
+if (pcTitleEl) {
+  // Same contract as pc-crit/pc-deed-die's own listeners - untags
+  // auto-sync on a hand edit (e.g. the player typing in the correct
+  // level 3+ title from their own Core Rulebook, or overriding a Judge's
+  // house-ruled name) and refreshes the placeholder so it stops showing
+  // "needs alignment"/"not on file" hints the moment there's real text.
+  pcTitleEl.addEventListener("input", () => {
+    pcTitleEl.dataset.autoSynced = "0";
+    refreshPcTitlePlaceholder();
+  });
+}
+const pcTitleSyncBtn = document.getElementById("pc-title-sync-btn");
+if (pcTitleSyncBtn) {
+  pcTitleSyncBtn.addEventListener("click", () => {
+    recalcPcTitle(true);
+    scheduleSave();
   });
 }
 const pcTrainedWeaponEl = document.getElementById("pc-trained-weapon");
@@ -5295,6 +5500,10 @@ document.getElementById("pc-class").addEventListener("change", () => {
   // (and whether the Dwarf-only Shield Bash option even applies) - same
   // force-overwrite contract as Crit Die/Table and Deed Die above.
   recalcPcActionDice(true);
+  // A new Class also means a (possibly different, or now alignment-gated,
+  // or newly-undocumented) Title - same force-overwrite contract as Crit
+  // Die/Deed Die above.
+  recalcPcTitle(true);
   // Halfling's special two-weapon rule waives the off-hand's "light
   // weapon" restriction - switching Class in or out of Halfling can
   // change which weapons are eligible for that role, so the attack rows
@@ -5330,6 +5539,10 @@ function cascadeLevelChangeEffects() {
   // Deed Die just above, so a level-up's new attack immediately shows up
   // as a pickable option on the row's Action Die # selector.
   recalcPcActionDice(true);
+  // A Level change also means a (possibly different, or now
+  // undocumented-level) Title - same force-overwrite contract as Crit
+  // Die/Deed Die above.
+  recalcPcTitle(true);
   renderAttacks("pc", readAttacks("pc"));
   cfgRenderFromCurrentForm("pc");
 }
@@ -5354,6 +5567,17 @@ document.getElementById("pc-level").addEventListener("change", () => {
   // discrete choice, not something that fires "input" mid-keystroke the
   // way the old free-text field did).
   cascadeLevelChangeEffects();
+  scheduleSave();
+});
+
+// Alignment only ever affects one thing on this Sheet: which column of
+// DCC_CLASS_TITLES a Cleric/Thief/Warrior/Wizard/Dwarf's Title reads from
+// (Elf/Halfling ignore it entirely - see dccClassTitle). Same force-
+// overwrite contract as Class/Level above - a deliberate Alignment pick is
+// enough to always resync an auto-managed Title, but never touches one the
+// player already typed over.
+document.getElementById("pc-alignment").addEventListener("change", () => {
+  recalcPcTitle(true);
   scheduleSave();
 });
 
