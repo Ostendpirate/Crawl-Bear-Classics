@@ -572,6 +572,13 @@
   .weapon-badge-untrained { background: #a3402f; color: #fff; font-weight: 700; }
   .weapon-badge-favorite { background: #2f7a3f; color: #fff; font-weight: 700; }
   .weapon-badge-backstab { background: #8a2d5c; color: #fff; font-weight: 700; }
+  .weapon-badge-ammo { background: var(--border); color: var(--text); font-weight: 700; }
+  .weapon-badge-ammo-out { background: #e0665a; color: #1e1b18; }
+  .hp-btn.disabled, .hp-btn[disabled] {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .hp-btn.disabled:hover, .hp-btn[disabled]:hover { background: var(--panel); }
   .attack-tw-role {
     flex: none;
     width: 96px;
@@ -588,6 +595,37 @@
     font-size: 10px;
     color: var(--muted);
     line-height: 1.3;
+  }
+  .attack-ammo-line {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 5px;
+    font-size: 10.5px;
+    color: var(--muted);
+  }
+  .attack-ammo-line input.attack-ammo {
+    width: 46px;
+    text-align: center;
+    padding: 3px 2px;
+    font-size: 11px;
+  }
+  .attack-ammo-line input.attack-ammo.out-of-ammo {
+    border-color: #e0665a;
+    color: #e0665a;
+    font-weight: 700;
+  }
+  .attack-ammo-btn {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    font-size: 10px;
+    padding: 0;
+    line-height: 1;
+  }
+  .attack-ammo-out-note {
+    color: #e0665a;
+    font-weight: 600;
   }
   .backstab-btn {
     background: none;
@@ -3433,7 +3471,7 @@ function weaponOptionsHtml(selectedKey) {
 }
 
 function emptyAttack() {
-  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false, deedType: "", deedCustom: "", actionDieIndex: "", lineDeeds: {} };
+  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false, deedType: "", deedCustom: "", actionDieIndex: "", lineDeeds: {}, ammo: "" };
 }
 
 // Backstab (Thief, Table 3-1) and Mighty Deed of Arms (Warrior/Dwarf,
@@ -3677,6 +3715,30 @@ function attackRowHtml(atk, mode) {
         <button type="button" class="attack-remove-btn" title="Remove attack">×</button>
       </div>
       ${metaParts.length ? `<div class="attack-row-meta">${metaParts.join(" · ")}</div>` : ""}
+      ${entry.type === "ranged" ? ammoLineHtml(atk) : ""}
+    </div>`;
+}
+
+// Ammo tracking is opt-in per ranged-weapon row: an EMPTY Ammo field means
+// "untracked/unlimited" (so every already-saved character keeps rolling
+// ranged attacks exactly as before this feature existed), and only typing
+// an actual number turns tracking on for that row. Once tracked, every
+// Tracker roll of this attack (rollAttackFor - two-weapon fighting is
+// melee-only per Table 4-3, so ranged attacks never go through
+// rollTwoWeaponAttack) spends one round automatically and refuses to roll
+// at all once it hits 0 (see the ammo check near the top of rollAttackFor).
+function ammoLineHtml(atk) {
+  const raw = atk.ammo ?? "";
+  const hasValue = String(raw).trim() !== "";
+  const numeric = hasValue ? parseInt(raw, 10) : null;
+  const isOut = hasValue && Number.isFinite(numeric) && numeric <= 0;
+  return `
+    <div class="attack-ammo-line">
+      <label title="Optional: track remaining ammo for this ranged weapon. Leave blank for unlimited/untracked ammo. Once you type a number, every Combat Tracker roll of this attack spends 1 automatically and the roll is blocked at 0.">Ammo</label>
+      <input type="number" class="attack-ammo${isOut ? " out-of-ammo" : ""}" min="0" step="1" placeholder="∞" value="${escapeHtml(String(raw))}" title="Remaining ammo for this weapon. Leave blank for unlimited (untracked). Decreases by 1 automatically with each Combat Tracker roll of this attack; blocks the roll once it reaches 0." />
+      <button type="button" class="hp-btn attack-ammo-btn attack-ammo-minus" title="Use one piece of ammo">−1</button>
+      <button type="button" class="hp-btn attack-ammo-btn attack-ammo-plus" title="Add one piece of ammo (reload/restock)">+1</button>
+      ${isOut ? `<span class="attack-ammo-out-note">Out of ammo!</span>` : ""}
     </div>`;
 }
 
@@ -3714,6 +3776,13 @@ function readAttacks(mode) {
       base.damageStrApplies = damageEl ? damageEl.dataset.damageStrApplies === "1" : false;
       const twRoleEl = row.querySelector(".attack-tw-role");
       base.twoWeaponRole = twRoleEl ? twRoleEl.value : "";
+      // Ammo (ranged weapons only - the input doesn't exist on a melee row
+      // at all, see ammoLineHtml). Blank means untracked/unlimited; carried
+      // forward as "" rather than "0" so a melee row (no ammo input to
+      // read) and a ranged row the player has simply never typed into both
+      // mean the same "not tracked" thing to rollAttackFor's ammo check.
+      const ammoEl = row.querySelector(".attack-ammo");
+      base.ammo = ammoEl ? ammoEl.value : "";
       // Same "not rendered = not applicable right now" contract as
       // effectiveTwRole/twoWeaponRole above - the select only exists when
       // actionDieSelectOptions found something to offer (see
@@ -3990,6 +4059,53 @@ function attachAttackRowListeners(mode) {
       // Backstab and Mighty Deed declarations now live in the Combat
       // Tracker tab (see trackerLineHtml/attachTrackerRowListeners), not on
       // this Sheet row - nothing to wire up here anymore.
+
+      // Ammo tracking (ranged weapons only - see ammoLineHtml). The generic
+      // "any input in this row schedules a save" listener at the top of
+      // this function already persists typed values; this just keeps the
+      // out-of-ammo styling/note live as the number changes, and wires the
+      // +1/-1 quick buttons. -1 is a no-op while the field is blank
+      // (untracked/unlimited - nothing to spend); +1 on a blank field
+      // starts tracking at 1 rather than silently doing nothing.
+      const ammoInput = row.querySelector(".attack-ammo");
+      if (ammoInput) {
+        const refreshAmmoIndicator = () => {
+          const hasValue = ammoInput.value.trim() !== "";
+          const numeric = hasValue ? parseInt(ammoInput.value, 10) : null;
+          const isOut = hasValue && Number.isFinite(numeric) && numeric <= 0;
+          ammoInput.classList.toggle("out-of-ammo", isOut);
+          const line = ammoInput.closest(".attack-ammo-line");
+          let note = line ? line.querySelector(".attack-ammo-out-note") : null;
+          if (isOut && !note && line) {
+            note = document.createElement("span");
+            note.className = "attack-ammo-out-note";
+            note.textContent = "Out of ammo!";
+            line.appendChild(note);
+          } else if (!isOut && note) {
+            note.remove();
+          }
+        };
+        ammoInput.addEventListener("input", refreshAmmoIndicator);
+        const ammoMinusBtn = row.querySelector(".attack-ammo-minus");
+        if (ammoMinusBtn) {
+          ammoMinusBtn.addEventListener("click", () => {
+            if (ammoInput.value.trim() === "") return;
+            const cur = parseInt(ammoInput.value, 10);
+            ammoInput.value = String(Math.max(0, (Number.isFinite(cur) ? cur : 0) - 1));
+            refreshAmmoIndicator();
+            scheduleSave();
+          });
+        }
+        const ammoPlusBtn = row.querySelector(".attack-ammo-plus");
+        if (ammoPlusBtn) {
+          ammoPlusBtn.addEventListener("click", () => {
+            const cur = ammoInput.value.trim() === "" ? 0 : parseInt(ammoInput.value, 10);
+            ammoInput.value = String((Number.isFinite(cur) ? cur : 0) + 1);
+            refreshAmmoIndicator();
+            scheduleSave();
+          });
+        }
+      }
     }
   });
 }
@@ -6483,6 +6599,13 @@ function trackerLineHtml(item, stats, line) {
   const canBackstab = stats.mode === "pc" && isThief && entry && entry.backstabDamage;
   const lineState = stats.mode === "pc" && line.slotKey ? getLineDeedState(atk, line.slotKey) : { deedType: "", deedCustom: "", backstabActive: false };
   const rowKey = `${line.attackId}:${line.slotKey || "0"}`;
+  // Ammo tracking is opt-in per row (blank Ammo field on the Sheet =
+  // untracked/unlimited - see ammoLineHtml). Ranged only: two-weapon
+  // fighting is melee-only (Table 4-3), so every ammo-tracked weapon only
+  // ever shows up as a single ordinary line here, never a "tw" pair.
+  const ammoTracked = stats.mode === "pc" && entry && entry.type === "ranged" && String(atk.ammo ?? "").trim() !== "";
+  const ammoCount = ammoTracked ? parseInt(atk.ammo, 10) : null;
+  const ammoOut = ammoTracked && Number.isFinite(ammoCount) && ammoCount <= 0;
 
   // Same small pill labels as the Sheet's per-row badges (attackRowHtml) -
   // stats-based rather than live-DOM, since the Tracker rolls for
@@ -6514,6 +6637,13 @@ function trackerLineHtml(item, stats, line) {
       const lckMod = abilityModifierFromRaw(stats.data.lck);
       badges.push(`<span class="weapon-badge weapon-badge-favorite" title="Favorite weapon - adds this character's Luck modifier (${formatSignedNumber(lckMod)}) to the attack roll, not damage.">Favorite (Lck${formatSignedNumber(lckMod)})</span>`);
     }
+    // Ammo (opt-in per row - see ammoLineHtml on the Sheet). A blank Ammo
+    // field means untracked/unlimited, so most ranged rows show nothing
+    // extra here at all; only once the player has typed an actual count
+    // does this line start showing/enforcing it.
+    if (ammoTracked) {
+      badges.push(`<span class="weapon-badge weapon-badge-ammo${ammoOut ? " weapon-badge-ammo-out" : ""}" title="Remaining ammo for this weapon - decreases by 1 automatically each time this line is rolled, and blocks the roll at 0. Use the reload button below (or the Ammo field on the Sheet) to add more.">${ammoOut ? "Out of ammo" : `Ammo: ${ammoCount}`}</span>`);
+    }
   }
   const bonusTooltip = stats.mode === "pc" ? attackBonusBreakdownTooltipForStats(stats, atk) : "";
   const dmgTooltip = stats.mode === "pc" ? damageBreakdownTooltipForStats(stats, atk, lineState) : "";
@@ -6521,6 +6651,9 @@ function trackerLineHtml(item, stats, line) {
   const extraControls = [];
   if (canBackstab) {
     extraControls.push(`<button type="button" class="hp-btn backstab-toggle-btn${lineState.backstabActive ? " on" : ""}" data-row-key="${rowKey}" title="Declare a Backstab (Table 3-1: ${escapeHtml(entry.backstabDamage)}) for this specific attack - swaps in the sneak-attack damage die for the next roll of this line only, then automatically reverts.">🗡️${lineState.backstabActive ? " Backstab ON" : " Backstab"}</button>`);
+  }
+  if (ammoTracked) {
+    extraControls.push(`<button type="button" class="hp-btn attack-ammo-reload-btn" data-attack-id="${line.attackId}" title="Add one piece of ammo to this weapon (reload/restock)">🔄 +1 Ammo</button>`);
   }
   if (hasDeedDie) {
     const customHidden = lineState.deedType !== "custom";
@@ -6544,7 +6677,7 @@ function trackerLineHtml(item, stats, line) {
             ? `<span class="attack-detail-meta-part"${dmgTooltip ? ` title="${escapeHtml(dmgTooltip)}"` : ""}>Dmg <b>${escapeHtml(atk.damage)}</b></span>`
             : ""}
         </span>
-        <button class="hp-btn attack-roll-btn" title="Roll this attack">🎲</button>
+        <button class="hp-btn attack-roll-btn${ammoOut ? " disabled" : ""}"${ammoOut ? " disabled" : ""} title="${ammoOut ? "Out of ammo - reload (see the +1 Ammo button below, or the Ammo field on the Sheet) before rolling this attack" : "Roll this attack"}">🎲</button>
       </div>
       ${badges.length ? `<div class="attack-detail-badges">${badges.join(" ")}</div>` : ""}
       ${extraControls.length ? `<div class="attack-detail-extra">${extraControls.join("")}</div>` : ""}
@@ -6752,6 +6885,27 @@ async function rollAttackFor(itemId, attackId, slotKey) {
   const atk = stats.attacks.find(a => a.id === attackId);
   if (!atk) return;
 
+  // Ammo (opt-in per ranged-weapon row - see ammoLineHtml on the Sheet; a
+  // blank Ammo field means untracked/unlimited, so this is a no-op for
+  // every attack until the player actually types a count in). Checked
+  // BEFORE any dice are rolled, so an out-of-ammo weapon blocks the whole
+  // action rather than rolling first and discovering there's nothing left
+  // to fire. Two-weapon fighting is melee-only (Table 4-3), so ranged
+  // attacks always come through this single-weapon path, never
+  // rollTwoWeaponAttack - one check here covers both the Tracker's roll
+  // button and the Sheet's own.
+  const weaponEntryForAmmo = stats.mode === "pc" ? dccWeaponEntry(atk.weapon) : null;
+  const ammoTracked = weaponEntryForAmmo && weaponEntryForAmmo.type === "ranged" && String(atk.ammo ?? "").trim() !== "";
+  if (ammoTracked) {
+    const ammoCount = parseInt(atk.ammo, 10);
+    if (Number.isFinite(ammoCount) && ammoCount <= 0) {
+      const msg = `${item.name || "Token"} — ${atk.name || "Attack"}: 🚫 Out of ammo! Reload (the Ammo field on the Sheet, or the Tracker's 🔄 +1 Ammo button) before attacking again.`;
+      showTrackerStatus(msg, true);
+      showStatus(msg, true);
+      return;
+    }
+  }
+
   // Which Action Die slot this particular roll is for - the Tracker now
   // shows one line per equipped weapon x Action Die (see
   // deriveTrackerLines), each with its own Backstab/Mighty Deed
@@ -6892,6 +7046,13 @@ async function rollAttackFor(itemId, attackId, slotKey) {
   // Marked regardless of hit/miss/fumble - the character spent the action
   // either way.
   await markActionSlotsUsed(itemId, [actionSlotKey(attackId, effectiveSlotKey)]);
+
+  // Firing a shot spends one piece of ammo whether it hits, misses, or
+  // fumbles - the ammo check above already refused to even roll at 0, so
+  // this is only reached with at least 1 in the tally.
+  if (ammoTracked) {
+    await applyAttackAmmoDelta(itemId, attackId, -1);
+  }
 
   // Attacks can be rolled from either the Sheet's own roll button or the
   // Tracker's - show the result in both status areas rather than just the
@@ -7196,6 +7357,15 @@ function attachTrackerRowListeners() {
           applyTrackerLineFieldUpdate(parentId, attackId, slotKey, "backstabActive", next);
         });
       }
+      // Ammo lives on the attack itself (not per-slot like lineDeeds - a
+      // weapon has one ammo pool regardless of which Action Die is firing
+      // it), so this only ever needs attackId, never slotKey.
+      const ammoReloadBtn = wrap.querySelector(".attack-ammo-reload-btn");
+      if (ammoReloadBtn) {
+        ammoReloadBtn.addEventListener("click", () => {
+          applyAttackAmmoDelta(parentId, attackId, 1);
+        });
+      }
       // Picking a deed type both persists it and updates the row in place
       // - shows/hides the free-text field for "Custom deed…", and
       // refreshes the ⓘ info panel's content to match the newly-picked
@@ -7334,6 +7504,32 @@ async function applyTrackerLineFieldUpdate(itemId, attackId, slotKey, field, val
         slotState[field] = value;
         lineDeeds[slotKey] = slotState;
         return { ...a, lineDeeds };
+      });
+      data.attacks = attacks;
+      item.metadata[PC_METADATA_KEY] = data;
+    });
+  });
+  await refreshTracker();
+}
+
+// Adjusts one attack's Ammo count by `delta` - used by the Tracker's "+1
+// Ammo" reload button (delta +1) and by rollAttackFor's automatic spend on
+// every ranged attack roll (delta -1). Clamped so it never goes below 0
+// regardless of what was there before (a stray negative left over from
+// hand-editing the Sheet field, say). PC-only, same no-op-for-monsters
+// guard as applyTrackerLineFieldUpdate - monster attacks have no `weapon`/
+// ammo concept at all.
+async function applyAttackAmmoDelta(itemId, attackId, delta) {
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      if (mode !== "pc") return;
+      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+      const attacks = (data.attacks || []).map(a => {
+        if (a.id !== attackId) return a;
+        const cur = parseInt(a.ammo, 10);
+        const base = Number.isFinite(cur) ? cur : 0;
+        return { ...a, ammo: String(Math.max(0, base + delta)) };
       });
       data.attacks = attacks;
       item.metadata[PC_METADATA_KEY] = data;
