@@ -1405,8 +1405,28 @@
         </fieldset>
 
         <fieldset>
-          <legend>Equipment</legend>
-          <textarea id="pc-equipment" placeholder="Leather armor, backpack, iron ration, 10' pole, 15 gp"></textarea>
+          <legend>Armor (Equipment)</legend>
+          <textarea id="pc-equip-armor" rows="3" placeholder="Auto-filled from the Armor &amp; Shields list above - add magic properties, condition notes, spares, etc. here" title="The top lines here auto-sync from the Armor &amp; Shields fieldset above (every owned piece, flagged if Equipped) - add your own extra notes below that block and they're preserved on the next resync."></textarea>
+        </fieldset>
+
+        <fieldset>
+          <legend>Weapons (Equipment)</legend>
+          <textarea id="pc-equip-weapons" rows="4" placeholder="Auto-filled from the Attacks list above - add ammunition counts, spares, magic properties, etc. here" title="The top lines here auto-sync from the Attacks fieldset above (every configured weapon, flagged if Equipped) - add your own extra notes below that block and they're preserved on the next resync."></textarea>
+        </fieldset>
+
+        <fieldset>
+          <legend>Adventuring Gear</legend>
+          <textarea id="pc-equip-gear" rows="8" placeholder="Backpack, torches, 50' rope, iron rations, holy water, thieves' tools, lantern &amp; oil, 10' pole..."></textarea>
+        </fieldset>
+
+        <fieldset>
+          <legend>Food &amp; Drink</legend>
+          <textarea id="pc-equip-food" rows="4" placeholder="Iron rations (3 days), wineskin, dried meat, waterskin..."></textarea>
+        </fieldset>
+
+        <fieldset>
+          <legend>Treasure</legend>
+          <textarea id="pc-equip-treasure" rows="6" placeholder="15 gp, 40 sp, a small pouch of gems, an ornate silver ring..."></textarea>
         </fieldset>
 
         <fieldset>
@@ -1594,7 +1614,7 @@ const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al", "montype"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-actdice","pc-fort","pc-ref","pc-will","pc-equipment","pc-spells","pc-languages","pc-notes","pc-ac-misc"];
+const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-spells","pc-languages","pc-notes","pc-ac-misc"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
 const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
@@ -1748,6 +1768,35 @@ function fillForm(mode, data) {
   document.getElementById(cfg.hpMaxId).value = d.hpMax ?? "";
   renderAttacks(mode, d.attacks || []);
   if (mode === "pc") renderArmorItems(d.armorItems || []);
+  // One-time migration for a token saved before Equipment was split into
+  // Armor/Weapons/Adventuring Gear/Food & Drink/Treasure fields: the old
+  // single blob still sits in this token's raw metadata under `equipment`
+  // even though it's no longer part of PC_ALL_FIELD_IDS, so it's still
+  // sitting on `data` (spread into `d` above) for exactly this check. Only
+  // runs when none of the five new fields have anything yet, so it never
+  // clobbers a character that's already been opened once since the split.
+  // Strips out the old Armor/Weapons auto-lines (they regenerate fresh
+  // moments later from the current Armor & Shields/Attacks lists via
+  // syncArmorIntoEquipment/syncWeaponsIntoEquipment) and drops whatever
+  // the player had actually typed into Adventuring Gear as a reasonable
+  // single bucket - nothing is silently lost, though it may need manually
+  // re-sorting into Food & Drink/Treasure afterward.
+  if (mode === "pc" && typeof data.equipment === "string" && data.equipment.trim()
+      && !d["equip-armor"] && !d["equip-weapons"] && !d["equip-gear"] && !d["equip-food"] && !d["equip-treasure"]) {
+    const leftover = stripAutoManagedEquipmentLines(data.equipment);
+    while (leftover.length && leftover[0].trim() === "") leftover.shift();
+    while (leftover.length && leftover[leftover.length - 1].trim() === "") leftover.pop();
+    if (leftover.length) {
+      const gearEl = document.getElementById("pc-equip-gear");
+      if (gearEl) gearEl.value = leftover.join("\n");
+    }
+    // Regenerate fresh Armor/Weapons auto-blocks right now, from whatever
+    // this character's Armor & Shields/Attacks lists currently hold -
+    // otherwise a just-migrated character would show blank Armor/Weapons
+    // fields until the player happened to edit either list again.
+    syncArmorIntoEquipment();
+    syncWeaponsIntoEquipment();
+  }
   // Restores which of Init/Fort/Ref/Will were still auto-managed (as
   // opposed to hand-typed) when this token was last saved, so that flag
   // - and therefore live Class/Level/ability updates to those fields -
@@ -4832,14 +4881,39 @@ function recalcPcInitiativeDie() {
   return die;
 }
 
+// Recognizes this app's own auto-managed "<Label> (+N AC) [equipped]" and
+// "<Label> (dmg ...) [equipped]" lines (see syncArmorIntoEquipment/
+// syncWeaponsIntoEquipment below) and strips them out of a block of text,
+// returning whatever's left. Shared by those two functions (to find where
+// their own auto-block ends and the player's own typed notes begin) and
+// by fillForm's one-time legacy-Equipment migration (a token saved before
+// this was split into Armor/Weapons/Adventuring Gear/Food & Drink/
+// Treasure fields) to recover whatever the player had actually typed,
+// discarding the old auto-lines since fresh ones regenerate immediately
+// from the current Armor & Shields/Attacks lists anyway. The "dmg" strip
+// uses a greedy ".*" rather than "[^()]*" for the parenthetical's inner
+// content - a Warrior/Dwarf's Damage already contains its own nested
+// parens (e.g. "1d8 (+d7 Deed Die)"), and a non-greedy/paren-excluding
+// match would stop at that inner ")" and fail to recognize the line.
+function stripAutoManagedEquipmentLines(text) {
+  return (text || "").split("\n").filter(line => {
+    const trimmed = line.trim();
+    return !/^.+ \(\+\d+ AC\)( \[equipped\])?$/.test(trimmed) && !/^.+ \(dmg .*\)( \[equipped\])?$/.test(trimmed);
+  });
+}
+
 // Keeps an auto-managed block of "<Label> (+<n> AC) [equipped]" lines at
-// the top of the Equipment text in sync with the Armor & Shields
-// inventory - every owned piece gets a line, with equipped ones flagged,
-// without disturbing anything else the player has typed there. Matched
+// the top of the Armor (Equipment) textarea in sync with the Armor &
+// Shields inventory - every owned piece gets a line, with equipped ones
+// flagged, without disturbing anything else the player has typed below
+// that block (spares, magic properties, condition notes, etc.). Matched
 // and replaced by exact line pattern each time, so editing the inventory
-// repeatedly never leaves duplicate or stale entries behind.
+// repeatedly never leaves duplicate or stale entries behind. This field
+// now has the whole Armor & Shields block to itself (it used to share one
+// combined Equipment textarea with the Weapons auto-block below), so the
+// strip pattern only ever needs to worry about ITS OWN line shape.
 function syncArmorIntoEquipment() {
-  const equipEl = document.getElementById("pc-equipment");
+  const equipEl = document.getElementById("pc-equip-armor");
   if (!equipEl) return;
 
   const items = readArmorItems();
@@ -4862,24 +4936,17 @@ function syncArmorIntoEquipment() {
   scheduleSave();
 }
 
-// Same auto-managed-block pattern as syncArmorIntoEquipment above, for the
-// Attacks list instead of Armor & Shields - every configured attack
-// (named, or with a Bonus/Damage set) gets a line the moment it's added
-// or edited, flagged if currently equipped, without disturbing anything
-// else the player has typed into Equipment. The "dmg " tag inside the
-// parenthetical is this block's fingerprint - it's what lets this
-// function find and replace only ITS OWN lines on the next sync, and
-// (just as importantly) keeps it from ever matching the Armor & Shields
-// block's "(+N AC)" lines, so both auto-managed blocks coexist and each
-// resyncs independently without stepping on the other. The strip regex
-// uses a greedy ".*" rather than "[^()]*" for the parenthetical's inner
-// content - a Warrior/Dwarf's Damage already contains its OWN nested
-// parens (e.g. "1d8 (+d7 Deed Die)"), and a non-greedy/paren-excluding
-// match would stop at that inner ")" and fail to recognize the line as
-// its own, leaving stale duplicate lines behind on every resync instead
-// of replacing them.
+// Same auto-managed-block pattern as syncArmorIntoEquipment above, but for
+// the Weapons (Equipment) textarea and the Attacks list instead of Armor &
+// Shields - every configured attack (named, or with a Bonus/Damage set)
+// gets a line the moment it's added or edited, flagged if currently
+// equipped, without disturbing anything else the player has typed below
+// that block (ammunition counts, spares, magic properties, etc.). Now that
+// Armor and Weapons each have their own dedicated field, this only ever
+// needs to recognize its OWN "(dmg ...)" line shape - it no longer has to
+// coexist with the Armor block's "(+N AC)" lines in the same textarea.
 function syncWeaponsIntoEquipment() {
-  const equipEl = document.getElementById("pc-equipment");
+  const equipEl = document.getElementById("pc-equip-weapons");
   if (!equipEl) return;
 
   const attacks = readAttacks("pc").filter(a => a.name || a.bonus || a.damage);
