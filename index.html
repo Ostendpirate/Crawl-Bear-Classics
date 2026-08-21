@@ -1334,6 +1334,8 @@
           </div>
         </div>
 
+        <div class="fumble-die-note" id="pc-racial-traits-note" style="margin-bottom:10px; display:none;"></div>
+
         <fieldset>
           <legend>Abilities</legend>
           <div class="ability-grid">
@@ -3246,6 +3248,23 @@ function recalcPcTitle(force) {
   return el.value;
 }
 
+// Keeps the Racial Traits note (Infravision, and Dwarf Underground Skills)
+// matching the current Class/Level on every render - fully computed, no
+// manual-edit-wins contract needed here (unlike Title/Hit Die/etc.) since
+// there's no house-ruled override case to preserve, so this is never
+// persisted to token metadata, just recomputed live same as the Speed
+// field or the Two-Weapon Fighting note. Hidden entirely for a class with
+// no infravision (Warrior/Wizard/Cleric/Thief/0-level/Other).
+function refreshPcRacialTraitsNote() {
+  const el = document.getElementById("pc-racial-traits-note");
+  if (!el) return;
+  const classEl = document.getElementById("pc-class");
+  const levelEl = document.getElementById("pc-level");
+  const text = computePcRacialTraitsText(classEl ? classEl.value : "", levelEl ? levelEl.value : "");
+  el.textContent = text;
+  el.style.display = text ? "" : "none";
+}
+
 // Does this character's current class roll a Deed Die at all right now
 // (live Sheet form) - gates whether an attack row offers the Mighty Deed
 // declaration UI (see attackRowHtml). A Deed Die is a character-wide
@@ -3789,9 +3808,13 @@ function backstabDamageNotationForStats(stats, atk) {
 // restriction and lets them off-hand any one-handed melee weapon too.
 // Two-handed weapons and ranged weapons are never eligible for either
 // role (DCC's two-weapon fighting is melee-only by definition - you're
-// wielding one weapon in each hand).
-function twoWeaponRoleOptions(entry, isHalfling) {
+// wielding one weapon in each hand). A Shield Equipped (see
+// shieldEquippedLive/shieldEquippedForStats) rules out BOTH roles
+// entirely regardless of weapon, for the same reason: there's no free
+// hand left for a second weapon once one hand is holding a shield.
+function twoWeaponRoleOptions(entry, isHalfling, shieldEquipped) {
   const options = [{ value: "", label: "—" }];
+  if (shieldEquipped) return options;
   const isOneHandedMelee = entry.type === "melee" && !entry.twoHanded;
   if (isOneHandedMelee) options.push({ value: "primary", label: "Primary hand" });
   if (isOneHandedMelee && (entry.light || isHalfling)) options.push({ value: "offhand", label: "Off-hand" });
@@ -3818,13 +3841,14 @@ function attackRowHtml(atk, mode) {
   const classEl = document.getElementById("pc-class");
   const isThief = classEl && classEl.value === "Thief";
   const isHalfling = classEl && classEl.value === "Halfling";
-  const twOptions = twoWeaponRoleOptions(entry, isHalfling);
-  // A weapon change (or a class change out of Halfling) can leave a
-  // previously-picked role no longer eligible for THIS weapon - rather
-  // than silently keep the stale role active, the row just shows it as
-  // cleared (falls back to "None"); readAttacks() then persists that
-  // cleared value the moment anything triggers a re-render, so a stale
-  // role never lingers into an actual roll.
+  const shieldEquipped = shieldEquippedLive();
+  const twOptions = twoWeaponRoleOptions(entry, isHalfling, shieldEquipped);
+  // A weapon change (or a class change out of Halfling, or equipping a
+  // Shield) can leave a previously-picked role no longer eligible for THIS
+  // weapon - rather than silently keep the stale role active, the row just
+  // shows it as cleared (falls back to "None"); readAttacks() then
+  // persists that cleared value the moment anything triggers a re-render,
+  // so a stale role never lingers into an actual roll.
   const effectiveTwRole = twOptions.some(o => o.value === atk.twoWeaponRole) ? atk.twoWeaponRole : "";
   if (effectiveTwRole === "primary") badges.push(`<span class="weapon-badge weapon-badge-tw" title="Two-weapon fighting: primary hand">TW: Primary</span>`);
   if (effectiveTwRole === "offhand") badges.push(`<span class="weapon-badge weapon-badge-tw" title="Two-weapon fighting: off-hand">TW: Off-hand</span>`);
@@ -3904,7 +3928,10 @@ function attackRowHtml(atk, mode) {
     const lckModDisplay = lckMod >= 0 ? `+${lckMod}` : `${lckMod}`;
     badges.push(`<span class="weapon-badge weapon-badge-favorite" title="Favorite weapon - adds this character's Luck modifier (${lckModDisplay}) to the attack roll, not damage.">Favorite (Lck${lckModDisplay})</span>`);
   }
-  const twSelectHtml = `<select class="attack-tw-role" title="Two-weapon fighting (Table 4-3) - mark this weapon as your primary or off-hand attack">${twOptions.map(o =>
+  const twSelectTitle = shieldEquipped
+    ? "Two-weapon fighting (Table 4-3) is unavailable while a Shield is Equipped (Armor tab) - no free hand left for a second weapon."
+    : "Two-weapon fighting (Table 4-3) - mark this weapon as your primary or off-hand attack";
+  const twSelectHtml = `<select class="attack-tw-role"${shieldEquipped ? " disabled" : ""} title="${escapeHtml(twSelectTitle)}">${twOptions.map(o =>
     `<option value="${o.value}"${o.value === effectiveTwRole ? " selected" : ""}>${escapeHtml(o.label)}</option>`
   ).join("")}</select>`;
   // Only rendered once there's an actual choice to make (see
@@ -4499,6 +4526,10 @@ function renderPcStatline(d) {
   // the live value instead of the possibly-stale `d.title` snapshot, same
   // reasoning as liveCrit/liveActDice.
   const liveTitle = recalcPcTitle(false);
+  // Keeps the Racial Traits note (Infravision/Dwarf Underground Skills)
+  // matching the current Class/Level on every render, same as the note
+  // below the Attacks list (updateTwoWeaponNote).
+  refreshPcRacialTraitsNote();
   // Same passive, auto-synced-only recompute, for the Action Dice field -
   // used below instead of the possibly-stale `d.actdice` snapshot, same
   // reasoning as liveCrit above.
@@ -5069,6 +5100,50 @@ function basePcSpeedForClass(cls) {
   return DCC_CLASS_BASE_SPEED[cls] ?? 30;
 }
 
+// Infravision distance by race (Dwarf/Elf/Halfling only - Warrior/Wizard/
+// Cleric/Thief are all presumed Human, no infravision). Verified against
+// Goodman Games' own free Quick Start Rules PDF, word for word: "A dwarf
+// can see in the dark up to 60'." / "An elf can see in the dark up to
+// 60'." / "Halflings dwell in pleasant homes carved from the sod beneath
+// hills. As such, halflings can see in the dark up to 30'." -
+// independently cross-checked against the open-source Foundry VTT DCC
+// system, whose own strings (CONFIG.DCC "Infravision 60'" /
+// "InfravisionHalfling 30'") and Purple Sorcerer character-sheet parser
+// test fixtures ("Dwarven ability: Infravision", "Elven traits: ...
+// Infravision", "Halfling ability: Infravision") all agree exactly,
+// including the Halfling-specific shorter range.
+const DCC_INFRAVISION_FEET_BY_CLASS = {
+  Dwarf: 60,
+  Elf: 60,
+  Halfling: 30,
+};
+
+// Dwarf-only "Underground Skills" - also verified word for word against
+// the QSR PDF: "Long life beneath the ground trains dwarves to detect
+// certain kinds of construction. When underground, dwarves receive a
+// bonus to detect traps, slanting passages, shifting walls, and other new
+// construction equal to their class level," plus a separate scent-based
+// trait ("a dwarf can smell gold and gems. A dwarf can tell the direction
+// of a strong concentration of gold or gems within 100'."). This app has
+// no generic skill-check roller to hang a real die roll on (occupation
+// skills are shown the same informational way, via the Occupation
+// tooltip), so this is display-only text explaining the bonus for a Judge
+// to apply to whatever ad-hoc Intelligence check the situation calls for
+// - not a button, since there's no single fixed DC or roll this rolls
+// against.
+function computePcRacialTraitsText(cls, levelRaw) {
+  const infravisionFeet = DCC_INFRAVISION_FEET_BY_CLASS[cls];
+  if (!infravisionFeet) return "";
+  const parts = [`Infravision: sees in the dark up to ${infravisionFeet}'.`];
+  if (cls === "Dwarf") {
+    const level = parseLevelNumber(levelRaw);
+    const bonus = level !== null && level >= 1 ? level : 0;
+    const bonusText = bonus > 0 ? `a +${bonus} bonus (this character's level)` : "a bonus equal to class level (not yet levelled)";
+    parts.push(`Underground Skills: ${bonusText} to detect traps, slanting passages, shifting walls, and other new construction while underground; can also smell a strong concentration of gold or gems within 100'.`);
+  }
+  return parts.join(" ");
+}
+
 function armorTypeEntry(key) {
   return DCC_ARMOR_TYPES.find(t => t.key === key) || DCC_ARMOR_TYPES[0];
 }
@@ -5140,6 +5215,14 @@ function attachArmorRowListeners() {
       recalcPcSpeed();
       recalcPcFumbleDie();
       syncArmorIntoEquipment();
+      // A type change on an already-Equipped row can move it in or out of
+      // the "shield" slot (e.g. Shield -> Custom Shield stays put, but
+      // nothing stops picking a body-armor type here instead) - rebuild
+      // the attack rows so the Primary/Off-hand dropdown and the
+      // Two-Weapon Fighting note (see twoWeaponRoleOptions/
+      // updateTwoWeaponNote) immediately reflect whichever way that moved,
+      // same as the Equipped checkbox's own listener just below.
+      if (equippedBox.checked) renderAttacks("pc", readAttacks("pc"));
     });
     bonusInput.addEventListener("input", () => {
       scheduleSave();
@@ -5169,8 +5252,19 @@ function attachArmorRowListeners() {
       recalcPcSpeed();
       recalcPcFumbleDie();
       syncArmorIntoEquipment();
+      // Equipping (or un-equipping) a Shield changes two-weapon fighting
+      // eligibility (Table 4-3 - see shieldEquippedLive/twoWeaponRoleOptions)
+      // - rebuild the attack rows immediately so the Primary/Off-hand
+      // dropdown and note reflect it right away, and any Primary/Off-hand
+      // role that a newly-equipped Shield just invalidated is cleared and
+      // persisted (readAttacks below picks up the cleared DOM value) rather
+      // than lingering stale until some unrelated edit happens to trigger
+      // a rebuild.
+      renderAttacks("pc", readAttacks("pc"));
+      scheduleSave();
     });
     row.querySelector(".attack-remove-btn").addEventListener("click", () => {
+      const wasEquippedShield = equippedBox.checked && armorTypeEntry(typeSel.value).slot === "shield";
       row.remove();
       scheduleSave();
       recalcPcAC();
@@ -5178,6 +5272,13 @@ function attachArmorRowListeners() {
       recalcPcSpeed();
       recalcPcFumbleDie();
       syncArmorIntoEquipment();
+      // Removing an Equipped Shield row is one more way two-weapon
+      // fighting eligibility can change - same rebuild as the Equipped
+      // checkbox's own listener above.
+      if (wasEquippedShield) {
+        renderAttacks("pc", readAttacks("pc"));
+        scheduleSave();
+      }
     });
   });
 }
@@ -6759,10 +6860,15 @@ function computeActiveOrder(items) {
 //    not tied to any specific equipped weapon), anchored to an equipped
 //    row for its Bonus/Damage fields - same "the player sets Damage to
 //    the shield bash die by hand" convention this app used for Shield
-//    Bash before the Tracker took over rolling it (this app doesn't track
-//    whether a shield is actually equipped, see DWARF_SHIELD_BASH_SIDES,
-//    so a Judge should rule it unavailable if the character isn't
-//    carrying one).
+//    Bash before the Tracker took over rolling it. This is offered
+//    regardless of whether a Shield is actually Equipped on the Armor tab
+//    (shieldEquippedForStats only gates two-weapon fighting below, not
+//    this) - a Judge should still rule it unavailable if the character
+//    isn't carrying one.
+//  - A Shield Equipped (shieldEquippedForStats) rules out two-weapon
+//    fighting entirely, same as the Sheet's own dropdown (see
+//    twoWeaponRoleOptions) - both weapons just fall through to the
+//    "remaining" expansion below and roll as independent single attacks.
 function deriveTrackerLines(item, stats) {
   const usedSlots = usedActionSlotsSetForStats(stats);
   const tagUsed = line => ({ ...line, used: usedSlots.has(actionSlotKey(line.attackId, line.slotKey)) });
@@ -6772,6 +6878,7 @@ function deriveTrackerLines(item, stats) {
   const equipped = stats.attacks.filter(a => a.equipped);
   const cls = (stats.data.class || "").trim();
   const level = stats.data.level;
+  const shieldEquipped = shieldEquippedForStats(stats);
   const lines = [];
 
   // Shared by both the two-weapon pair below and the single-remaining-
@@ -6780,8 +6887,8 @@ function deriveTrackerLines(item, stats) {
   // of the character's ordinary Action Dice, so it's filtered out of both.
   const actDieOptions = actionDieSelectOptions(cls, level).filter(o => o.value !== "shieldbash");
 
-  const primary = equipped.find(a => a.twoWeaponRole === "primary");
-  const offhand = equipped.find(a => a.twoWeaponRole === "offhand");
+  const primary = shieldEquipped ? undefined : equipped.find(a => a.twoWeaponRole === "primary");
+  const offhand = shieldEquipped ? undefined : equipped.find(a => a.twoWeaponRole === "offhand");
   const twPair = primary && offhand ? [primary, offhand] : null;
   if (twPair) {
     const twProfile = twoWeaponProfileForStats(stats);
@@ -7078,6 +7185,21 @@ function twoWeaponDiceForHalfling() {
 // (Halfling special rule takes priority over the Agility table, per the
 // Table 4-3 footnote), and rolls the actual stepped-down die size for
 // each hand out of the dice chain.
+// Table 4-3's two-weapon fighting assumes one weapon in each hand, with
+// nothing else occupying either one - a Shield takes up the off-hand
+// (the same one a second weapon would need), so a character with a
+// Shield currently Equipped can't fight two-weapon at all, no matter how
+// many one-handed melee weapons they own. Reused everywhere TW eligibility
+// is decided: the Sheet's own Primary/Off-hand dropdown (twoWeaponRoleOptions,
+// via shieldEquippedLive below) and the Tracker's actual pairing/roll
+// (deriveTrackerLines/rollTwoWeaponAttack) - same "not just a disabled
+// control" defense in depth already used for Ammo.
+function shieldEquippedForStats(stats) {
+  if (stats.mode !== "pc") return false;
+  const equipped = (stats.data.armorItems || []).filter(item => item.equipped);
+  return equipped.some(item => armorTypeEntry(item.type).slot === "shield");
+}
+
 function twoWeaponProfileForStats(stats) {
   const isHalfling = (stats.data.class || "").trim() === "Halfling";
   const agiScore = parseAbilityScore(stats.data.agi);
@@ -7104,6 +7226,15 @@ function liveTwoWeaponProfile() {
   return twoWeaponProfileForStats({ data: { class: classEl ? classEl.value : "", agi: agiEl ? agiEl.value : "" } });
 }
 
+// Live-DOM equivalent of shieldEquippedForStats - reads whatever's
+// actually sitting in the Armor tab's rows right now, for the Sheet's own
+// Primary/Off-hand dropdown and its "Two-Weapon Fighting" note. Same
+// "live form, not saved token stats" reasoning as liveTwoWeaponProfile
+// just above.
+function shieldEquippedLive() {
+  return readArmorItems().some(item => item.equipped && armorTypeEntry(item.type).slot === "shield");
+}
+
 // Live-updating summary shown under the Attacks list: what's currently
 // configured (or a prompt to configure it), including the actual stepped-
 // down dice, crit eligibility, and fumble rule that a roll would use right
@@ -7114,6 +7245,15 @@ function liveTwoWeaponProfile() {
 function updateTwoWeaponNote() {
   const noteEl = document.getElementById("pc-tw-note");
   if (!noteEl) return;
+  // A Shield takes priority over any Primary/Off-hand picks still sitting
+  // on the rows below - checked first so the note always explains WHY
+  // two-weapon fighting is unavailable while a Shield is Equipped, rather
+  // than showing stale "active" stats for a pairing the dropdown options
+  // (see twoWeaponRoleOptions) no longer even offer.
+  if (shieldEquippedLive()) {
+    noteEl.textContent = "Two-weapon fighting is unavailable - a Shield is currently Equipped (Armor tab), leaving no free hand for a second weapon. Un-equip it to fight two-weapon instead.";
+    return;
+  }
   const attacks = readAttacks("pc");
   const primary = attacks.find(a => a.twoWeaponRole === "primary");
   const offhand = attacks.find(a => a.twoWeaponRole === "offhand");
@@ -7431,6 +7571,18 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
   const primaryAtk = stats.attacks.find(a => a.id === primaryAttackId);
   const offhandAtk = stats.attacks.find(a => a.id === offhandAttackId);
   if (!primaryAtk || !offhandAtk) return;
+
+  // Defense in depth, same as rollAttackFor's own Ammo check - the Tracker
+  // normally never even offers this pairing once a Shield is Equipped (see
+  // deriveTrackerLines), but this guards against a stale click reaching
+  // here anyway (e.g. a Shield equipped in the moment between the Tracker
+  // rendering this button and the click landing).
+  if (shieldEquippedForStats(stats)) {
+    const msg = `${item.name || "Token"} — Two-weapon fighting: 🚫 A Shield is Equipped - no free hand for a second weapon. Un-equip it (Armor tab) to fight two-weapon.`;
+    showTrackerStatus(msg, true);
+    showStatus(msg, true);
+    return;
+  }
 
   const twProfile = twoWeaponProfileForStats(stats);
   const critDieProfile = critProfileForStats(stats);
