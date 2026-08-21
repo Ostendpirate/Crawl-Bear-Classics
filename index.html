@@ -1438,13 +1438,14 @@
           <div style="flex:0.75;">
             <label>Hit Die</label>
             <div class="hp-row">
-              <select id="pc-hitdie">
+              <select id="pc-hitdie" title="This class's Hit Die (rolled + Stamina modifier for HP at every level). Auto-fills from Class - 1d4 for a 0-level/unclassed/Other character, per the funnel rules. Pick a different die by hand any time; a manual pick is never overwritten except by clicking ↻ or picking a new Class.">
                 <option value="4">d4</option>
                 <option value="6">d6</option>
                 <option value="8" selected>d8</option>
                 <option value="10">d10</option>
                 <option value="12">d12</option>
               </select>
+              <button type="button" class="derived-sync-btn" id="pc-hitdie-sync-btn" title="Set to this Class's Hit Die">↻</button>
               <button type="button" class="hp-btn" id="pc-roll-hp" title="Roll Hit Die + Stamina modifier, add to Max HP">🎲</button>
             </div>
           </div>
@@ -1916,6 +1917,10 @@ function fillForm(mode, data) {
     // Class/Level/Alignment auto-fill (see dccClassTitle).
     const pcTitleRestoreEl = document.getElementById("pc-title");
     if (pcTitleRestoreEl) pcTitleRestoreEl.dataset.autoSynced = d.pcTitleAutoSynced ? "1" : "0";
+    // Same "still auto-managed?" restoration, for the Hit Die field's
+    // Class auto-fill.
+    const pcHitDieRestoreEl = document.getElementById("pc-hitdie");
+    if (pcHitDieRestoreEl) pcHitDieRestoreEl.dataset.autoSynced = d.pcHitDieAutoSynced ? "1" : "0";
     // Every attack row's Bonus field is the total true to-hit bonus this
     // attack rolls with (see composedAttackBonusText) - resync each
     // auto-synced row now, on load, not just on the next edit. Without
@@ -1962,6 +1967,8 @@ function readForm(mode) {
     d.pcTrainedWeaponAutoSynced = pcTrainedWeaponSaveEl ? pcTrainedWeaponSaveEl.dataset.autoSynced === "1" : false;
     const pcTitleSaveEl = document.getElementById("pc-title");
     d.pcTitleAutoSynced = pcTitleSaveEl ? pcTitleSaveEl.dataset.autoSynced === "1" : false;
+    const pcHitDieSaveEl = document.getElementById("pc-hitdie");
+    d.pcHitDieAutoSynced = pcHitDieSaveEl ? pcHitDieSaveEl.dataset.autoSynced === "1" : false;
   }
   if (mode === "monster") {
     const critEl = document.getElementById("crit");
@@ -2250,6 +2257,61 @@ const DCC_CLASS_TABLES = {
     },
   },
 };
+
+// Each class's Hit Die (the die rolled - plus Stamina modifier - for HP at
+// every level, including 1st) - fixed per class, doesn't change with
+// Level the way Deed Die/Crit Die do. Cross-verified against two
+// independent sources that agree exactly: Goodman Games' own free Quick
+// Start Rules PDF ("A thief gains 1d6 hit points at each level.", etc. for
+// every class below) and the open-source Foundry VTT DCC system's
+// CONFIG.DCC.hitDiePerClass. Values in SIDES only (4/6/8/10/12), matching
+// the Hit Die <select>'s own option values. 0-level/unset-class/"Other"
+// isn't a lookup miss here the way it is for Deed Die/Title - the QSR is
+// explicit that a 0-level funnel character's hit points are rolled on a
+// flat 1d4 (not tied to any class), so "4" is what computePcHitDieSides
+// falls back to below rather than leaving the field's own default alone.
+const DCC_HIT_DIE_BY_CLASS = {
+  Cleric: 8,
+  Thief: 6,
+  Halfling: 6,
+  Warrior: 12,
+  Wizard: 4,
+  Dwarf: 10,
+  Elf: 6,
+};
+
+// What the Hit Die field SHOULD read for the current Class - see
+// DCC_HIT_DIE_BY_CLASS above for sourcing and the 0-level/no-class/"Other"
+// fallback to "4".
+function computePcHitDieSides(cls) {
+  const sides = DCC_HIT_DIE_BY_CLASS[cls];
+  return sides ? String(sides) : "4";
+}
+
+// Keeps the Hit Die <select> synced to Class, same "manual edit wins"
+// contract as Crit Die/Deed Die/Title (recalcPcCrit/recalcPcDeedDie/
+// recalcPcTitle): `force` (a Class change, or the ↻ button) always
+// overwrites the field and re-opts it into auto-sync; without it, only a
+// still-auto-synced field is touched, so a hand-picked override (a
+// house-ruled die, or a homebrew class with its own Hit Die) is never
+// silently clobbered by an unrelated re-render. Also treats a still-BLANK
+// select as eligible even without force - same reasoning as Level's own
+// recalcPcLevelFromXp: a brand-new token's metadata has no "hitdie" key
+// yet, so the generic field-restore loop leaves this <select> with no
+// option selected (none of 4/6/8/10/12 match an empty string) rather than
+// the HTML's own "d8" default - there's nothing a blank selection could be
+// preserving, so it's always safe to fill in.
+function recalcPcHitDie(force) {
+  const el = document.getElementById("pc-hitdie");
+  if (!el) return "";
+  const isBlank = el.value.trim() === "";
+  if (force || isBlank || el.dataset.autoSynced === "1") {
+    const classEl = document.getElementById("pc-class");
+    el.value = computePcHitDieSides(classEl ? classEl.value : "");
+    el.dataset.autoSynced = "1";
+  }
+  return el.value;
+}
 
 // Each class's "Title" by level (and, for most classes, by alignment) -
 // the flavor name a character goes by before earning a proper reputation,
@@ -4441,6 +4503,11 @@ function renderPcStatline(d) {
   // used below instead of the possibly-stale `d.actdice` snapshot, same
   // reasoning as liveCrit above.
   const liveActDice = recalcPcActionDice(false);
+  // Same passive, auto-synced-only recompute as Crit Die/Deed Die/Title
+  // above, for the Hit Die field - keeps it matching the current Class on
+  // every render (including right after loading a different token), not
+  // just right after a Class change fires its own forced sync.
+  recalcPcHitDie(false);
   // Keeps the Trained Weapon row's visibility/label matching whichever
   // Class is currently on screen (see updatePcTrainedWeaponVisibility) -
   // needs to run on every render, not just a Class change, so it's also
@@ -4607,6 +4674,22 @@ if (pcDeedDieSyncBtn) {
     // render pass) to match the newly-synced value right away.
     renderAttacks("pc", readAttacks("pc"));
     cfgRenderFromCurrentForm("pc");
+  });
+}
+const pcHitDieEl = document.getElementById("pc-hitdie");
+if (pcHitDieEl) {
+  // Same contract as pc-crit/pc-deed-die's own listeners - a manual pick
+  // (a house-ruled die, or a homebrew class) untags auto-sync so a later
+  // Class change won't silently overwrite it. Bound to "change" (a picked
+  // option is a discrete choice, not something that fires "input" mid-
+  // keystroke) - same reasoning as Level's own listener.
+  pcHitDieEl.addEventListener("change", () => { pcHitDieEl.dataset.autoSynced = "0"; });
+}
+const pcHitDieSyncBtn = document.getElementById("pc-hitdie-sync-btn");
+if (pcHitDieSyncBtn) {
+  pcHitDieSyncBtn.addEventListener("click", () => {
+    recalcPcHitDie(true);
+    scheduleSave();
   });
 }
 const pcTitleEl = document.getElementById("pc-title");
@@ -5509,6 +5592,14 @@ document.getElementById("pc-class").addEventListener("change", () => {
   // (and whether the Dwarf-only Shield Bash option even applies) - same
   // force-overwrite contract as Crit Die/Table and Deed Die above.
   recalcPcActionDice(true);
+  // A new Class also means a (possibly different) Hit Die (or the 0-level
+  // funnel's flat 1d4 if switching back OUT of a class entirely) - same
+  // force-overwrite contract as Crit Die/Deed Die above. This is the fix
+  // for the Hit Die field not reacting to a Class change at all: previously
+  // nothing here ever touched #pc-hitdie, so it just sat at whatever it was
+  // (usually still the HTML's own default d8) no matter what Class was
+  // picked.
+  recalcPcHitDie(true);
   // A new Class also means a (possibly different, or now alignment-gated,
   // or newly-undocumented) Title - same force-overwrite contract as Crit
   // Die/Deed Die above.
