@@ -902,6 +902,47 @@
     white-space: pre-line;
   }
   .tables-modal-empty { color: var(--muted); font-style: italic; }
+  .skills-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 4px; }
+  .skill-row {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 6px;
+  }
+  .skill-row-label { flex: 1; min-width: 0; font-size: 12px; color: var(--text); }
+  .skill-row-label small { display: block; font-size: 9.5px; color: var(--muted); font-style: normal; }
+  .skill-row-value {
+    /* flex-basis set via the shorthand (not a separate width) so this
+       wins over the higher-specificity input[type=text]{width:100%}
+       base rule - a flex item's flex-basis (when not auto) takes
+       precedence over width regardless of which rule is more specific. */
+    flex: 0 0 58px;
+    text-align: center;
+    padding: 4px 2px;
+    font-size: 12px;
+    font-weight: 700;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--accent);
+  }
+  .skill-row-roll-btn {
+    flex: none;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    font-size: 13px;
+    background: var(--border);
+    border: none;
+    border-radius: 5px;
+    color: var(--text);
+    cursor: pointer;
+    line-height: 1;
+  }
+  .skill-row-roll-btn:hover { background: var(--accent); color: #1e1b18; }
   .occ-tooltip {
     display: none;
     position: fixed;
@@ -1485,6 +1526,13 @@
           <div class="fumble-die-note" id="pc-tw-note" style="margin-top:6px;">Mark one attack "Primary" and another "Off-hand" to fight with two weapons (Table 4-3).</div>
         </fieldset>
 
+        <fieldset id="pc-skills-fieldset" style="display:none">
+          <legend id="pc-skills-legend">Skills</legend>
+          <div class="fumble-die-note" id="pc-skills-subtitle" style="margin-bottom:6px; display:none;"></div>
+          <div class="tables-modal-empty" id="pc-skills-placeholder" style="display:none; margin-bottom:6px;"></div>
+          <div class="skills-list" id="pc-skills-list"></div>
+        </fieldset>
+
         <fieldset class="equip-fieldset">
           <legend>Equipment</legend>
           <div class="tabs equip-tabs" id="equip-tabs">
@@ -1838,6 +1886,7 @@ function defaultData(mode) {
   d.hpMax = "";
   d.attacks = [];
   d.armorItems = [];
+  d.pcSkillOverrides = {};
   return d;
 }
 
@@ -1938,6 +1987,13 @@ function fillForm(mode, data) {
     const critEl = document.getElementById("crit");
     if (critEl) critEl.dataset.autoSynced = d.critAutoSynced ? "1" : "0";
   }
+  // One-shot handoff to the Skills section's very next render: its rows
+  // don't exist in the DOM yet at this point (they're built by
+  // recalcPcSkillsSection, called from cfg.render(d)/renderPcStatline just
+  // below), so recalcPcSkillsSection can't recover manual overrides the
+  // normal way (reading the previous render's own DOM) the first time a
+  // freshly loaded token renders.
+  if (mode === "pc") pendingPcSkillOverrides = d.pcSkillOverrides || {};
   suppressChange = false;
   cfg.render(d);
 }
@@ -1950,6 +2006,7 @@ function readForm(mode) {
   d.hpMax = document.getElementById(cfg.hpMaxId).value;
   d.attacks = readAttacks(mode);
   d.armorItems = mode === "pc" ? readArmorItems() : [];
+  d.pcSkillOverrides = mode === "pc" ? readPcSkillOverrides() : {};
   if (mode === "pc") {
     const autoFlags = {};
     Object.keys(PC_DERIVED_FIELD_SOURCES).forEach(fieldId => {
@@ -2313,6 +2370,153 @@ function recalcPcHitDie(force) {
     el.dataset.autoSynced = "1";
   }
   return el.value;
+}
+
+// Table 1-9: Thief Skills by Level and Alignment, straight from the user's
+// own DCC Reference Booklet (Table 1-9, page 13) - all 13 skills, levels
+// 1-10, for all three alignments. Cross-checked against Goodman Games'
+// free Quick Start Rules PDF's own Table 1-7 (a subset covering levels
+// 1-2 only), which agrees exactly with the Reference Booklet's numbers
+// below. Each skill's array is indexed [level1, level2, ..., level10].
+// castSpellFromScroll's array holds the action die's SIDES (10/12/14/16/
+// 20), not a flat bonus - it's rolled as 1d(sides) instead of d20+bonus,
+// per the Reference Booklet's own "d10/d12/.../d20" notation for that row.
+// Ability modifiers (Table 1-9's own footnotes): Agility also applies to
+// Sneak Silently, Hide in Shadows, Pick Pocket, Climb Sheer Surfaces, Pick
+// Lock, Disable Trap, and Forge Document (*); Intelligence also applies to
+// Find Trap, Read Languages, and Cast Spell from Scroll (†); Personality
+// also applies to Disguise Self (‡). Backstab and Handle Poison get no
+// ability modifier at all. See THIEF_SKILL_DEFS below for that mapping.
+const DCC_THIEF_SKILLS_TABLE = {
+  L: {
+    label: "Lawful (Path of the Boss)",
+    skills: {
+      backstab:            [1, 3, 5, 7, 8, 9, 10, 11, 12, 13],
+      sneakSilently:        [1, 3, 5, 7, 8, 9, 10, 11, 12, 13],
+      hideInShadows:        [3, 5, 7, 8, 9, 11, 12, 13, 14, 15],
+      pickPocket:           [1, 3, 5, 7, 8, 9, 10, 11, 12, 13],
+      climbSheerSurfaces:   [3, 5, 7, 8, 9, 11, 12, 13, 14, 15],
+      pickLock:             [1, 3, 5, 7, 8, 9, 10, 11, 12, 13],
+      findTrap:             [3, 5, 7, 8, 9, 11, 12, 13, 14, 15],
+      disableTrap:          [3, 5, 7, 8, 9, 11, 12, 13, 14, 15],
+      forgeDocument:        [0, 0, 1, 2, 3, 4, 5, 6, 7, 8],
+      disguiseSelf:         [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+      readLanguages:        [0, 0, 1, 2, 3, 4, 5, 6, 7, 8],
+      handlePoison:         [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+      castSpellFromScroll:  [10, 10, 12, 12, 14, 14, 16, 16, 20, 20],
+    },
+  },
+  C: {
+    label: "Chaotic (Path of the Assassin)",
+    skills: {
+      backstab:             [3, 5, 7, 8, 9, 11, 12, 13, 14, 15],
+      sneakSilently:        [3, 5, 7, 8, 9, 11, 12, 13, 14, 15],
+      hideInShadows:        [1, 3, 5, 7, 8, 9, 10, 11, 12, 13],
+      pickPocket:           [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+      climbSheerSurfaces:   [1, 3, 5, 7, 8, 9, 10, 11, 12, 13],
+      pickLock:             [1, 3, 5, 7, 8, 9, 10, 11, 12, 13],
+      findTrap:             [1, 3, 5, 7, 8, 9, 10, 11, 12, 13],
+      disableTrap:          [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+      forgeDocument:        [0, 0, 1, 2, 3, 4, 5, 6, 7, 8],
+      disguiseSelf:         [3, 5, 7, 8, 9, 11, 12, 13, 14, 15],
+      readLanguages:        [0, 0, 1, 2, 3, 4, 5, 6, 7, 8],
+      handlePoison:         [3, 5, 7, 8, 9, 11, 12, 13, 14, 15],
+      castSpellFromScroll:  [10, 10, 12, 12, 14, 14, 16, 16, 20, 20],
+    },
+  },
+  N: {
+    label: "Neutral (Path of the Swindler)",
+    skills: {
+      backstab:             [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+      sneakSilently:        [3, 5, 7, 8, 9, 11, 12, 13, 14, 15],
+      hideInShadows:        [1, 3, 5, 7, 8, 9, 10, 11, 12, 13],
+      pickPocket:           [3, 5, 7, 8, 9, 11, 12, 13, 14, 15],
+      climbSheerSurfaces:   [3, 5, 7, 8, 9, 11, 12, 13, 14, 15],
+      pickLock:             [1, 3, 5, 7, 8, 9, 10, 11, 12, 13],
+      findTrap:             [1, 3, 5, 7, 8, 9, 10, 11, 12, 13],
+      disableTrap:          [1, 3, 5, 7, 8, 9, 10, 11, 12, 13],
+      forgeDocument:        [3, 5, 7, 8, 9, 11, 12, 13, 14, 15],
+      disguiseSelf:         [0, 0, 1, 2, 3, 4, 5, 6, 7, 8],
+      readLanguages:        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+      handlePoison:         [0, 0, 1, 2, 3, 4, 5, 6, 7, 8],
+      castSpellFromScroll:  [12, 12, 14, 14, 16, 16, 20, 20, 20, 20],
+    },
+  },
+};
+
+// Display order + ability-modifier mapping for Table 1-9's 13 skills (see
+// the table's own comment above for sourcing of the ability mapping).
+// Backstab is deliberately left OUT of this list - it's a to-hit bonus for
+// a specific kind of attack, and this app's Attacks/Combat Tracker already
+// has its own dedicated "Declare Backstab" flow (see backstabActive/the
+// backstab-toggle-btn) for that attack, so a second, disconnected copy of
+// the number in the Skills section would just be redundant. The raw Table
+// 1-9 numbers stay in DCC_THIEF_SKILLS_TABLE above for reference even
+// though nothing reads them anymore.
+// `isDie` flags Cast Spell from Scroll, whose "bonus" is actually the
+// sides of the action die it rolls (see DCC_THIEF_SKILLS_TABLE's comment).
+// `checkPenaltyApplies` flags the skills the armor Check Penalty applies
+// to: Sneak Silently IS the "move silently" check and Climb Sheer Surfaces
+// IS the "climb" check the Check Penalty note itself already names (see
+// recalcPcCheckPenalty/computePcCheckPenaltyTotal); Cast Spell from
+// Scroll is also flagged since armor hinders spellcasting checks for
+// every class except Cleric (see classSpellcastingHinderedByArmor), and a
+// Thief attempting to read a scroll is no exception.
+const THIEF_SKILL_DEFS = [
+  { key: "sneakSilently", label: "Sneak Silently", ability: "agi", checkPenaltyApplies: true },
+  { key: "hideInShadows", label: "Hide in Shadows", ability: "agi" },
+  { key: "pickPocket", label: "Pick Pocket", ability: "agi" },
+  { key: "climbSheerSurfaces", label: "Climb Sheer Surfaces", ability: "agi", checkPenaltyApplies: true },
+  { key: "pickLock", label: "Pick Lock", ability: "agi" },
+  { key: "findTrap", label: "Find Trap", ability: "int" },
+  { key: "disableTrap", label: "Disable Trap", ability: "agi" },
+  { key: "forgeDocument", label: "Forge Document", ability: "agi" },
+  { key: "disguiseSelf", label: "Disguise Self", ability: "per" },
+  { key: "readLanguages", label: "Read Languages", ability: "int" },
+  { key: "handlePoison", label: "Handle Poison", ability: null },
+  // Always true here (not conditioned on class) since THIEF_SKILL_DEFS is
+  // only ever used for the Thief class, and Thief is never Cleric - see
+  // classSpellcastingHinderedByArmor.
+  { key: "castSpellFromScroll", label: "Cast Spell from Scroll", ability: "int", isDie: true, checkPenaltyApplies: true },
+];
+
+// Table 1-18's "Sneak & Hide" column (page 12 of the Reference Booklet) -
+// the Halfling's own racial Stealth bonus to Sneak Silently/Hide in
+// Shadows checks, on top of the ordinary Agility modifier every class
+// applies to those same two checks (Table 1-9's own Agility footnote
+// applies here too - Halflings aren't Thieves, but they're rolling the
+// same two named checks). Indexed [level1, ..., level10], same convention
+// as DCC_THIEF_SKILLS_TABLE above.
+const DCC_HALFLING_SNEAK_HIDE_BY_LEVEL = [3, 5, 7, 8, 9, 11, 12, 13, 14, 15];
+
+// Resolves this PC's Thief Skills (Table 1-9) into a {status, ...} result,
+// same "status drives the placeholder" contract as dccClassTitle() above.
+// status: "not-thief" (wrong/no class - the Skills section stays hidden in
+// that case anyway, see activeSkillRowDefs/recalcPcSkillsSection, but this
+// stays safe to call regardless), "no-level" (0-level/blank),
+// "needs-alignment" (Thief, has a level, but no Alignment picked - every
+// column in Table 1-9 is alignment-specific, unlike Title's per-class mix
+// of alignment-gated and "any" entries), or "ok" (rows is the full list,
+// each {key, label, ability, isDie, checkPenaltyApplies, classBonus} -
+// classBonus is a flat bonus normally, or Cast Spell from Scroll's die
+// sides when isDie).
+function thiefSkillsData(cls, levelRaw, alignmentRaw) {
+  if ((cls || "").trim() !== "Thief") return { status: "not-thief" };
+  const level = parseLevelNumber(levelRaw);
+  if (level === null || level < 1) return { status: "no-level" };
+  const align = String(alignmentRaw || "").trim();
+  const table = DCC_THIEF_SKILLS_TABLE[align];
+  if (!table) return { status: "needs-alignment" };
+  const clamped = Math.min(10, level) - 1;
+  const rows = THIEF_SKILL_DEFS.map(def => ({
+    key: def.key,
+    label: def.label,
+    ability: def.ability,
+    isDie: !!def.isDie,
+    checkPenaltyApplies: !!def.checkPenaltyApplies,
+    classBonus: table.skills[def.key][clamped],
+  }));
+  return { status: "ok", alignmentLabel: table.label, level: clamped + 1, rows };
 }
 
 // Each class's "Title" by level (and, for most classes, by alignment) -
@@ -4214,6 +4418,7 @@ function enforceShieldCapacityAfterWeaponEquip() {
   shieldRow.classList.remove("equipped");
   recalcPcAC();
   recalcPcCheckPenalty();
+  recalcPcSkillsSection(false);
   recalcPcSpeed();
   recalcPcFumbleDie();
   syncArmorIntoEquipment();
@@ -4610,6 +4815,12 @@ function renderPcStatline(d) {
   // matching the current Class/Level on every render, same as the note
   // below the Attacks list (updateTwoWeaponNote).
   refreshPcRacialTraitsNote();
+  // Keeps the Thief/Halfling Skills section (Table 1-9/Table 1-18)
+  // matching the current Class/Level/Alignment/Ability scores/armor Check
+  // Penalty on every render - passive pass (force=false), so an
+  // already-manually-overridden row is left alone; see the
+  // Class/Level/Alignment change handlers below for the force=true calls.
+  recalcPcSkillsSection(false);
   // Same passive, auto-synced-only recompute, for the Action Dice field -
   // used below instead of the possibly-stale `d.actdice` snapshot, same
   // reasoning as liveCrit above.
@@ -5059,6 +5270,10 @@ function refreshDerivedPcFields() {
   refreshAutoSyncedAttackBonuses();
   refreshAutoSyncedAttackDamages();
   recalcPcAC();
+  // An ability-score edit (Agility/Intelligence/Personality) can change any
+  // still-auto Skills row's total too - same passive, auto-synced-only
+  // recompute as everything else in this function.
+  recalcPcSkillsSection(false);
   updateTwoWeaponNote();
   scheduleSave();
 }
@@ -5221,6 +5436,13 @@ function computePcRacialTraitsText(cls, levelRaw) {
     const bonusText = bonus > 0 ? `a +${bonus} bonus (this character's level)` : "a bonus equal to class level (not yet levelled)";
     parts.push(`Underground Skills: ${bonusText} to detect traps, slanting passages, shifting walls, and other new construction while underground; can also smell a strong concentration of gold or gems within 100'.`);
   }
+  if (cls === "Halfling") {
+    const level = parseLevelNumber(levelRaw);
+    const clamped = level !== null && level >= 1 ? Math.min(10, level) : null;
+    const bonus = clamped !== null ? DCC_HALFLING_SNEAK_HIDE_BY_LEVEL[clamped - 1] : null;
+    const bonusText = bonus !== null ? `a +${bonus} bonus (Table 1-18, this character's level)` : "a bonus that grows with level (Table 1-18)";
+    parts.push(`Stealth: ${bonusText} to Sneak Silently and Hide in Shadows checks, on top of the normal Agility modifier.`);
+  }
   return parts.join(" ");
 }
 
@@ -5292,6 +5514,7 @@ function attachArmorRowListeners() {
       scheduleSave();
       recalcPcAC();
       recalcPcCheckPenalty();
+      recalcPcSkillsSection(false);
       recalcPcSpeed();
       recalcPcFumbleDie();
       syncArmorIntoEquipment();
@@ -5318,6 +5541,7 @@ function attachArmorRowListeners() {
     checkPenaltyInput.addEventListener("input", () => {
       scheduleSave();
       recalcPcCheckPenalty();
+      recalcPcSkillsSection(false);
     });
     equippedBox.addEventListener("change", () => {
       row.classList.toggle("equipped", equippedBox.checked);
@@ -5340,6 +5564,7 @@ function attachArmorRowListeners() {
       scheduleSave();
       recalcPcAC();
       recalcPcCheckPenalty();
+      recalcPcSkillsSection(false);
       recalcPcSpeed();
       recalcPcFumbleDie();
       syncArmorIntoEquipment();
@@ -5363,6 +5588,7 @@ function attachArmorRowListeners() {
       scheduleSave();
       recalcPcAC();
       recalcPcCheckPenalty();
+      recalcPcSkillsSection(false);
       recalcPcSpeed();
       recalcPcFumbleDie();
       syncArmorIntoEquipment();
@@ -5382,6 +5608,7 @@ document.getElementById("add-armor-pc").addEventListener("click", () => {
   attachArmorRowListeners();
   recalcPcAC();
   recalcPcCheckPenalty();
+  recalcPcSkillsSection(false);
   recalcPcSpeed();
   recalcPcFumbleDie();
   syncArmorIntoEquipment();
@@ -5419,22 +5646,37 @@ function recalcPcAC() {
 }
 
 // Check Penalty always applies to climb/jump/balance/swim/move-silently,
-// regardless of class. Whether it ALSO applies to spell checks depends on
-// class: Wizard and Elf spellcasting is hindered by armor, Cleric
-// spellcasting is explicitly exempt per the rulebook, and other classes
-// don't have spell checks for it to apply to in the first place. Now that
-// Class is a constrained dropdown instead of free text, this can be
-// resolved exactly instead of shown as a blanket caveat for every class -
-// "Other/Homebrew" and 0-level (no class yet) fall back to the safe
-// default of not claiming a spellcasting exemption that may not apply.
-const DCC_ARMOR_AFFECTS_SPELL_CHECKS = new Set(["Wizard", "Elf"]);
+// regardless of class. It ALSO hinders spellcasting checks for every
+// class except Cleric - Cleric spellcasting is explicitly exempt per the
+// rulebook (divine magic, not reliant on the same freedom of movement
+// arcane casting needs), but everyone else's - Wizard/Elf's own spell
+// checks, and a Thief's Cast Spell from Scroll (Table 1-9) alike - is
+// impaired by armor same as any other class. Now that Class is a
+// constrained dropdown instead of free text, this can be resolved exactly
+// instead of shown as a blanket caveat for every class - "Other/Homebrew"
+// and 0-level (no class yet) fall back to the safe default of not
+// claiming a spellcasting exemption that may not apply.
+function classSpellcastingHinderedByArmor(cls) {
+  return !!cls && cls !== "Cleric";
+}
+
+// Pure "what's the number" half of recalcPcCheckPenalty below, factored
+// out so anything else that needs this total (the Thief Skills/Halfling
+// Stealth section's Sneak Silently/Climb Sheer Surfaces rows, see
+// activeSkillRowDefs) can read the exact same value without duplicating
+// the equipped-items sum or depending on the #pc-check-penalty span
+// having already been rendered this cycle.
+function computePcCheckPenaltyTotal() {
+  const equippedItems = readArmorItems().filter(item => item.equipped);
+  return equippedItems.reduce((sum, item) => sum + (parseInt(item.checkPenalty, 10) || 0), 0);
+}
 
 function recalcPcCheckPenalty() {
   const el = document.getElementById("pc-check-penalty");
   const noteEl = document.getElementById("pc-check-penalty-note");
   if (!el) return 0;
   const equippedItems = readArmorItems().filter(item => item.equipped);
-  const total = equippedItems.reduce((sum, item) => sum + (parseInt(item.checkPenalty, 10) || 0), 0);
+  const total = computePcCheckPenaltyTotal();
   el.textContent = total === 0 ? "0" : formatSignedNumber(total);
 
   // Mouseover breakdown, one term per equipped item (same "name each
@@ -5454,8 +5696,8 @@ function recalcPcCheckPenalty() {
     const cls = classEl ? classEl.value : "";
     if (cls === "Cleric") {
       noteEl.textContent = "Climb, jump, balance, swim, move silently. Cleric spell checks are NOT affected by armor.";
-    } else if (DCC_ARMOR_AFFECTS_SPELL_CHECKS.has(cls)) {
-      noteEl.textContent = `Climb, jump, balance, swim, move silently, and ${cls} spell checks.`;
+    } else if (classSpellcastingHinderedByArmor(cls)) {
+      noteEl.textContent = `Climb, jump, balance, swim, move silently, and spell checks (including Cast Spell from Scroll).`;
     } else {
       noteEl.textContent = "Climb, jump, balance, swim, move silently.";
     }
@@ -5799,6 +6041,11 @@ document.getElementById("pc-class").addEventListener("change", () => {
   // or newly-undocumented) Title - same force-overwrite contract as Crit
   // Die/Deed Die above.
   recalcPcTitle(true);
+  // A new Class can also mean the Skills section switches entirely (Thief
+  // <-> Halfling <-> neither) or, for Thief, keeps the same 13 rows but
+  // under a fresh set of column data - same force-overwrite contract as
+  // Crit Die/Deed Die/Title above.
+  recalcPcSkillsSection(true);
   // Halfling's special two-weapon rule waives the off-hand's "light
   // weapon" restriction - switching Class in or out of Halfling can
   // change which weapons are eligible for that role, so the attack rows
@@ -5838,6 +6085,10 @@ function cascadeLevelChangeEffects() {
   // undocumented-level) Title - same force-overwrite contract as Crit
   // Die/Deed Die above.
   recalcPcTitle(true);
+  // A Level change also means every Skills section row (Table 1-9/Table
+  // 1-18 are both indexed by level) has a new class bonus - same
+  // force-overwrite contract as Crit Die/Deed Die/Title above.
+  recalcPcSkillsSection(true);
   renderAttacks("pc", readAttacks("pc"));
   cfgRenderFromCurrentForm("pc");
 }
@@ -5873,6 +6124,11 @@ document.getElementById("pc-level").addEventListener("change", () => {
 // player already typed over.
 document.getElementById("pc-alignment").addEventListener("change", () => {
   recalcPcTitle(true);
+  // A Thief's entire Table 1-9 column depends on Alignment (Halfling's
+  // Table 1-18 bonus doesn't, but recalcPcSkillsSection is a no-op there
+  // beyond a routine rebuild) - same force-overwrite contract as Title
+  // just above.
+  recalcPcSkillsSection(true);
   scheduleSave();
 });
 
@@ -5973,6 +6229,7 @@ function tableRowsHtml(table) {
 }
 
 function renderTablesModal(subtitle, sections) {
+  document.getElementById("tables-modal-title").textContent = "Crit & Fumble Tables";
   document.getElementById("tables-modal-subtitle").textContent = subtitle;
   const body = document.getElementById("tables-modal-body");
   body.innerHTML = sections.map(sec => `
@@ -6016,6 +6273,309 @@ function openTablesModalForMonster() {
     { title: critTable ? critTable.label : (parsed ? `Crit Table ${parsed.table}` : "Crit Table"), table: critTable },
     { title: FUMBLE_TABLE.label, table: FUMBLE_TABLE },
   ]);
+}
+
+// --- Thief/Halfling Skills section (Table 1-9 / Table 1-18) -----------
+//
+// A dedicated, always-visible Sheet section (superseding the earlier
+// reference-modal approach) for the two classes that get numeric skill
+// checks: Thief (all 13 Table 1-9 skills) and Halfling (the 2 checks
+// Table 1-18's Sneak & Hide bonus applies to). Every row auto-fills from
+// Level/Alignment/ability modifier/armor Check Penalty on every render,
+// but follows the same "manual edit wins, force-overwrite on deliberate
+// action" contract as every other derived PC field in this app: typing
+// directly into a row's value opts that row out of auto-sync (see
+// attachSkillRowListeners' "input" listener below), and only a genuinely
+// deliberate action - that row's own ↻ button, or a Class/Level/Alignment
+// change (see recalcPcSkillsSection's `force` param) - opts it back in.
+// pendingPcSkillOverrides is a one-shot handoff from fillForm (loading a
+// saved token) to the very next recalcPcSkillsSection call, since the
+// section's rows don't exist in the DOM yet at that point for the normal
+// "read the previous render's own DOM state" path below to find them.
+let pendingPcSkillOverrides = null;
+
+const SKILL_ABILITY_ABBREV = { agi: "Agi", int: "Int", per: "Per" };
+
+// Resolves which of this app's two Skills mechanics (if any) applies to
+// the currently selected Class, into one common {status, sectionTitle,
+// subtitle, rows} shape recalcPcSkillsSection can build rows from without
+// caring whether the data came from Table 1-9 (Thief - 13 skills,
+// alignment-gated) or Table 1-18 (Halfling's Sneak & Hide - 2 skills,
+// alignment-independent). status mirrors thiefSkillsData's own contract:
+// "not-applicable" (neither class - the fieldset stays hidden), "no-level",
+// "needs-alignment" (Thief only - Halfling's table doesn't vary by
+// Alignment), or "ok".
+function activeSkillRowDefs(cls, levelRaw, alignmentRaw) {
+  const trimmed = (cls || "").trim();
+  if (trimmed === "Thief") {
+    const data = thiefSkillsData(cls, levelRaw, alignmentRaw);
+    if (data.status !== "ok") {
+      return { status: data.status, sectionTitle: "🗡️ Thief Skills (Table 1-9)" };
+    }
+    return {
+      status: "ok",
+      sectionTitle: "🗡️ Thief Skills (Table 1-9)",
+      subtitle: `${data.alignmentLabel} — Level ${data.level}`,
+      rows: data.rows,
+    };
+  }
+  if (trimmed === "Halfling") {
+    const level = parseLevelNumber(levelRaw);
+    if (level === null || level < 1) {
+      return { status: "no-level", sectionTitle: "🕵️ Stealth Skills (Table 1-18)" };
+    }
+    const clamped = Math.min(10, level) - 1;
+    const bonus = DCC_HALFLING_SNEAK_HIDE_BY_LEVEL[clamped];
+    return {
+      status: "ok",
+      sectionTitle: "🕵️ Stealth Skills (Table 1-18)",
+      subtitle: `Halfling Sneak & Hide — Level ${clamped + 1}`,
+      // Table 1-18's bonus applies to both checks, but the armor Check
+      // Penalty note ("climb, jump, balance, swim, move silently") only
+      // ever names Sneak Silently (the "move silently" check) - Hide in
+      // Shadows stays unaffected by armor, same as it is for a Thief.
+      rows: [
+        { key: "sneakSilently", label: "Sneak Silently", ability: "agi", isDie: false, checkPenaltyApplies: true, classBonus: bonus },
+        { key: "hideInShadows", label: "Hide in Shadows", ability: "agi", isDie: false, checkPenaltyApplies: false, classBonus: bonus },
+      ],
+    };
+  }
+  return { status: "not-applicable" };
+}
+
+// Folds a skill row's flat Table bonus together with this character's live
+// ability modifier (if the skill has one) and, for the two skills the
+// armor Check Penalty note itself names, the current total Check Penalty
+// (computePcCheckPenaltyTotal() - the same total the Armor & Shields
+// fieldset's own Check Penalty line shows).
+function computeSkillRowTotal(row) {
+  const abilityMod = row.ability ? abilityModifierFromField(`pc-${row.ability}`) : 0;
+  const penalty = row.checkPenaltyApplies ? computePcCheckPenaltyTotal() : 0;
+  if (row.isDie) {
+    // Cast Spell from Scroll's "bonus" is the action die's sides, not a
+    // flat number added to a d20 roll - the ability modifier AND the armor
+    // Check Penalty (armor hinders spellcasting for every class except
+    // Cleric - see classSpellcastingHinderedByArmor - and a Thief is never
+    // a Cleric) still apply to the check itself (see rollPcSkill), just
+    // not to the die.
+    return { isDie: true, sides: row.classBonus, abilityMod, penalty };
+  }
+  return { isDie: false, classBonus: row.classBonus, abilityMod, penalty, total: row.classBonus + abilityMod + penalty };
+}
+
+function skillRowValueText(row) {
+  const c = computeSkillRowTotal(row);
+  return c.isDie ? `d${c.sides}` : formatSignedNumber(c.total);
+}
+
+function skillRowTitle(row) {
+  const abbrev = SKILL_ABILITY_ABBREV[row.ability] || "";
+  const c = computeSkillRowTotal(row);
+  const autoNote = `Auto-fills from Level/Alignment${row.ability ? `/${abbrev}` : ""}${row.checkPenaltyApplies ? "/armor Check Penalty" : ""}. Type over it any time; ↻ resets it back to auto.`;
+  if (c.isDie) {
+    const dieParts = [];
+    if (row.ability) dieParts.push(`your ${abbrev} modifier (currently ${formatSignedNumber(c.abilityMod)})`);
+    if (row.checkPenaltyApplies && c.penalty) dieParts.push(`the armor Check Penalty (${formatSignedNumber(c.penalty)})`);
+    const modNote = dieParts.length ? ` Roll 1d${c.sides} plus ${dieParts.join(" and ")}.` : ` Roll 1d${c.sides}.`;
+    return `${modNote} ${autoNote}`;
+  }
+  const parts = [`${formatSignedNumber(c.classBonus)} class`];
+  if (row.ability) parts.push(`${formatSignedNumber(c.abilityMod)} ${abbrev}`);
+  if (row.checkPenaltyApplies && c.penalty) parts.push(`${formatSignedNumber(c.penalty)} armor Check Penalty`);
+  return `${formatSignedNumber(c.total)} (${parts.join(", ")}). ${autoNote}`;
+}
+
+// Builds one row's HTML. `prevOverride` (from readPcSkillOverrides, or a
+// just-loaded token's saved d.pcSkillOverrides via pendingPcSkillOverrides)
+// carries over a manually-typed value across a rebuild; omitted/auto means
+// this row shows the freshly computed auto-fill value instead.
+function skillRowHtml(row, prevOverride) {
+  const auto = prevOverride ? prevOverride.auto : true;
+  const value = auto ? skillRowValueText(row) : prevOverride.value;
+  const abbrev = SKILL_ABILITY_ABBREV[row.ability] || "";
+  const noteBits = [];
+  if (row.ability) noteBits.push(`${abbrev} mod applies`);
+  if (row.checkPenaltyApplies) noteBits.push("armor Check Penalty applies");
+  const note = noteBits.length ? `<small>${escapeHtml(noteBits.join(" · "))}</small>` : "";
+  return `
+    <div class="skill-row" data-key="${row.key}" data-label="${escapeHtml(row.label)}" data-ability="${row.ability || ""}" data-is-die="${row.isDie ? "1" : "0"}" data-check-penalty-applies="${row.checkPenaltyApplies ? "1" : "0"}">
+      <div class="skill-row-label">${escapeHtml(row.label)}${note}</div>
+      <input type="text" class="skill-row-value" id="pc-skill-${row.key}" data-key="${row.key}" data-auto-synced="${auto ? "1" : "0"}" value="${escapeHtml(value)}" title="${escapeHtml(skillRowTitle(row))}" />
+      <button type="button" class="derived-sync-btn skill-row-sync-btn" data-key="${row.key}" title="Recompute from Level/Alignment/Ability/Armor">↻</button>
+      <button type="button" class="skill-row-roll-btn" data-key="${row.key}" title="Roll ${escapeHtml(row.label)}">🎲</button>
+    </div>`;
+}
+
+// Reads the section's current DOM state (before a rebuild replaces it)
+// into a {key: {value, auto}} map - same "snapshot the list before
+// rebuilding it" pattern readAttacks()/readArmorItems() use, needed here
+// so a rebuild (triggered by an unrelated field edit, or just the next
+// render cycle) doesn't clobber a manually-typed skill value.
+function readPcSkillOverrides() {
+  const listEl = document.getElementById("pc-skills-list");
+  const map = {};
+  if (!listEl) return map;
+  listEl.querySelectorAll(".skill-row-value").forEach(input => {
+    const key = input.dataset.key;
+    if (!key) return;
+    map[key] = { value: input.value, auto: input.dataset.autoSynced === "1" };
+  });
+  return map;
+}
+
+function attachSkillRowListeners() {
+  const listEl = document.getElementById("pc-skills-list");
+  if (!listEl) return;
+  listEl.querySelectorAll(".skill-row-value").forEach(input => {
+    // Same "manual edit wins" contract as every other derived PC field -
+    // typing directly into a skill's value opts it out of auto-sync.
+    input.addEventListener("input", () => {
+      input.dataset.autoSynced = "0";
+      scheduleSave();
+    });
+  });
+  listEl.querySelectorAll(".skill-row-sync-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const input = document.getElementById(`pc-skill-${btn.dataset.key}`);
+      if (input) input.dataset.autoSynced = "1";
+      scheduleSave();
+      // recalcPcSkillsSection updates this row's value in place (same
+      // rows are still on screen, see its "sameShape" fast path below) -
+      // no full form re-render needed, and critically no DOM node gets
+      // recreated out from under the button that's mid-click (see that
+      // function's own comment for the regression this avoids).
+      recalcPcSkillsSection(false);
+    });
+  });
+  listEl.querySelectorAll(".skill-row-roll-btn").forEach(btn => {
+    btn.addEventListener("click", () => rollPcSkill(btn.dataset.key));
+  });
+}
+
+// Rebuilds (or, far more often, just refreshes in place) the Skills
+// section for whichever of Thief/Halfling (if either) is the current
+// Class. Called on every renderPcStatline pass (force=false - only an
+// already-auto row gets its value refreshed) and force=true from the
+// Class/Level/Alignment change handlers (a deliberate-enough action that
+// every row snaps back to auto, same contract as Crit Die/Deed Die/etc.
+// above).
+function recalcPcSkillsSection(force) {
+  const fieldset = document.getElementById("pc-skills-fieldset");
+  const listEl = document.getElementById("pc-skills-list");
+  if (!fieldset || !listEl) return;
+  const legendEl = document.getElementById("pc-skills-legend");
+  const subtitleEl = document.getElementById("pc-skills-subtitle");
+  const placeholderEl = document.getElementById("pc-skills-placeholder");
+  const classEl = document.getElementById("pc-class");
+  const levelEl = document.getElementById("pc-level");
+  const alignmentEl = document.getElementById("pc-alignment");
+  const info = activeSkillRowDefs(classEl ? classEl.value : "", levelEl ? levelEl.value : "", alignmentEl ? alignmentEl.value : "");
+
+  if (info.status === "not-applicable") {
+    fieldset.style.display = "none";
+    listEl.innerHTML = "";
+    pendingPcSkillOverrides = null;
+    return;
+  }
+  fieldset.style.display = "";
+  if (legendEl) legendEl.textContent = info.sectionTitle || "Skills";
+
+  if (info.status !== "ok") {
+    if (subtitleEl) { subtitleEl.style.display = "none"; subtitleEl.textContent = ""; }
+    if (placeholderEl) {
+      placeholderEl.style.display = "";
+      placeholderEl.textContent = info.status === "no-level"
+        ? "Pick a Level to auto-fill this character's skill bonuses."
+        : "Pick an Alignment to auto-fill this character's skill bonuses (Table 1-9's bonuses vary by Alignment).";
+    }
+    listEl.style.display = "none";
+    listEl.innerHTML = "";
+    pendingPcSkillOverrides = null;
+    return;
+  }
+  if (placeholderEl) placeholderEl.style.display = "none";
+  listEl.style.display = "";
+  if (subtitleEl) {
+    subtitleEl.style.display = "";
+    subtitleEl.textContent = info.subtitle || "";
+  }
+
+  // A just-loaded token's saved overrides (pendingPcSkillOverrides) always
+  // forces a full rebuild - the rows currently on screen (if any) belong
+  // to whatever token was open a moment ago, not this one, so they can't
+  // be trusted for the "same rows already rendered" in-place path below.
+  const hasPendingLoad = pendingPcSkillOverrides !== null;
+  const existingKeys = Array.from(listEl.querySelectorAll(".skill-row")).map(row => row.dataset.key);
+  const sameShape = !hasPendingLoad
+    && existingKeys.length === info.rows.length
+    && info.rows.every((row, i) => existingKeys[i] === row.key);
+
+  if (sameShape) {
+    // The exact same set of rows is already on screen (the overwhelmingly
+    // common case - every passive re-render while nothing about which
+    // rows apply has changed) - update each row's value/tooltip in place
+    // rather than recreating any DOM node. Recreating nodes here would
+    // risk dropping whatever the player is mid-interaction with: typing
+    // into another row, or - the regression this fixed - clicking THIS
+    // row's own ↻ button, since a click's mousedown blurs whatever field
+    // previously had focus, and if that blur's own passive re-render had
+    // rebuilt the list (destroying and recreating the very button being
+    // clicked) before its "click" event fired, the click would silently
+    // land on nothing.
+    info.rows.forEach(row => {
+      const input = document.getElementById(`pc-skill-${row.key}`);
+      if (!input) return;
+      if (force || input.dataset.autoSynced === "1") {
+        input.value = skillRowValueText(row);
+        input.dataset.autoSynced = "1";
+      }
+      input.title = skillRowTitle(row);
+    });
+    return;
+  }
+
+  // Structural rebuild: first render, a just-loaded token, or the set of
+  // rows itself changed (switching Thief's 13 rows <-> Halfling's 2 <->
+  // neither).
+  const prevOverrides = hasPendingLoad ? pendingPcSkillOverrides : (force ? {} : readPcSkillOverrides());
+  pendingPcSkillOverrides = null;
+  listEl.innerHTML = info.rows.map(row => skillRowHtml(row, prevOverrides[row.key])).join("");
+  attachSkillRowListeners();
+}
+
+// Rolls one skill row using whatever value is CURRENTLY shown in its
+// field - auto-filled or manually overridden, same "roll with what's on
+// the sheet" behavior every other roll button in this app follows (e.g.
+// an attack row's Bonus field). Flat-bonus skills roll 1d20 + that value;
+// Cast Spell from Scroll (data-is-die) rolls 1d(sides) + the live ability
+// modifier (and, since armor hinders spellcasting for every class except
+// Cleric, the live armor Check Penalty) instead, since its Table 1-9 entry
+// is a die, not a bonus. Sheet-only (no appendChatLog entry), same scope
+// as rollPcHpLevelUp.
+function rollPcSkill(key) {
+  const row = document.querySelector(`.skill-row[data-key="${key}"]`);
+  const input = row ? row.querySelector(".skill-row-value") : null;
+  if (!row || !input) return;
+  const label = row.dataset.label || key;
+  const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
+  if (row.dataset.isDie === "1") {
+    const sidesMatch = /d(\d+)/i.exec(input.value || "");
+    const sides = sidesMatch ? parseInt(sidesMatch[1], 10) : 20;
+    const abilityId = row.dataset.ability;
+    const abilityMod = abilityId ? abilityModifierFromField(`pc-${abilityId}`) : 0;
+    const penalty = row.dataset.checkPenaltyApplies === "1" ? computePcCheckPenaltyTotal() : 0;
+    const modifier = abilityMod + penalty;
+    const rolled = Math.floor(Math.random() * sides) + 1;
+    const total = rolled + modifier;
+    showStatus(`${label}: d${sides} (${rolled}) ${formatSignedNumber(modifier)} = ${markRollTotal(total)}`, false, 4000);
+    broadcastDiceRoll({ rollerName, dice: [{ sides, value: rolled }], modifier, notation: `d${sides}`, total, label });
+    return;
+  }
+  const bonus = parseModifier(input.value);
+  const rolled = Math.floor(Math.random() * 20) + 1;
+  const total = rolled + bonus;
+  showStatus(`${label}: d20 (${rolled}) ${formatSignedNumber(bonus)} = ${markRollTotal(total)}`, false, 4000);
+  broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: bonus, notation: "d20", total, label });
 }
 
 document.getElementById("pc-tables-btn").addEventListener("click", openTablesModalForPc);
