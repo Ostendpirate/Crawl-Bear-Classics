@@ -1594,7 +1594,12 @@
 
         <fieldset>
           <legend>Spells</legend>
-          <textarea id="pc-spells" placeholder="Known/prepared spells, spell check bonus, mercurial effects"></textarea>
+          <div id="pc-spellcheck-wrap" style="display:none">
+            <div class="fumble-die-note" id="pc-spellcheck-note" style="margin-bottom:6px;"></div>
+            <div class="attack-list" id="pc-spells-list"></div>
+            <button type="button" class="add-attack-btn" id="add-spell-pc">+ Add Spell</button>
+          </div>
+          <textarea id="pc-spells" placeholder="Known/prepared spells, spell check bonus, mercurial effects" style="margin-top:8px;"></textarea>
         </fieldset>
 
         <fieldset>
@@ -1957,6 +1962,7 @@ function defaultData(mode) {
   d.hpMax = "";
   d.attacks = [];
   d.armorItems = [];
+  d.pcSpells = [];
   d.pcSkillOverrides = {};
   return d;
 }
@@ -1970,6 +1976,7 @@ function fillForm(mode, data) {
   document.getElementById(cfg.hpMaxId).value = d.hpMax ?? "";
   renderAttacks(mode, d.attacks || []);
   if (mode === "pc") renderArmorItems(d.armorItems || []);
+  if (mode === "pc") renderSpellItems(d.pcSpells || []);
   // One-time migration for a token saved before Equipment was split into
   // Armor/Weapons/Adventuring Gear/Food & Drink/Treasure fields: the old
   // single blob still sits in this token's raw metadata under `equipment`
@@ -2099,6 +2106,7 @@ function readForm(mode) {
   d.hpMax = document.getElementById(cfg.hpMaxId).value;
   d.attacks = readAttacks(mode);
   d.armorItems = mode === "pc" ? readArmorItems() : [];
+  d.pcSpells = mode === "pc" ? readSpellItems() : [];
   d.pcSkillOverrides = mode === "pc" ? readPcSkillOverrides() : {};
   if (mode === "pc") {
     const autoFlags = {};
@@ -4983,6 +4991,10 @@ function renderPcStatline(d) {
   // already-manually-overridden row is left alone; see the
   // Class/Level/Alignment change handlers below for the force=true calls.
   recalcPcSkillsSection(false);
+  // Keeps the Spell Check list's visibility (Cleric/Wizard/Elf only) and
+  // mechanic-reminder note matching the current Class on every render,
+  // same passive contract as the Skills section just above.
+  recalcPcSpellSection();
   // Same passive, auto-synced-only recompute, for the Action Dice field -
   // used below instead of the possibly-stale `d.actdice` snapshot, same
   // reasoning as liveCrit above.
@@ -5790,6 +5802,133 @@ document.getElementById("add-armor-pc").addEventListener("click", () => {
   recalcPcFumbleDie();
   syncArmorIntoEquipment();
 });
+
+// ---- Spell Check (Cleric/Wizard/Elf) ----
+//
+// Only these three classes roll a Spell Check at all - a Thief's own
+// spellcasting substitute (Cast Spell from Scroll) is a Table 1-9 Skill
+// row instead (see rollPcSkill), not this. Cleric checks run off
+// Personality; Wizard/Elf off Intelligence - same ability split Table
+// 1-1's "Wizard Spells Known" column already implies for Int, and the
+// core rulebook spells out Personality for Cleric casting.
+function pcCasterAbilityId(cls) {
+  if (cls === "Cleric") return "per";
+  if (cls === "Wizard" || cls === "Elf") return "int";
+  return null;
+}
+
+function emptySpellItem() {
+  return { id: "g" + Math.random().toString(36).slice(2, 9), name: "" };
+}
+
+function spellRowHtml(item) {
+  return `
+    <div class="attack-row" data-id="${item.id}">
+      <input type="text" class="attack-name spell-row-name" placeholder="Spell name" value="${escapeHtml(item.name || "")}" />
+      <button type="button" class="hp-btn attack-roll-btn spell-row-roll-btn" title="Roll Spell Check">🎲</button>
+      <button type="button" class="attack-remove-btn spell-row-remove-btn" title="Remove">×</button>
+    </div>`;
+}
+
+function spellsListEl() {
+  return document.getElementById("pc-spells-list");
+}
+
+function renderSpellItems(items) {
+  const listEl = spellsListEl();
+  if (!listEl) return;
+  listEl.innerHTML = (items || []).map(spellRowHtml).join("");
+  attachSpellRowListeners();
+}
+
+function readSpellItems() {
+  const listEl = spellsListEl();
+  if (!listEl) return [];
+  return Array.from(listEl.querySelectorAll(".attack-row")).map(row => ({
+    id: row.dataset.id,
+    name: row.querySelector(".spell-row-name").value,
+  }));
+}
+
+function attachSpellRowListeners() {
+  const listEl = spellsListEl();
+  if (!listEl) return;
+  listEl.querySelectorAll(".attack-row").forEach(row => {
+    row.querySelector(".spell-row-name").addEventListener("input", scheduleSave);
+    row.querySelector(".spell-row-roll-btn").addEventListener("click", () => rollPcSpell(row.dataset.id));
+    row.querySelector(".spell-row-remove-btn").addEventListener("click", () => {
+      row.remove();
+      scheduleSave();
+    });
+  });
+}
+
+document.getElementById("add-spell-pc").addEventListener("click", () => {
+  spellsListEl().insertAdjacentHTML("beforeend", spellRowHtml(emptySpellItem()));
+  attachSpellRowListeners();
+  scheduleSave();
+});
+
+// Shows/hides the whole rollable Spell list (the free-text Spells
+// textarea below it always stays visible regardless of Class, same as
+// before this section existed) and keeps its mechanic-reminder note
+// matching the current Class - passive, every-render pass, same "keep
+// this in sync with Class on every render, not just right after a Class
+// change" contract as recalcPcSkillsSection/updatePcTrainedWeaponVisibility
+// etc. just above it in renderPcStatline.
+function recalcPcSpellSection() {
+  const wrapEl = document.getElementById("pc-spellcheck-wrap");
+  const noteEl = document.getElementById("pc-spellcheck-note");
+  if (!wrapEl) return;
+  const classEl = document.getElementById("pc-class");
+  const cls = classEl ? classEl.value : "";
+  const abilityId = pcCasterAbilityId(cls);
+  if (!abilityId) {
+    wrapEl.style.display = "none";
+    return;
+  }
+  wrapEl.style.display = "";
+  if (noteEl) {
+    const abilityLabel = abilityId === "per" ? "Personality" : "Intelligence";
+    const armorNote = classSpellcastingHinderedByArmor(cls)
+      ? " Equipped armor's Check Penalty applies."
+      : " Not hindered by armor (Cleric).";
+    noteEl.textContent = `Spell Check: d20 + Level + ${abilityLabel} modifier.${armorNote}`;
+  }
+}
+
+// Rolls a Spell Check for one row: 1d20 + this character's Level + the
+// casting ability's modifier (Personality for Cleric, Intelligence for
+// Wizard/Elf) + equipped armor's Check Penalty (Wizard/Elf only - see
+// classSpellcastingHinderedByArmor). A blank/0-level character still
+// rolls (just with a +0 Level term) rather than being blocked outright -
+// this app doesn't otherwise gate rolling on "should this character be
+// able to do this yet."
+function rollPcSpell(id) {
+  const row = document.querySelector(`#pc-spells-list .attack-row[data-id="${id}"]`);
+  const input = row ? row.querySelector(".spell-row-name") : null;
+  if (!row || !input) return;
+  const classEl = document.getElementById("pc-class");
+  const cls = classEl ? classEl.value : "";
+  const abilityId = pcCasterAbilityId(cls);
+  if (!abilityId) {
+    showStatus("Only Cleric/Wizard/Elf roll a Spell Check.", true, 4000);
+    return;
+  }
+  const levelEl = document.getElementById("pc-level");
+  const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
+  const abilityMod = abilityModifierFromField(`pc-${abilityId}`);
+  const penalty = classSpellcastingHinderedByArmor(cls) ? computePcCheckPenaltyTotal() : 0;
+  const modifier = level + abilityMod + penalty;
+  const rolled = Math.floor(Math.random() * 20) + 1;
+  const total = rolled + modifier;
+  const label = input.value.trim() || "Spell";
+  const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
+  const text = `${label} - Spell Check: d20 (${rolled}) ${formatSignedNumber(modifier)} = ${markRollTotal(total)}`;
+  showStatus(text, false, 4000);
+  appendChatLog({ kind: "spell", tokenName: rollerName, text, gmOnly: false });
+  broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier, notation: "d20", total, label: `${label} — Spell Check` });
+}
 
 // AC is fully deterministic in DCC (10 + Agi mod + equipped Armor +
 // equipped Shield + any misc bonus), unlike saves/attacks which need a
