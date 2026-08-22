@@ -273,6 +273,8 @@
     line-height: 1.4;
   }
   .chat-entry.gm-only { border-color: var(--accent); }
+  .chat-entry.poison { border-color: #438a56; background: #1c261e; }
+  .chat-entry.poison .chat-entry-name { color: #72d68e; }
   .chat-entry-top {
     display: flex;
     justify-content: space-between;
@@ -574,6 +576,35 @@
   .weapon-badge-backstab { background: #8a2d5c; color: #fff; font-weight: 700; }
   .weapon-badge-ammo { background: var(--border); color: var(--text); font-weight: 700; }
   .weapon-badge-ammo-out { background: #e0665a; color: #1e1b18; }
+  .weapon-badge-poison { background: #265434; color: #a4f5b8; font-weight: 700; }
+  .attack-poison-btn {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    font-size: 11px;
+    line-height: 1;
+    padding: 0;
+    cursor: pointer;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    opacity: 0.45;
+    filter: grayscale(80%);
+    transition: opacity 0.15s, background 0.15s, border-color 0.15s, filter 0.15s;
+  }
+  .attack-poison-btn:hover {
+    opacity: 0.9;
+    filter: none;
+    border-color: #438a56;
+  }
+  .attack-poison-btn.on {
+    opacity: 1;
+    filter: none;
+    background: #1e3a24;
+    border-color: #438a56;
+    color: #a4f5b8;
+    box-shadow: 0 0 4px rgba(67, 138, 86, 0.4);
+  }
   .hp-btn.disabled, .hp-btn[disabled] {
     opacity: 0.4;
     cursor: not-allowed;
@@ -3986,7 +4017,7 @@ function weaponOptionsHtml(selectedKey) {
 }
 
 function emptyAttack() {
-  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false, deedType: "", deedCustom: "", actionDieIndex: "", lineDeeds: {}, ammo: "" };
+  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false, deedType: "", deedCustom: "", actionDieIndex: "", lineDeeds: {}, ammo: "", poisoned: false };
 }
 
 // Backstab (Thief, Table 3-1) and Mighty Deed of Arms (Warrior/Dwarf,
@@ -4093,6 +4124,7 @@ function attackRowHtml(atk, mode) {
         <input type="text" class="attack-name" placeholder="Claw" value="${escapeHtml(atk.name)}" />
         <input type="text" class="attack-bonus" placeholder="+4" value="${escapeHtml(atk.bonus)}" />
         <input type="text" class="attack-damage" placeholder="1d6" value="${escapeHtml(atk.damage)}" />
+        <button type="button" class="hp-btn attack-poison-btn${atk.poisoned ? " on" : ""}" data-poisoned="${atk.poisoned ? "1" : "0"}" title="${atk.poisoned ? "Poisoned weapon: ON (Accidentally self-poisons on Natural 1)" : "Poisoned weapon: OFF (Click to mark poisoned)"}">${atk.poisoned ? "☠️" : "💧"}</button>
         <button type="button" class="hp-btn attack-roll-btn" title="Roll this attack">🎲</button>
         <button type="button" class="attack-remove-btn" title="Remove attack">×</button>
       </div>`;
@@ -4102,6 +4134,7 @@ function attackRowHtml(atk, mode) {
   const badges = [];
   if (entry.twoHanded) badges.push(`<span class="weapon-badge weapon-badge-2h" title="Two-handed weapon: uses d16 for Initiative instead of d20 when equipped">2H</span>`);
   if (entry.type === "ranged") badges.push(`<span class="weapon-badge weapon-badge-ranged">Ranged</span>`);
+  if (atk.poisoned) badges.push(`<span class="weapon-badge weapon-badge-poison" title="Poisoned weapon: self-poisons on Natural 1">☠️ Poisoned</span>`);
 
   const classEl = document.getElementById("pc-class");
   const isThief = classEl && classEl.value === "Thief";
@@ -4251,6 +4284,7 @@ function attackRowHtml(atk, mode) {
         <input type="text" class="attack-bonus" placeholder="+4" value="${escapeHtml(atk.bonus)}" data-auto-synced="${atk.bonusAuto ? "1" : "0"}" data-bonus-source="${escapeHtml(atk.bonusSource || "")}" title="${escapeHtml(bonusTooltip)}" />
         <button type="button" class="attack-quick-btn ability-toggle-btn" data-mod="${toggleMod}" title="Bonus currently uses ${currentLabel} modifier + class/level Attack bonus - click to switch to ${toggleLabel}">${toggleLabel}</button>
         <input type="text" class="attack-damage" placeholder="1d6" value="${escapeHtml(atk.damage)}" data-auto-synced="${atk.damageAuto ? "1" : "0"}" data-damage-base="${escapeHtml(atk.damageBase || "")}" data-damage-str-applies="${atk.damageStrApplies ? "1" : "0"}" />
+        <button type="button" class="hp-btn attack-poison-btn${atk.poisoned ? " on" : ""}" data-poisoned="${atk.poisoned ? "1" : "0"}" title="${atk.poisoned ? "Poisoned weapon: ON (Accidentally self-poisons on Natural 1)" : "Poisoned weapon: OFF (Click to mark poisoned)"}">${atk.poisoned ? "☠️" : "💧"}</button>
         <button type="button" class="hp-btn attack-roll-btn" title="Roll this attack">🎲</button>
         <button type="button" class="attack-remove-btn" title="Remove attack">×</button>
       </div>
@@ -4296,11 +4330,14 @@ function renderAttacks(mode, attacks) {
 function readAttacks(mode) {
   const listEl = attackListEl(mode);
   return Array.from(listEl.querySelectorAll(".attack-row")).map(row => {
+    const poisonBtn = row.querySelector(".attack-poison-btn");
+    const isPoisoned = poisonBtn ? (poisonBtn.classList.contains("on") || poisonBtn.dataset.poisoned === "1") : false;
     const base = {
       id: row.dataset.id,
       name: row.querySelector(".attack-name").value,
       bonus: row.querySelector(".attack-bonus").value,
       damage: row.querySelector(".attack-damage").value,
+      poisoned: isPoisoned,
     };
     if (mode === "pc") {
       const weaponEl = row.querySelector(".attack-weapon");
@@ -4525,6 +4562,22 @@ function attachAttackRowListeners(mode) {
     if (damageInputEl) {
       damageInputEl.addEventListener("input", () => {
         damageInputEl.dataset.autoSynced = "0";
+      });
+    }
+    const poisonBtn = row.querySelector(".attack-poison-btn");
+    if (poisonBtn) {
+      poisonBtn.addEventListener("click", () => {
+        const next = !poisonBtn.classList.contains("on");
+        poisonBtn.classList.toggle("on", next);
+        poisonBtn.dataset.poisoned = next ? "1" : "0";
+        poisonBtn.textContent = next ? "☠️" : "💧";
+        poisonBtn.title = next
+          ? "Poisoned weapon: ON (Accidentally self-poisons on Natural 1)"
+          : "Poisoned weapon: OFF (Click to mark poisoned)";
+        scheduleSave();
+        if (mode === "pc") {
+          renderAttacks(mode, readAttacks(mode));
+        }
       });
     }
     row.querySelector(".attack-remove-btn").addEventListener("click", () => {
@@ -7836,6 +7889,7 @@ function trackerLineHtml(item, stats, line) {
   // line so every line shows its die the same way the Sheet does.
   const badges = [];
   if (line.dieSides) badges.push(`<span class="weapon-badge weapon-badge-die" title="Attack die this line rolls">d${line.dieSides}</span>`);
+  if (atk.poisoned) badges.push(`<span class="weapon-badge weapon-badge-poison" title="Poisoned weapon: self-poisons on Natural 1">☠️ Poisoned</span>`);
   if (stats.mode === "pc" && entry) {
     if (entry.twoHanded) badges.push(`<span class="weapon-badge weapon-badge-2h" title="Two-handed weapon: uses d16 for Initiative instead of d20 when equipped">2H</span>`);
     if (entry.type === "ranged") badges.push(`<span class="weapon-badge weapon-badge-ranged">Ranged</span>`);
@@ -8233,8 +8287,9 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     const fumbleRow = fumbleRoll ? lookupTableRow(FUMBLE_TABLE, fumbleRoll.total) : null;
     if (fumbleRoll) rollDice.push(...fumbleRoll.dice);
     const rowText = fumbleRow ? fumbleRow.text : "";
-    text = `${atk.name || "Attack"}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${wasForced ? " (GM-forced)" : ""} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}).${untrainedNote} ${rowText}`;
-    label = "💀 FUMBLE! Natural 1 — automatic miss";
+    const poisonNote = atk.poisoned ? ` ☠️ ACCIDENTAL SELF-POISON: ${item.name || "The attacker"} has accidentally self-poisoned!` : "";
+    text = `${atk.name || "Attack"}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${wasForced ? " (GM-forced)" : ""} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}).${untrainedNote}${poisonNote} ${rowText}`;
+    label = atk.poisoned ? "💀 FUMBLE! Natural 1 — accidental self-poison" : "💀 FUMBLE! Natural 1 — automatic miss";
   } else {
     // Fresh Deed Die roll for THIS attack - see rollDeedDieForStats (no
     // longer shared/cached across other attacks the same round).
@@ -8355,6 +8410,16 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     gmOnly: stats.mode === "monster",
   });
 
+  if (isFumble && atk.poisoned) {
+    await appendChatLog({
+      kind: "poison",
+      tokenName: item.name || "Token",
+      mode: stats.mode,
+      text: `☠️ ⚠️ ${item.name || "Attacker"} rolled a Natural 1 with a poisoned weapon (${atk.name || "Weapon"}) and has accidentally self-poisoned!`,
+      gmOnly: stats.mode === "monster",
+    });
+  }
+
   broadcastDiceRoll({
     rollerName: item.name || "Token",
     dice: rollDice,
@@ -8458,6 +8523,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     const isNat1 = roll === 1;
     const isFumble = isNat1 && !twProfile.halflingFumbleRule;
     const isPlainMiss = isNat1 && twProfile.halflingFumbleRule && !halflingDoubleFumble;
+    const poisonNote = (isNat1 && atk.poisoned) ? ` ☠️ ACCIDENTAL SELF-POISON: ${item.name || "Attacker"} has accidentally self-poisoned!` : "";
 
     if (isFumble) {
       anyFumble = true;
@@ -8466,10 +8532,10 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
       const fumbleRow = fumbleRoll ? lookupTableRow(FUMBLE_TABLE, fumbleRoll.total) : null;
       if (fumbleRoll) rollDice.push(...fumbleRoll.dice);
       const rowText = fumbleRow ? fumbleRow.text : "";
-      return `${label}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${forcedNote} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}). ${rowText}`;
+      return `${label}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${forcedNote} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}).${poisonNote} ${rowText}`;
     }
     if (isPlainMiss) {
-      return `${label}: Natural 1${forcedNote} — miss (Halfling two-weapon fighting: a lone natural 1 doesn't fumble by itself).`;
+      return `${label}: Natural 1${forcedNote} — miss (Halfling two-weapon fighting: a lone natural 1 doesn't fumble by itself).${poisonNote}`;
     }
 
     // A Favorite Weapon's Luck modifier (checked per hand, since primary
@@ -8606,6 +8672,25 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     text,
     gmOnly: stats.mode === "monster",
   });
+
+  if (primaryRoll === 1 && primaryAtk.poisoned) {
+    await appendChatLog({
+      kind: "poison",
+      tokenName: item.name || "Token",
+      mode: stats.mode,
+      text: `☠️ ⚠️ ${item.name || "Attacker"} rolled a Natural 1 on their primary attack with a poisoned weapon (${primaryAtk.name || "Primary weapon"}) and has accidentally self-poisoned!`,
+      gmOnly: stats.mode === "monster",
+    });
+  }
+  if (offhandRoll === 1 && offhandAtk.poisoned) {
+    await appendChatLog({
+      kind: "poison",
+      tokenName: item.name || "Token",
+      mode: stats.mode,
+      text: `☠️ ⚠️ ${item.name || "Attacker"} rolled a Natural 1 on their off-hand attack with a poisoned weapon (${offhandAtk.name || "Off-hand weapon"}) and has accidentally self-poisoned!`,
+      gmOnly: stats.mode === "monster",
+    });
+  }
 
   broadcastDiceRoll({
     rollerName: item.name || "Token",
@@ -8889,7 +8974,7 @@ async function appendChatLog(entry) {
 function chatEntryHtml(entry) {
   const time = new Date(entry.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return `
-    <div class="chat-entry${entry.gmOnly ? " gm-only" : ""}">
+    <div class="chat-entry${entry.gmOnly ? " gm-only" : ""}${entry.kind === "poison" ? " poison" : ""}">
       <div class="chat-entry-top">
         <div class="chat-entry-name-wrap">
           ${entry.gmOnly ? `<span class="gm-badge" title="Only visible to the GM">GM</span>` : ""}
