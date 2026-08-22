@@ -2446,13 +2446,13 @@ const DCC_THIEF_SKILLS_TABLE = {
 
 // Display order + ability-modifier mapping for Table 1-9's 13 skills (see
 // the table's own comment above for sourcing of the ability mapping).
-// Backstab is deliberately left OUT of this list - it's a to-hit bonus for
-// a specific kind of attack, and this app's Attacks/Combat Tracker already
-// has its own dedicated "Declare Backstab" flow (see backstabActive/the
-// backstab-toggle-btn) for that attack, so a second, disconnected copy of
-// the number in the Skills section would just be redundant. The raw Table
-// 1-9 numbers stay in DCC_THIEF_SKILLS_TABLE above for reference even
-// though nothing reads them anymore.
+// Backstab has no roll button (`rollable: false`) - it's shown here for
+// reference, but the actual roll it applies to happens through the
+// Attacks/Combat Tracker's own "Declare Backstab" flow (see
+// backstabActive/the backstab-toggle-btn and backstabAttackBonusForStats),
+// which now folds this same Table 1-9 number into that attack's to-hit
+// roll automatically. A second, disconnected roll button here would just
+// invite rolling it twice.
 // `isDie` flags Cast Spell from Scroll, whose "bonus" is actually the
 // sides of the action die it rolls (see DCC_THIEF_SKILLS_TABLE's comment).
 // `checkPenaltyApplies` flags the skills the armor Check Penalty applies
@@ -2463,6 +2463,7 @@ const DCC_THIEF_SKILLS_TABLE = {
 // every class except Cleric (see classSpellcastingHinderedByArmor), and a
 // Thief attempting to read a scroll is no exception.
 const THIEF_SKILL_DEFS = [
+  { key: "backstab", label: "Backstab (attack bonus)", ability: null, rollable: false },
   { key: "sneakSilently", label: "Sneak Silently", ability: "agi", checkPenaltyApplies: true },
   { key: "hideInShadows", label: "Hide in Shadows", ability: "agi" },
   { key: "pickPocket", label: "Pick Pocket", ability: "agi" },
@@ -2497,8 +2498,8 @@ const DCC_HALFLING_SNEAK_HIDE_BY_LEVEL = [3, 5, 7, 8, 9, 11, 12, 13, 14, 15];
 // "needs-alignment" (Thief, has a level, but no Alignment picked - every
 // column in Table 1-9 is alignment-specific, unlike Title's per-class mix
 // of alignment-gated and "any" entries), or "ok" (rows is the full list,
-// each {key, label, ability, isDie, checkPenaltyApplies, classBonus} -
-// classBonus is a flat bonus normally, or Cast Spell from Scroll's die
+// each {key, label, ability, isDie, checkPenaltyApplies, rollable,
+// classBonus} - classBonus is a flat bonus normally, or Cast Spell from Scroll's die
 // sides when isDie).
 function thiefSkillsData(cls, levelRaw, alignmentRaw) {
   if ((cls || "").trim() !== "Thief") return { status: "not-thief" };
@@ -2514,6 +2515,7 @@ function thiefSkillsData(cls, levelRaw, alignmentRaw) {
     ability: def.ability,
     isDie: !!def.isDie,
     checkPenaltyApplies: !!def.checkPenaltyApplies,
+    rollable: def.rollable !== false,
     classBonus: table.skills[def.key][clamped],
   }));
   return { status: "ok", alignmentLabel: table.label, level: clamped + 1, rows };
@@ -4015,6 +4017,23 @@ function backstabDamageNotationForStats(stats, atk) {
   const damageStrApplies = entry.type === "melee" || entry.strAtClose;
   const mod = damageStrApplies ? abilityModifierFromRaw(stats.data.str) : 0;
   return `${entry.backstabDamage}${mod ? formatSignedNumber(mod) : ""}`;
+}
+
+// Table 1-9's own "Backstab" row - a flat to-hit bonus (no ability
+// modifier applies, per that table's own footnotes) that stacks with the
+// row's normal Bonus specifically when Backstab is declared for this
+// attack (see rollAttackFor/rollTwoWeaponAttack) - separate from, and in
+// addition to, the weapon's own sneak-attack DAMAGE die swap
+// (backstabDamageNotationForStats above), which is the only half of Table
+// 3-1's Backstab rule this app implemented until now. Resolves to 0 for
+// anything that isn't a Thief with both Level and Alignment set - reuses
+// thiefSkillsData rather than re-deriving the table lookup, so this stays
+// in lockstep with whatever the Skills section itself shows for Backstab.
+function backstabAttackBonusForStats(stats) {
+  const data = thiefSkillsData(stats.data.class, stats.data.level, stats.data.alignment);
+  if (data.status !== "ok") return 0;
+  const row = data.rows.find(r => r.key === "backstab");
+  return row ? row.classBonus : 0;
 }
 
 // Which Two-Weapon Fighting roles (if any) a given weapon can fill.
@@ -6396,13 +6415,22 @@ function skillRowHtml(row, prevOverride) {
   const noteBits = [];
   if (row.ability) noteBits.push(`${abbrev} mod applies`);
   if (row.checkPenaltyApplies) noteBits.push("armor Check Penalty applies");
+  // Backstab is the only `rollable: false` row today - it's not rolled on
+  // its own; the Attacks/Combat Tracker's "Declare Backstab" flow already
+  // folds this same number into that attack's to-hit roll automatically
+  // (see backstabAttackBonusForStats), so a second roll button here would
+  // just invite double-counting it.
+  if (row.rollable === false) noteBits.push("auto-applied when you declare Backstab on an attack");
   const note = noteBits.length ? `<small>${escapeHtml(noteBits.join(" · "))}</small>` : "";
+  const rollBtnHtml = row.rollable === false
+    ? ""
+    : `<button type="button" class="skill-row-roll-btn" data-key="${row.key}" title="Roll ${escapeHtml(row.label)}">🎲</button>`;
   return `
     <div class="skill-row" data-key="${row.key}" data-label="${escapeHtml(row.label)}" data-ability="${row.ability || ""}" data-is-die="${row.isDie ? "1" : "0"}" data-check-penalty-applies="${row.checkPenaltyApplies ? "1" : "0"}">
       <div class="skill-row-label">${escapeHtml(row.label)}${note}</div>
       <input type="text" class="skill-row-value" id="pc-skill-${row.key}" data-key="${row.key}" data-auto-synced="${auto ? "1" : "0"}" value="${escapeHtml(value)}" title="${escapeHtml(skillRowTitle(row))}" />
       <button type="button" class="derived-sync-btn skill-row-sync-btn" data-key="${row.key}" title="Recompute from Level/Alignment/Ability/Armor">↻</button>
-      <button type="button" class="skill-row-roll-btn" data-key="${row.key}" title="Roll ${escapeHtml(row.label)}">🎲</button>
+      ${rollBtnHtml}
     </div>`;
 }
 
@@ -8040,6 +8068,14 @@ async function rollAttackFor(itemId, attackId, slotKey) {
   const atkForDie = { ...atk, actionDieIndex: effectiveSlotKey };
 
   const atkMod = parseModifier(atk.bonus);
+  // Table 1-9's Backstab bonus (a flat to-hit bonus, no ability modifier -
+  // see backstabAttackBonusForStats) applies to THIS roll only when the
+  // Tracker's "Declare Backstab" flag is active for this specific line.
+  // Computed once here so the to-hit total below, the crit override
+  // further down (a successful Backstab is always a critical hit, Table
+  // 3-1), and the result text all share the same value.
+  const backstabActive = !!lineState.backstabActive;
+  const backstabBonus = backstabActive ? backstabAttackBonusForStats(stats) : 0;
   // Which of this character's Action Dice this attack uses (Table 1-5/
   // .../1-18, or a Dwarf's bonus Shield Bash) - see
   // actionDieProfileForAttack. A monster attack, or a PC row still on its
@@ -8065,7 +8101,11 @@ async function rollAttackFor(itemId, attackId, slotKey) {
   // from a higher level, or a Dwarf's Shield Bash) instead uses the same
   // "maxOnly" convention Table 4-3 already applies to a two-weapon
   // off-hand - see actionDieProfileForAttack's comment for why.
-  const isCrit = actionDieProfile.isMain ? (d20Roll >= profile.threatRange) : (d20Roll === atkSides);
+  // A declared Backstab overrides all of that: per Table 3-1, a successful
+  // Backstab attack is automatically a critical hit regardless of the
+  // natural die result (it still must beat the target's AC to actually be
+  // "successful" - see the autoHitNote text further down).
+  const isCrit = backstabActive || (actionDieProfile.isMain ? (d20Roll >= profile.threatRange) : (d20Roll === atkSides));
   const isFumble = d20Roll === 1;
   const rollDice = [{ sides: atkSides, value: d20Roll }];
   const untrainedNote = untrained ? " (untrained weapon, Table 4-1: -1 die)" : "";
@@ -8090,7 +8130,7 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     // Fresh Deed Die roll for THIS attack - see rollDeedDieForStats (no
     // longer shared/cached across other attacks the same round).
     const deed = rollDeedDieForStats(stats);
-    const toHit = d20Roll + atkMod + (deed ? deed.total : 0);
+    const toHit = d20Roll + atkMod + backstabBonus + (deed ? deed.total : 0);
     // A Backstab declared on this specific slot (Combat Tracker, Thief
     // only) swaps in the weapon's sneak-attack die for THIS roll instead
     // of the row's normal stored Damage text - computed fresh here rather
@@ -8099,11 +8139,19 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     // revert to normal" bug: the base data was never touched to begin
     // with). Falls back to the normal Damage text if this weapon has no
     // Backstab die on file.
-    const backstabNotation = lineState.backstabActive ? backstabDamageNotationForStats(stats, atk) : null;
+    const backstabNotation = backstabActive ? backstabDamageNotationForStats(stats, atk) : null;
     const dmg = rollDamage(backstabNotation || atk.damage);
     const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)})` : "";
     const deedLine = mightyDeedResultText(lineState.deedType, lineState.deedCustom, deed);
-    const backstabLine = backstabNotation ? ` 🗡️ Backstab (${backstabNotation}) applied to this attack's damage.` : "";
+    // Backstab bonus shown as its own labeled term below (backstabModText)
+    // rather than folded silently into atkMod, and this line spells out
+    // both halves of Table 3-1/1-9's Backstab rule - the to-hit bonus and
+    // the damage-die swap - whenever a Backstab was actually declared,
+    // even if this particular weapon has no special sneak-attack die on
+    // file (backstabNotation null) and only the to-hit bonus applies.
+    const backstabLine = backstabActive
+      ? ` 🗡️ Backstab declared${backstabBonus ? ` (${formatModifier(backstabBonus)} to hit, Table 1-9)` : ""}${backstabNotation ? ` — ${backstabNotation} applied to this attack's damage` : ""}.`
+      : "";
     if (deed) rollDice.push({ sides: deed.sides, value: deed.roll });
     if (dmg) rollDice.push(...dmg.dice);
 
@@ -8134,11 +8182,21 @@ async function rollAttackFor(itemId, attackId, slotKey) {
       // An extra Action Die's crit (see isCrit above) is NOT an automatic
       // hit the way the character's main attack's natural max is - same
       // wording Table 4-3 uses for a two-weapon off-hand's "maxOnly" crit.
-      const autoHitNote = actionDieProfile.isMain ? " — automatic hit" : " (not an automatic hit — must still beat the target's AC)";
-      critLine = ` ${markCritAlert("💥 CRITICAL HIT!")} Natural ${d20Roll}${wasForced ? " (GM-forced)" : ""}${autoHitNote}. ${critDieText ? `${critDieText} — ` : ""}${rowText}`;
+      // A Backstab-triggered crit gets its own wording instead, since it
+      // isn't tied to the natural die result at all (Table 3-1: any
+      // successful Backstab is automatically a critical hit) - but still
+      // carries the same "must beat the target's AC" caveat everywhere
+      // else here, since this app can't check that against a specific
+      // target for any roll.
+      const autoHitNote = backstabActive
+        ? " — any successful Backstab is an automatic critical hit (Table 3-1), but still must beat the target's AC to actually hit"
+        : (actionDieProfile.isMain ? " — automatic hit" : " (not an automatic hit — must still beat the target's AC)");
+      const critReasonText = backstabActive ? "🗡️ Backstab attack" : `Natural ${d20Roll}${wasForced ? " (GM-forced)" : ""}`;
+      critLine = ` ${markCritAlert("💥 CRITICAL HIT!")} ${critReasonText}${autoHitNote}. ${critDieText ? `${critDieText} — ` : ""}${rowText}`;
     }
 
-    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${atkSides} ${d20Roll}${wasForced ? " forced" : ""}${formatModifier(atkMod)}${deedText})${untrainedNote}`;
+    const backstabModText = backstabActive && backstabBonus ? `${formatModifier(backstabBonus)}(backstab)` : "";
+    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${atkSides} ${d20Roll}${wasForced ? " forced" : ""}${formatModifier(atkMod)}${deedText}${backstabModText})${untrainedNote}`;
     const dmgText = dmg !== null
       ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${isCrit ? " +crit" : ""})`
       : "";
@@ -8277,6 +8335,15 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
 
   function resolveHand(atk, roll, sides, isPrimary) {
     const lineState = getLineDeedState(atk, slotKey);
+    // Same Backstab bonus/auto-crit override as single-weapon rollAttackFor
+    // (see its comment). Each hand of a two-weapon pair has its OWN
+    // lineDeeds (keyed by that hand's own attackId, not shared - see
+    // deriveTrackerLines/the Tracker's two separate Backstab toggle
+    // buttons for a "tw" pair), so this is evaluated per hand: declaring
+    // Backstab on just one weapon backstabs with that weapon only, same
+    // as it would at the table.
+    const backstabActive = !!lineState.backstabActive;
+    const backstabBonus = backstabActive ? backstabAttackBonusForStats(stats) : 0;
     const label = atk.name || (isPrimary ? "Primary hand" : "Off-hand");
     const forcedNote = isPrimary && wasForced ? " (GM-forced)" : "";
     const isNat1 = roll === 1;
@@ -8308,15 +8375,21 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     // though they're one action.
     const deed = rollDeedDieForStats(stats);
     if (deed) rollDice.push({ sides: deed.sides, value: deed.roll });
-    const toHit = roll + atkMod + (deed ? deed.total : 0);
+    const toHit = roll + atkMod + backstabBonus + (deed ? deed.total : 0);
     // Same on-the-fly Backstab swap as single-weapon rollAttackFor, per
     // hand - see its comment for why this never mutates atk.damage itself.
-    const backstabNotation = lineState.backstabActive ? backstabDamageNotationForStats(stats, atk) : null;
+    const backstabNotation = backstabActive ? backstabDamageNotationForStats(stats, atk) : null;
     const dmg = rollDamage(backstabNotation || atk.damage);
     const deedText = deed ? `+${deed.notation}(${deed.roll}${formatModifier(deed.mod)})` : "";
     const deedLine = mightyDeedResultText(lineState.deedType, lineState.deedCustom, deed);
-    const backstabLine = backstabNotation ? ` 🗡️ Backstab (${backstabNotation}) applied to this hand's damage.` : "";
-    if (lineState.backstabActive) backstabRevertQueue.push(atk.id);
+    // Same combined to-hit-bonus + damage-swap wording as single-weapon
+    // rollAttackFor's backstabLine (see its comment) - shown for this hand
+    // whenever Backstab is declared, even if this hand's weapon has no
+    // special sneak-attack die on file.
+    const backstabLine = backstabActive
+      ? ` 🗡️ Backstab declared${backstabBonus ? ` (${formatModifier(backstabBonus)} to hit, Table 1-9)` : ""}${backstabNotation ? ` — ${backstabNotation} applied to this hand's damage` : ""}.`
+      : "";
+    if (backstabActive) backstabRevertQueue.push(atk.id);
     const untrainedNote = isWeaponUntrained(stats, atk) ? " (untrained weapon, Table 4-1: -1 die)" : "";
     if (dmg) rollDice.push(...dmg.dice);
     let dmgTotal = dmg !== null ? dmg.total + (deed ? deed.total : 0) : null;
@@ -8324,8 +8397,12 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     // Off-hand can never crit under Table 4-3 / the Halfling rule -
     // critical hits while fighting two-weapon are a primary-hand-only
     // possibility, and even then only at whatever eligibility this
-    // Agility tier (or the Halfling ability) allows.
-    const critEligible = isPrimary && twProfile.primaryCrit !== "none" && roll === sides;
+    // Agility tier (or the Halfling ability) allows. A declared Backstab
+    // is a more specific rule that overrides this restriction (Table 3-1:
+    // any successful Backstab is an automatic crit, no exception carved
+    // out for an off-hand attack), same as it overrides the natural-roll
+    // requirement in single-weapon rollAttackFor.
+    const critEligible = backstabActive || (isPrimary && twProfile.primaryCrit !== "none" && roll === sides);
     let critLine = "";
     if (critEligible) {
       anyCrit = true;
@@ -8356,12 +8433,18 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
       // way a normal natural-max roll is - Table 4-3 says it still has to
       // beat the target's AC. This app doesn't track target AC for any
       // roll, so that check is left to the table, same as everywhere else
-      // here - the difference is just this line's wording.
-      const autoHitNote = twProfile.primaryCrit === "maxOnly" ? " (not an automatic hit — must still beat the target's AC)" : " — automatic hit";
-      critLine = ` ${markCritAlert("💥 CRITICAL HIT!")} Natural ${roll}${forcedNote}${autoHitNote}. ${critDieText ? `${critDieText} — ` : ""}${rowText}`;
+      // here - the difference is just this line's wording. A Backstab-
+      // triggered crit (see critEligible above) gets its own wording
+      // instead, same as single-weapon rollAttackFor.
+      const autoHitNote = backstabActive
+        ? " — any successful Backstab is an automatic critical hit (Table 3-1), but still must beat the target's AC to actually hit"
+        : (twProfile.primaryCrit === "maxOnly" ? " (not an automatic hit — must still beat the target's AC)" : " — automatic hit");
+      const critReasonText = backstabActive ? "🗡️ Backstab attack" : `Natural ${roll}${forcedNote}`;
+      critLine = ` ${markCritAlert("💥 CRITICAL HIT!")} ${critReasonText}${autoHitNote}. ${critDieText ? `${critDieText} — ` : ""}${rowText}`;
     }
 
-    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${sides} ${roll}${forcedNote}${formatModifier(atkMod)}${deedText})${untrainedNote}`;
+    const backstabModText = backstabActive && backstabBonus ? `${formatModifier(backstabBonus)}(backstab)` : "";
+    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${sides} ${roll}${forcedNote}${formatModifier(atkMod)}${deedText}${backstabModText})${untrainedNote}`;
     const dmgText = dmg !== null
       ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${critEligible ? " +crit" : ""})`
       : "";
