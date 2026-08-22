@@ -1529,6 +1529,7 @@
         <fieldset id="pc-skills-fieldset" style="display:none">
           <legend id="pc-skills-legend">Skills</legend>
           <div class="fumble-die-note" id="pc-skills-subtitle" style="margin-bottom:6px; display:none;"></div>
+          <div class="fumble-die-note" id="pc-skills-mechanic-note" style="margin-bottom:6px; display:none;"></div>
           <div class="tables-modal-empty" id="pc-skills-placeholder" style="display:none; margin-bottom:6px;"></div>
           <div class="skills-list" id="pc-skills-list"></div>
         </fieldset>
@@ -1980,6 +1981,10 @@ function fillForm(mode, data) {
     // luck-less number the moment its sheet is reopened, until something
     // else happened to touch it.
     refreshAutoSyncedAttackBonuses();
+    // Backfills Thieves' Cant into Languages for a Thief token saved
+    // before this feature existed (or just re-affirms it's still there) -
+    // see syncThievesCantIntoLanguages's own comment.
+    syncThievesCantIntoLanguages();
   }
   // Same "still auto-managed?" restoration as above, for the monster
   // Crit field's Monster Type + HD auto-fill.
@@ -2462,19 +2467,27 @@ const DCC_THIEF_SKILLS_TABLE = {
 // Scroll is also flagged since armor hinders spellcasting checks for
 // every class except Cleric (see classSpellcastingHinderedByArmor), and a
 // Thief attempting to read a scroll is no exception.
+// `requiresTools` flags the five skills the Thief class text names as
+// needing a set of thieves' tools to attempt at all ("A thief needs tools
+// to pick locks, find and disable traps, climb sheer surfaces, forge
+// documents, and handle poisons. A 1st-level thief must purchase a set of
+// thieves' tools that allows him to use these skills.") - every OTHER
+// skill here (Sneak Silently, Hide in Shadows, Pick Pocket, Disguise Self,
+// Read Languages, Cast Spell from Scroll, and Backstab) needs no tools,
+// just the thief themselves.
 const THIEF_SKILL_DEFS = [
   { key: "backstab", label: "Backstab (attack bonus)", ability: null, rollable: false },
   { key: "sneakSilently", label: "Sneak Silently", ability: "agi", checkPenaltyApplies: true },
   { key: "hideInShadows", label: "Hide in Shadows", ability: "agi" },
   { key: "pickPocket", label: "Pick Pocket", ability: "agi" },
-  { key: "climbSheerSurfaces", label: "Climb Sheer Surfaces", ability: "agi", checkPenaltyApplies: true },
-  { key: "pickLock", label: "Pick Lock", ability: "agi" },
-  { key: "findTrap", label: "Find Trap", ability: "int" },
-  { key: "disableTrap", label: "Disable Trap", ability: "agi" },
-  { key: "forgeDocument", label: "Forge Document", ability: "agi" },
+  { key: "climbSheerSurfaces", label: "Climb Sheer Surfaces", ability: "agi", checkPenaltyApplies: true, requiresTools: true },
+  { key: "pickLock", label: "Pick Lock", ability: "agi", requiresTools: true },
+  { key: "findTrap", label: "Find Trap", ability: "int", requiresTools: true },
+  { key: "disableTrap", label: "Disable Trap", ability: "agi", requiresTools: true },
+  { key: "forgeDocument", label: "Forge Document", ability: "agi", requiresTools: true },
   { key: "disguiseSelf", label: "Disguise Self", ability: "per" },
   { key: "readLanguages", label: "Read Languages", ability: "int" },
-  { key: "handlePoison", label: "Handle Poison", ability: null },
+  { key: "handlePoison", label: "Handle Poison", ability: null, requiresTools: true },
   // Always true here (not conditioned on class) since THIEF_SKILL_DEFS is
   // only ever used for the Thief class, and Thief is never Cleric - see
   // classSpellcastingHinderedByArmor.
@@ -2499,8 +2512,8 @@ const DCC_HALFLING_SNEAK_HIDE_BY_LEVEL = [3, 5, 7, 8, 9, 11, 12, 13, 14, 15];
 // column in Table 1-9 is alignment-specific, unlike Title's per-class mix
 // of alignment-gated and "any" entries), or "ok" (rows is the full list,
 // each {key, label, ability, isDie, checkPenaltyApplies, rollable,
-// classBonus} - classBonus is a flat bonus normally, or Cast Spell from Scroll's die
-// sides when isDie).
+// requiresTools, classBonus} - classBonus is a flat bonus normally, or
+// Cast Spell from Scroll's die sides when isDie).
 function thiefSkillsData(cls, levelRaw, alignmentRaw) {
   if ((cls || "").trim() !== "Thief") return { status: "not-thief" };
   const level = parseLevelNumber(levelRaw);
@@ -2516,6 +2529,7 @@ function thiefSkillsData(cls, levelRaw, alignmentRaw) {
     isDie: !!def.isDie,
     checkPenaltyApplies: !!def.checkPenaltyApplies,
     rollable: def.rollable !== false,
+    requiresTools: !!def.requiresTools,
     classBonus: table.skills[def.key][clamped],
   }));
   return { status: "ok", alignmentLabel: table.label, level: clamped + 1, rows };
@@ -5858,6 +5872,29 @@ function syncWeaponsIntoEquipment() {
   scheduleSave();
 }
 
+// Thieves' Cant: "Thieves speak a secret language called the cant known
+// only to members of their class... Teaching the cant to a non-thief is
+// punishable by death." Every Thief knows it automatically, so it gets the
+// same auto-managed-line treatment as the Equipment textareas above
+// (syncArmorIntoEquipment/syncWeaponsIntoEquipment) - stripped and re-added
+// by exact line match every time Class changes (or a saved token loads),
+// so it never duplicates and it disappears again the moment the character
+// stops being a Thief, without disturbing anything else the player has
+// typed in this field (Common, an alignment tongue, bonus languages from a
+// high Intelligence, etc.).
+function syncThievesCantIntoLanguages() {
+  const el = document.getElementById("pc-languages");
+  if (!el) return;
+  const classEl = document.getElementById("pc-class");
+  const isThief = !!classEl && classEl.value === "Thief";
+  const lines = (el.value || "").split("\n").filter(line => line.trim() !== "Thieves' Cant");
+  while (lines.length && lines[0].trim() === "") lines.shift();
+  el.value = isThief
+    ? (lines.length ? ["Thieves' Cant", "", ...lines].join("\n") : "Thieves' Cant")
+    : lines.join("\n");
+  scheduleSave();
+}
+
 // Occupation dropdown (Table 1-3) + hover tooltip with suggested skill
 // checks. The actual saved value still lives in the hidden #pc-occupation
 // field so the rest of the save/load pipeline (PC_TEXT_FIELD_IDS,
@@ -6065,6 +6102,10 @@ document.getElementById("pc-class").addEventListener("change", () => {
   // under a fresh set of column data - same force-overwrite contract as
   // Crit Die/Deed Die/Title above.
   recalcPcSkillsSection(true);
+  // A new Class also means Thieves' Cant should appear (or disappear) in
+  // Languages - see syncThievesCantIntoLanguages's own comment for why
+  // this is safe to run unconditionally on every Class change.
+  syncThievesCantIntoLanguages();
   // Halfling's special two-weapon rule waives the off-hand's "light
   // weapon" restriction - switching Class in or out of Halfling can
   // change which weapons are eligible for that role, so the attack rows
@@ -6354,8 +6395,8 @@ function activeSkillRowDefs(cls, levelRaw, alignmentRaw) {
       // ever names Sneak Silently (the "move silently" check) - Hide in
       // Shadows stays unaffected by armor, same as it is for a Thief.
       rows: [
-        { key: "sneakSilently", label: "Sneak Silently", ability: "agi", isDie: false, checkPenaltyApplies: true, classBonus: bonus },
-        { key: "hideInShadows", label: "Hide in Shadows", ability: "agi", isDie: false, checkPenaltyApplies: false, classBonus: bonus },
+        { key: "sneakSilently", label: "Sneak Silently", ability: "agi", isDie: false, checkPenaltyApplies: true, requiresTools: false, classBonus: bonus },
+        { key: "hideInShadows", label: "Hide in Shadows", ability: "agi", isDie: false, checkPenaltyApplies: false, requiresTools: false, classBonus: bonus },
       ],
     };
   }
@@ -6387,21 +6428,48 @@ function skillRowValueText(row) {
   return c.isDie ? `d${c.sides}` : formatSignedNumber(c.total);
 }
 
+// Per-skill rules-reference tooltip text, sourced directly from the Thief
+// class's own skill descriptions - mostly DC guidance (each check is never
+// opposed; the player rolls this total vs. whatever DC the Judge assigns
+// from the ranges below), plus Backstab's own restriction/crit rule, which
+// isn't a DC at all but fits the same "extra rules text in this row's
+// tooltip" slot. Keyed by the same THIEF_SKILL_DEFS keys;
+// sneakSilently/hideInShadows are shared with Halfling's Table 1-18 rows
+// (same skillRowTitle function, same DCs - nothing here is Thief-specific
+// praxis, just the check itself), so this lookup applies to both variants
+// of the Skills section.
+const THIEF_SKILL_DC_GUIDANCE = {
+  backstab: "Attacking from behind, or when the target is otherwise unaware, adds this bonus to the attack roll - and a hit is automatically a critical hit (Table 3-1), rolled against the crit table for the thief's own level. Only possible against a creature with clear anatomical vulnerabilities. Typically set up with a successful Sneak Silently or Hide in Shadows check first.",
+  sneakSilently: "Never an opposed check - roll vs. a DC set by the surface: DC 5 cushioned (grass, carpet), DC 10 stone, DC 15 creaking wood, DC 20 crackling leaves/still water/gravel. On a success the thief's movement can't be heard (short of demi-gods/extraordinary magic) - often set up before a Backstab attempt.",
+  hideInShadows: "Never an opposed check - roll vs. a DC set by lighting/cover: DC 5 at night or in dim/shaded light, DC 10 moderate cover or under a full moon, DC 15 daylight in a dark shadow or behind a solid object, DC 20 broad daylight with minimal cover. Can even be attempted in broad daylight. Often set up before a Backstab attempt.",
+  pickPocket: "DC 5 for an unaware target with a loose pocket/unsecured coin pouch, up to DC 20 for a target actively watching their own belongings. Also covers card tricks, minor magic tricks, and other legerdemain.",
+  climbSheerSurfaces: "DC 10 for a normal stone wall, up to DC 20 for a perfectly smooth surface with no visible handholds.",
+  pickLock: "DC 10 for a mundane lock, DC 20 for an extremely well-crafted one, DC 25+ for a lock of legendary manufacture.",
+  findTrap: "DC 10 for a large, bulky trap (a floor pit, spring-loaded axe, dropped portcullis), DC 15-20+ for something subtler.",
+  disableTrap: "DC 10 for a large, bulky trap (a floor pit, spring-loaded axe, dropped portcullis), DC 15-20+ for something subtler. A natural 1 on this roll triggers the trap.",
+  forgeDocument: "DC 5-20, scaling with the complexity and originality of the source document being forged.",
+  disguiseSelf: "DC 5 to resemble someone of the same basic race/build, DC 10 to change significant facial features, DC 15 to change mannerisms/height, DC 20+ minimum to fool someone close to the target (a parent, a spouse).",
+  readLanguages: "DC 10 to interpret simple meaning, DC 15 for anything more detailed.",
+  handlePoison: "DC 10 safety check every time poison is applied to a blade or other surface - fail it and the thief accidentally poisons themself. A natural 1 on any attack roll made with a poisoned blade also self-poisons, on top of any Fumble result (not automated by this app - track it yourself).",
+  castSpellFromScroll: "DC is the spell's own normal spell check DC - roll the die shown (not a d20) to try to beat it. Spellburn may not be used to boost this roll.",
+};
+
 function skillRowTitle(row) {
   const abbrev = SKILL_ABILITY_ABBREV[row.ability] || "";
   const c = computeSkillRowTotal(row);
   const autoNote = `Auto-fills from Level/Alignment${row.ability ? `/${abbrev}` : ""}${row.checkPenaltyApplies ? "/armor Check Penalty" : ""}. Type over it any time; ↻ resets it back to auto.`;
+  const dcNote = THIEF_SKILL_DC_GUIDANCE[row.key] ? ` ${THIEF_SKILL_DC_GUIDANCE[row.key]}` : "";
   if (c.isDie) {
     const dieParts = [];
     if (row.ability) dieParts.push(`your ${abbrev} modifier (currently ${formatSignedNumber(c.abilityMod)})`);
     if (row.checkPenaltyApplies && c.penalty) dieParts.push(`the armor Check Penalty (${formatSignedNumber(c.penalty)})`);
     const modNote = dieParts.length ? ` Roll 1d${c.sides} plus ${dieParts.join(" and ")}.` : ` Roll 1d${c.sides}.`;
-    return `${modNote} ${autoNote}`;
+    return `${modNote} ${autoNote}${dcNote}`;
   }
   const parts = [`${formatSignedNumber(c.classBonus)} class`];
   if (row.ability) parts.push(`${formatSignedNumber(c.abilityMod)} ${abbrev}`);
   if (row.checkPenaltyApplies && c.penalty) parts.push(`${formatSignedNumber(c.penalty)} armor Check Penalty`);
-  return `${formatSignedNumber(c.total)} (${parts.join(", ")}). ${autoNote}`;
+  return `${formatSignedNumber(c.total)} (${parts.join(", ")}). ${autoNote}${dcNote}`;
 }
 
 // Builds one row's HTML. `prevOverride` (from readPcSkillOverrides, or a
@@ -6421,12 +6489,19 @@ function skillRowHtml(row, prevOverride) {
   // (see backstabAttackBonusForStats), so a second roll button here would
   // just invite double-counting it.
   if (row.rollable === false) noteBits.push("auto-applied when you declare Backstab on an attack");
+  // "A thief needs tools to pick locks, find and disable traps, climb
+  // sheer surfaces, forge documents, and handle poisons. A 1st-level
+  // thief must purchase a set of thieves' tools that allows him to use
+  // these skills" - flagged per-row (requiresTools) rather than as one
+  // blanket note, since it's only these five Table 1-9 skills, not the
+  // whole section (see THIEF_SKILL_DEFS's own comment).
+  if (row.requiresTools) noteBits.push("🧰 requires thieves' tools");
   const note = noteBits.length ? `<small>${escapeHtml(noteBits.join(" · "))}</small>` : "";
   const rollBtnHtml = row.rollable === false
     ? ""
     : `<button type="button" class="skill-row-roll-btn" data-key="${row.key}" title="Roll ${escapeHtml(row.label)}">🎲</button>`;
   return `
-    <div class="skill-row" data-key="${row.key}" data-label="${escapeHtml(row.label)}" data-ability="${row.ability || ""}" data-is-die="${row.isDie ? "1" : "0"}" data-check-penalty-applies="${row.checkPenaltyApplies ? "1" : "0"}">
+    <div class="skill-row" data-key="${row.key}" data-label="${escapeHtml(row.label)}" data-ability="${row.ability || ""}" data-is-die="${row.isDie ? "1" : "0"}" data-check-penalty-applies="${row.checkPenaltyApplies ? "1" : "0"}" data-requires-tools="${row.requiresTools ? "1" : "0"}">
       <div class="skill-row-label">${escapeHtml(row.label)}${note}</div>
       <input type="text" class="skill-row-value" id="pc-skill-${row.key}" data-key="${row.key}" data-auto-synced="${auto ? "1" : "0"}" value="${escapeHtml(value)}" title="${escapeHtml(skillRowTitle(row))}" />
       <button type="button" class="derived-sync-btn skill-row-sync-btn" data-key="${row.key}" title="Recompute from Level/Alignment/Ability/Armor">↻</button>
@@ -6493,6 +6568,7 @@ function recalcPcSkillsSection(force) {
   if (!fieldset || !listEl) return;
   const legendEl = document.getElementById("pc-skills-legend");
   const subtitleEl = document.getElementById("pc-skills-subtitle");
+  const mechanicNoteEl = document.getElementById("pc-skills-mechanic-note");
   const placeholderEl = document.getElementById("pc-skills-placeholder");
   const classEl = document.getElementById("pc-class");
   const levelEl = document.getElementById("pc-level");
@@ -6510,6 +6586,7 @@ function recalcPcSkillsSection(force) {
 
   if (info.status !== "ok") {
     if (subtitleEl) { subtitleEl.style.display = "none"; subtitleEl.textContent = ""; }
+    if (mechanicNoteEl) { mechanicNoteEl.style.display = "none"; mechanicNoteEl.textContent = ""; }
     if (placeholderEl) {
       placeholderEl.style.display = "";
       placeholderEl.textContent = info.status === "no-level"
@@ -6526,6 +6603,18 @@ function recalcPcSkillsSection(force) {
   if (subtitleEl) {
     subtitleEl.style.display = "";
     subtitleEl.textContent = info.subtitle || "";
+  }
+  // General skill-check mechanic reminder (applies to both the Thief's
+  // Table 1-9 checks and the Halfling's Sneak/Hide checks - same "roll and
+  // beat a DC" resolution either way): "the player rolls d20 and adds
+  // their modifier. They must beat a DC assigned to the task at hand. An
+  // easy task is DC 5, while an extremely difficult task is DC 20." Only
+  // a Thief's rows ever carry requiresTools, so the tools sentence only
+  // ever appears for that variant of this section, never for Halfling.
+  if (mechanicNoteEl) {
+    mechanicNoteEl.style.display = "";
+    const anyRequiresTools = (info.rows || []).some(row => row.requiresTools);
+    mechanicNoteEl.textContent = `Roll d20 + the modifier shown, vs. a DC the Judge sets for the task (DC 5 = easy … DC 20 = extremely difficult, e.g. an exceptional lock or the pocket of an alert guard).${anyRequiresTools ? " Skills marked 🧰 need a set of thieves' tools - every 1st-level Thief is expected to own one." : ""}`;
   }
 
   // A just-loaded token's saved overrides (pendingPcSkillOverrides) always
@@ -6602,7 +6691,14 @@ function rollPcSkill(key) {
   const bonus = parseModifier(input.value);
   const rolled = Math.floor(Math.random() * 20) + 1;
   const total = rolled + bonus;
-  showStatus(`${label}: d20 (${rolled}) ${formatSignedNumber(bonus)} = ${markRollTotal(total)}`, false, 4000);
+  // Disable Trap's own rule: "A natural 1 on a disable trap check triggers
+  // the trap." Every other skill here just fails on a low roll like any
+  // ordinary DC check - this is the one with a distinct natural-1
+  // consequence worth calling out in the result text, the same way a
+  // natural 1 has special text on an attack roll (Fumble) elsewhere in
+  // this app.
+  const trapTriggerNote = (key === "disableTrap" && rolled === 1) ? " ⚠️ Natural 1 - the trap triggers!" : "";
+  showStatus(`${label}: d20 (${rolled}) ${formatSignedNumber(bonus)} = ${markRollTotal(total)}${trapTriggerNote}`, rolled === 1 && key === "disableTrap", trapTriggerNote ? 6000 : 4000);
   broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: bonus, notation: "d20", total, label });
 }
 
@@ -7763,7 +7859,7 @@ function trackerLineHtml(item, stats, line) {
 
   const extraControls = [];
   if (canBackstab) {
-    extraControls.push(`<button type="button" class="hp-btn backstab-toggle-btn${lineState.backstabActive ? " on" : ""}" data-row-key="${rowKey}" title="Declare a Backstab (Table 3-1: ${escapeHtml(entry.backstabDamage)}) for this specific attack - swaps in the sneak-attack damage die for the next roll of this line only, then automatically reverts.">🗡️${lineState.backstabActive ? " Backstab ON" : " Backstab"}</button>`);
+    extraControls.push(`<button type="button" class="hp-btn backstab-toggle-btn${lineState.backstabActive ? " on" : ""}" data-row-key="${rowKey}" title="Declare a Backstab (Table 3-1: ${escapeHtml(entry.backstabDamage)}) for this specific attack - swaps in the sneak-attack damage die and adds Table 1-9's to-hit bonus for the next roll of this line only, then automatically reverts. Only usable against a target with clear anatomical vulnerabilities (attacking from behind, or otherwise unaware) - typically set up with a successful Sneak Silently or Hide in Shadows check first.">🗡️${lineState.backstabActive ? " Backstab ON" : " Backstab"}</button>`);
   }
   if (ammoTracked) {
     extraControls.push(`<button type="button" class="hp-btn attack-ammo-reload-btn" data-attack-id="${line.attackId}" title="Add one piece of ammo to this weapon (reload/restock)">🔄 +1 Ammo</button>`);
