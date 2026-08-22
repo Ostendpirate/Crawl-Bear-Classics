@@ -223,6 +223,23 @@
     justify-content: space-between;
     align-items: center;
     margin-top: 4px;
+    /* The Sheet view is one long scrolling column (Ability Scores, Attacks,
+       Skills, Equipment, Spells, Languages, Notes, in that order) and this
+       footer/status toast sits at the very end of it. A roll triggered from
+       something well above the fold - Thief/Halfling Skills chief among
+       them, since that's the one section with no Tracker-side status of
+       its own to fall back on (see rollPcSkill) - would show its result
+       here and then fade out again long before a normal scroll position
+       ever reached it. Sticking the footer to the bottom of the popover's
+       own viewport keeps the toast visible no matter which fieldset the
+       roll came from, without needing to auto-scroll the page out from
+       under whatever the player was doing.
+       */
+    position: sticky;
+    bottom: 0;
+    background: var(--bg);
+    padding: 6px 0 2px;
+    z-index: 5;
   }
   .status { font-size: 11px; color: var(--good); min-height: 14px; }
   .roll-total { font-size: 1.3em; font-weight: 800; }
@@ -6741,8 +6758,11 @@ function recalcPcSkillsSection(force) {
 // Cast Spell from Scroll (data-is-die) rolls 1d(sides) + the live ability
 // modifier (and, since armor hinders spellcasting for every class except
 // Cleric, the live armor Check Penalty) instead, since its Table 1-9 entry
-// is a die, not a bonus. Sheet-only (no appendChatLog entry), same scope
-// as rollPcHpLevelUp.
+// is a die, not a bonus. Logged to the shared Chat Log (never gmOnly -
+// unlike a monster's rolls, a PC's own skill checks are always meant for
+// the whole table to see), same as every other roll type except
+// rollPcHpLevelUp, which stays sheet-only on purpose (a level-up HP roll
+// isn't really "table" information the way a skill check is).
 function rollPcSkill(key) {
   const row = document.querySelector(`.skill-row[data-key="${key}"]`);
   const input = row ? row.querySelector(".skill-row-value") : null;
@@ -6758,7 +6778,9 @@ function rollPcSkill(key) {
     const modifier = abilityMod + penalty;
     const rolled = Math.floor(Math.random() * sides) + 1;
     const total = rolled + modifier;
-    showStatus(`${label}: d${sides} (${rolled}) ${formatSignedNumber(modifier)} = ${markRollTotal(total)}`, false, 4000);
+    const text = `${label}: d${sides} (${rolled}) ${formatSignedNumber(modifier)} = ${markRollTotal(total)}`;
+    showStatus(text, false, 4000);
+    appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly: false });
     broadcastDiceRoll({ rollerName, dice: [{ sides, value: rolled }], modifier, notation: `d${sides}`, total, label });
     return;
   }
@@ -6772,7 +6794,9 @@ function rollPcSkill(key) {
   // natural 1 has special text on an attack roll (Fumble) elsewhere in
   // this app.
   const trapTriggerNote = (key === "disableTrap" && rolled === 1) ? " ⚠️ Natural 1 - the trap triggers!" : "";
-  showStatus(`${label}: d20 (${rolled}) ${formatSignedNumber(bonus)} = ${markRollTotal(total)}${trapTriggerNote}`, rolled === 1 && key === "disableTrap", trapTriggerNote ? 6000 : 4000);
+  const text = `${label}: d20 (${rolled}) ${formatSignedNumber(bonus)} = ${markRollTotal(total)}${trapTriggerNote}`;
+  showStatus(text, rolled === 1 && key === "disableTrap", trapTriggerNote ? 6000 : 4000);
+  appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly: false });
   broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: bonus, notation: "d20", total, label });
 }
 
