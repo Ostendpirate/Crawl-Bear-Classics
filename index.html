@@ -1911,6 +1911,44 @@ let currentMode = "monster";
 let saveTimeout = null;
 let suppressChange = false;
 
+// Snapshot of whatever monster/pc metadata + mode + name is CURRENTLY
+// painted onto the Sheet, so a reload can be skipped when none of it has
+// actually changed. Both places that can reload the open item's form -
+// loadSelection (fired by OBR.player.onChange, which the SDK also fires
+// for "lots of player-state changes beyond just selection - tool
+// switches, sync state, etc", per its own call site) and the
+// scene.items.onChange handler's passive refresh branch (almost always
+// just an echo of this very client's own debounced save) - already skip
+// the reload while a field is actively focused or a save is still
+// in-flight. Neither one, though, previously had any way to tell "the
+// data comes back byte-for-byte identical to what's already on screen"
+// apart from those two cases, so hovering a button (not editing, nothing
+// pending) while ANY such firing arrived still ran fillForm()'s
+// unconditional innerHTML rebuild of the Attacks list - destroying and
+// recreating every row's buttons under the cursor. That's what made a
+// button flash on hover and occasionally swallow a click that landed
+// mid-rebuild. Comparing against this signature first turns the truly
+// no-op case (by far the common one) into an early return instead.
+let lastAppliedSheetSignature = null;
+// The OTHER half of whatever's currently reflected in lastAppliedSheetSignature -
+// saveCurrent() only ever writes ONE mode's data (readForm(currentMode)), so
+// it needs whatever the last-known data for BOTH modes was in order to
+// recompute a full, comparable signature right after a save completes,
+// rather than leaving the signature stale until the next real reload comes
+// along and does one (harmless, but avoidable) redundant rebuild.
+let lastKnownMonsterData = null;
+let lastKnownPcData = null;
+
+function sheetSignatureFor(item, monsterData, pcData, mode) {
+  return JSON.stringify({
+    id: item.id,
+    name: item.name || "",
+    mode,
+    monsterData,
+    pcData,
+  });
+}
+
 function defaultData(mode) {
   const cfg = MODES[mode];
   const d = {};
@@ -5012,6 +5050,21 @@ async function saveCurrent() {
   });
   cfg.render(data);
   showStatus("Saved");
+  // Keeps lastAppliedSheetSignature (and the per-mode data it's built
+  // from) matching what was JUST written, rather than leaving it stale
+  // until the next reload happens to notice - this save's own onChange
+  // echo would otherwise read back as "different from last applied" and
+  // trigger one more (harmless but avoidable) fillForm() rebuild the
+  // moment it arrives. saveCurrent only ever writes ONE mode's data, so
+  // the OTHER mode's half of the signature carries forward from whatever
+  // it was last known to be.
+  if (currentMode === "monster") lastKnownMonsterData = data; else lastKnownPcData = data;
+  lastAppliedSheetSignature = sheetSignatureFor(
+    { id: currentItemId, name },
+    lastKnownMonsterData,
+    lastKnownPcData,
+    currentMode
+  );
 }
 
 function showStatus(text, isError, duration) {
@@ -9544,12 +9597,26 @@ async function loadSelection(selection) {
   currentItemId = item.id;
   const monsterData = item.metadata[MONSTER_METADATA_KEY] || defaultData("monster");
   const pcData = item.metadata[PC_METADATA_KEY] || defaultData("pc");
-  fillForm("monster", monsterData);
-  fillForm("pc", pcData);
-  setMode(item.metadata[MODE_METADATA_KEY] || "monster", false);
-  suppressChange = true;
-  nameEl.value = item.name || "";
-  suppressChange = false;
+  const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+  // OBR.player.onChange (this function's caller) fires for far more than
+  // just a new selection - see this function's own onChange comment above
+  // - so this same token, with nothing about it actually different, gets
+  // re-offered here constantly during ordinary play. Only run the
+  // destructive fillForm() rebuild (which recreates every Attack/Armor
+  // row's DOM, buttons included) when something in the signature has
+  // actually moved since the last time it ran.
+  const signature = sheetSignatureFor(item, monsterData, pcData, mode);
+  if (signature !== lastAppliedSheetSignature) {
+    fillForm("monster", monsterData);
+    fillForm("pc", pcData);
+    setMode(mode, false);
+    suppressChange = true;
+    nameEl.value = item.name || "";
+    suppressChange = false;
+    lastAppliedSheetSignature = signature;
+    lastKnownMonsterData = monsterData;
+    lastKnownPcData = pcData;
+  }
   refreshOwnerSelectForItem(item);
   emptyState.innerHTML = EMPTY_STATE_DEFAULT_HTML;
   emptyState.style.display = "none";
@@ -9668,10 +9735,26 @@ OBR.onReady(async () => {
         } else {
           const monsterData = item.metadata[MONSTER_METADATA_KEY] || defaultData("monster");
           const pcData = item.metadata[PC_METADATA_KEY] || defaultData("pc");
-          fillForm("monster", monsterData);
-          fillForm("pc", pcData);
-          setMode(item.metadata[MODE_METADATA_KEY] || currentMode, false);
-          nameEl.value = item.name || "";
+          const mode = item.metadata[MODE_METADATA_KEY] || currentMode;
+          // This handler fires for ANY scene item changing, not just this
+          // one - and per the comment above, is far more often an echo of
+          // this very client's own already-applied save than a genuine
+          // outside edit. Only run the destructive fillForm() rebuild
+          // (recreates every Attack/Armor row's DOM, including their
+          // buttons) when the incoming data actually differs from what's
+          // already painted - otherwise this is exactly the "button
+          // flashes on hover, click sometimes lands on nothing" regression,
+          // just triggered from this listener instead of loadSelection's.
+          const signature = sheetSignatureFor(item, monsterData, pcData, mode);
+          if (signature !== lastAppliedSheetSignature) {
+            fillForm("monster", monsterData);
+            fillForm("pc", pcData);
+            setMode(mode, false);
+            nameEl.value = item.name || "";
+            lastAppliedSheetSignature = signature;
+            lastKnownMonsterData = monsterData;
+            lastKnownPcData = pcData;
+          }
           refreshOwnerSelectForItem(item);
         }
       }
