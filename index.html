@@ -2000,6 +2000,24 @@ function fillForm(mode, data) {
     // before this feature existed (or just re-affirms it's still there) -
     // see syncThievesCantIntoLanguages's own comment.
     syncThievesCantIntoLanguages();
+    // Re-stamp each ability field's own "score (mod)" display text against
+    // the CURRENT DCC_ABILITY_MOD_TABLE, same "resync stale saved text on
+    // load" reasoning as refreshAutoSyncedAttackBonuses just above. A
+    // token saved before a table fix (e.g. score 13 briefly mapping to
+    // +0 instead of +1) would otherwise keep showing the old baked-in
+    // modifier forever - parseAbilityScore/dccAbilityModifier only ever
+    // ran again on that field's own blur event, which a saved token never
+    // fires just by being reopened. refreshDerivedPcFields() then follows
+    // to resync any Fort/Ref/Will/Init field still flagged auto-synced
+    // (or blank) off these corrected ability mods, without touching one
+    // the player already hand-typed over.
+    PC_ABILITY_FIELD_IDS.forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const score = parseAbilityScore(el.value);
+      if (score !== null) el.value = `${score} (${formatSignedNumber(dccAbilityModifier(score))})`;
+    });
+    refreshDerivedPcFields();
   }
   // Same "still auto-managed?" restoration as above, for the monster
   // Crit field's Monster Type + HD auto-fill.
