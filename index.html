@@ -1879,6 +1879,22 @@ let currentMode = "monster";
 let saveTimeout = null;
 let suppressChange = false;
 
+// Thin wrappers around the two OBR.scene.items calls that show up
+// dozens of times throughout this file for a SINGLE item at a time
+// (get-by-id, then mutate-by-id). Every other call site in this file
+// that only ever touches one item goes through these instead of
+// repeating the same `getItems([id])` destructure or
+// `updateItems([id], items => items.forEach(...))` wrapper each time.
+async function getItem(id) {
+  const [item] = await OBR.scene.items.getItems([id]);
+  return item || null;
+}
+
+async function updateItem(id, mutator) {
+  await OBR.scene.items.updateItems([id], items => items.forEach(mutator));
+}
+
+
 function defaultData(mode) {
   const cfg = MODES[mode];
   const d = {};
@@ -4906,20 +4922,19 @@ async function saveCurrent() {
   const cfg = MODES[currentMode];
   const data = readForm(currentMode);
   const name = nameEl.value;
-  await OBR.scene.items.updateItems([currentItemId], items => {
-    items.forEach(item => {
-      item.metadata[cfg.metadataKey] = data;
-      item.metadata[MODE_METADATA_KEY] = currentMode;
-      if (name.trim()) {
-        item.name = name;
-        if (item.text) {
-          item.text.plainText = name;
-          item.text.type = "PLAIN";
-        }
+  await updateItem(currentItemId, item => {
+    item.metadata[cfg.metadataKey] = data;
+    item.metadata[MODE_METADATA_KEY] = currentMode;
+    if (name.trim()) {
+      item.name = name;
+      if (item.text) {
+        item.text.plainText = name;
+        item.text.type = "PLAIN";
       }
-    });
+    }
   });
   cfg.render(data);
+
   showStatus("Saved");
 }
 
@@ -7511,7 +7526,7 @@ document.getElementById("owner-select").addEventListener("change", async () => {
 
   let item;
   try {
-    [item] = await OBR.scene.items.getItems([itemId]);
+    item = await getItem(itemId);
   } catch (err) {
     console.error("DCC sheet: failed to fetch item for owner assignment", err);
   }
@@ -7573,9 +7588,7 @@ document.getElementById("owner-select").addEventListener("change", async () => {
     // immediately in the current scene, not just on next sync. Unassigning
     // hands createdUserId back to the GM, since the GM is exempt from Owner
     // Only anyway and there's no real "nobody" value to set it to.
-    OBR.scene.items.updateItems([itemId], items => {
-      items.forEach(it => { it.createdUserId = id || currentPlayerId; });
-    }),
+    updateItem(itemId, it => { it.createdUserId = id || currentPlayerId; }),
   ]);
 
   sel.disabled = false;
@@ -8121,7 +8134,7 @@ function consumeForcedD20() {
 // any "+NdM" bonus damage a crit result calls for, and builds a clearly
 // marked alert into both the Tracker toast and the persisted Log entry.
 async function rollAttackFor(itemId, attackId, slotKey) {
-  const [item] = await OBR.scene.items.getItems([itemId]);
+  const item = await getItem(itemId);
   if (!item) return;
   const stats = getStatsForItem(item);
   const atk = stats.attacks.find(a => a.id === attackId);
@@ -8373,7 +8386,7 @@ async function rollAttackFor(itemId, attackId, slotKey) {
 // Die picker for a TW-configured row and always rolls the character's
 // first/main pair - keeps working unchanged.
 async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slotKey = "tw") {
-  const [item] = await OBR.scene.items.getItems([itemId]);
+  const item = await getItem(itemId);
   if (!item) return;
   const stats = getStatsForItem(item);
   const primaryAtk = stats.attacks.find(a => a.id === primaryAttackId);
@@ -8616,7 +8629,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
 // rolls for whichever token was clicked, not necessarily the one open on
 // the Sheet tab.
 async function rollAttackForTrackerRow(itemId, attackId, slotKey) {
-  const [item] = await OBR.scene.items.getItems([itemId]);
+  const item = await getItem(itemId);
   if (!item) return;
   const stats = getStatsForItem(item);
   const atk = stats.attacks.find(a => a.id === attackId);
@@ -8759,26 +8772,23 @@ function scheduleTrackerUpdate(id, field, value) {
 
 async function applyTrackerUpdate(id, field, value) {
   if (field === "initiative" || field === "enabled") {
-    await OBR.scene.items.updateItems([id], items => {
-      items.forEach(item => {
-        const combat = item.metadata[COMBAT_METADATA_KEY] || {};
-        item.metadata[COMBAT_METADATA_KEY] = { ...combat, [field]: value };
-      });
+    await updateItem(id, item => {
+      const combat = item.metadata[COMBAT_METADATA_KEY] || {};
+      item.metadata[COMBAT_METADATA_KEY] = { ...combat, [field]: value };
     });
     await refreshTracker();
     return;
   }
-  await OBR.scene.items.updateItems([id], items => {
-    items.forEach(item => {
-      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
-      const key = mode === "pc" ? PC_METADATA_KEY : MONSTER_METADATA_KEY;
-      const data = { ...(item.metadata[key] || defaultData(mode)) };
-      data[field] = value;
-      item.metadata[key] = data;
-    });
+  await updateItem(id, item => {
+    const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+    const key = mode === "pc" ? PC_METADATA_KEY : MONSTER_METADATA_KEY;
+    const data = { ...(item.metadata[key] || defaultData(mode)) };
+    data[field] = value;
+    item.metadata[key] = data;
   });
   await refreshTracker();
 }
+
 
 // Debounced write for one field of one attack line's Backstab/Mighty Deed
 // declaration - same 300ms-coalescing pattern as scheduleTrackerUpdate,
@@ -9248,15 +9258,13 @@ async function setTokenDimmed(id, dim) {
 }
 
 async function toggleEnabled(id) {
-  const [item] = await OBR.scene.items.getItems([id]);
+  const item = await getItem(id);
   if (!item) return;
   const stats = getStatsForItem(item);
   const nextEnabled = !stats.enabled;
-  await OBR.scene.items.updateItems([id], items => {
-    items.forEach(it => {
-      const combat = it.metadata[COMBAT_METADATA_KEY] || {};
-      it.metadata[COMBAT_METADATA_KEY] = { ...combat, enabled: nextEnabled };
-    });
+  await updateItem(id, it => {
+    const combat = it.metadata[COMBAT_METADATA_KEY] || {};
+    it.metadata[COMBAT_METADATA_KEY] = { ...combat, enabled: nextEnabled };
   });
   await setTokenDimmed(id, !nextEnabled);
   // If we just deactivated the token whose turn it currently is, hand off to the next active combatant.
@@ -9267,7 +9275,7 @@ async function toggleEnabled(id) {
 }
 
 async function rollInitiativeFor(id) {
-  const [item] = await OBR.scene.items.getItems([id]);
+  const item = await getItem(id);
   if (!item) return;
   const stats = getStatsForItem(item);
   const mod = parseModifier(stats.initBonus);
@@ -9275,11 +9283,9 @@ async function rollInitiativeFor(id) {
   const initDie = hasTwoHanded ? 16 : 20;
   const dieValue = Math.floor(Math.random() * initDie) + 1;
   const roll = dieValue + mod;
-  await OBR.scene.items.updateItems([id], items => {
-    items.forEach(it => {
-      const combat = it.metadata[COMBAT_METADATA_KEY] || {};
-      it.metadata[COMBAT_METADATA_KEY] = { ...combat, initiative: roll };
-    });
+  await updateItem(id, it => {
+    const combat = it.metadata[COMBAT_METADATA_KEY] || {};
+    it.metadata[COMBAT_METADATA_KEY] = { ...combat, initiative: roll };
   });
   await refreshTracker();
   await appendChatLog({
@@ -9671,7 +9677,7 @@ OBR.onReady(async () => {
 
   try {
     if (currentItemId) {
-      const [item] = await OBR.scene.items.getItems([currentItemId]);
+      const item = await getItem(currentItemId);
       if (item) refreshOwnerSelectForItem(item);
     }
   } catch (err) {
