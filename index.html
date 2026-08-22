@@ -528,6 +528,20 @@
     cursor: pointer;
     accent-color: var(--good);
   }
+  .attack-poisoned-wrap {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    flex: none;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .attack-poisoned {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: #4d7a2f;
+  }
   .attack-weapon {
     /* A weapon name (e.g. "Two-Handed Sword (2H)") needs real room to stay
        readable - flex:1 alone will happily let a plain flex item shrink to
@@ -572,6 +586,7 @@
   .weapon-badge-untrained { background: #a3402f; color: #fff; font-weight: 700; }
   .weapon-badge-favorite { background: #2f7a3f; color: #fff; font-weight: 700; }
   .weapon-badge-backstab { background: #8a2d5c; color: #fff; font-weight: 700; }
+  .weapon-badge-poisoned { background: #4d7a2f; color: #fff; font-weight: 700; }
   .weapon-badge-ammo { background: var(--border); color: var(--text); font-weight: 700; }
   .weapon-badge-ammo-out { background: #e0665a; color: #1e1b18; }
   .hp-btn.disabled, .hp-btn[disabled] {
@@ -1878,22 +1893,6 @@ let currentItemId = null;
 let currentMode = "monster";
 let saveTimeout = null;
 let suppressChange = false;
-
-// Thin wrappers around the two OBR.scene.items calls that show up
-// dozens of times throughout this file for a SINGLE item at a time
-// (get-by-id, then mutate-by-id). Every other call site in this file
-// that only ever touches one item goes through these instead of
-// repeating the same `getItems([id])` destructure or
-// `updateItems([id], items => items.forEach(...))` wrapper each time.
-async function getItem(id) {
-  const [item] = await OBR.scene.items.getItems([id]);
-  return item || null;
-}
-
-async function updateItem(id, mutator) {
-  await OBR.scene.items.updateItems([id], items => items.forEach(mutator));
-}
-
 
 function defaultData(mode) {
   const cfg = MODES[mode];
@@ -3986,7 +3985,7 @@ function weaponOptionsHtml(selectedKey) {
 }
 
 function emptyAttack() {
-  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false, deedType: "", deedCustom: "", actionDieIndex: "", lineDeeds: {}, ammo: "" };
+  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false, deedType: "", deedCustom: "", actionDieIndex: "", lineDeeds: {}, ammo: "", poisoned: false };
 }
 
 // Backstab (Thief, Table 3-1) and Mighty Deed of Arms (Warrior/Dwarf,
@@ -4185,6 +4184,17 @@ function attackRowHtml(atk, mode) {
   if (entry.backstabDamage && isThief) {
     badges.push(`<span class="weapon-badge weapon-badge-backstab" title="This weapon has a Backstab damage die (${escapeHtml(entry.backstabDamage)}) - declare a backstab for a specific attack in the Combat Tracker tab.">Backstab d.: ${escapeHtml(entry.backstabDamage)}</span>`);
   }
+  // "On a natural 1 on any attack roll with a poisoned blade, the thief
+  // automatically poisons themself, in addition to any fumble results" -
+  // poisoned is a property of the WEAPON itself (like Equipped), not a
+  // one-shot per-roll declaration like Backstab, so it stays checked
+  // across however many attacks this same blade makes until the player
+  // unchecks it (representing wiping the blade clean, or the dose running
+  // out) - see rollAttackFor/rollTwoWeaponAttack's own natural-1 handling.
+  // Thief-only, matching Handle Poison's own DC 10 safety-check skill.
+  if (isThief && atk.poisoned) {
+    badges.push(`<span class="weapon-badge weapon-badge-poisoned" title="Poisoned blade - a natural 1 on an attack roll with this weapon also poisons the thief themself, on top of any Fumble result.">☠️ Poisoned</span>`);
+  }
   // A Warrior/Dwarf's designated favorite weapon (see the Favorite Weapon
   // field above) adds their Luck modifier to THIS attack's to-hit roll
   // only, never damage - see isFavoriteWeaponMatch.
@@ -4236,6 +4246,15 @@ function attackRowHtml(atk, mode) {
   // one-time upgrade path for a declaration saved under the old flat
   // deedType/deedCustom/backstabActive fields, before lineDeeds existed.
   const lineDeedsAttr = escapeHtml(JSON.stringify(migratedLineDeeds(atk)));
+  // Thief-only (see the badge above this same "poisoned" field for why) -
+  // a persistent per-weapon toggle, not a Combat Tracker per-roll
+  // declaration, since a poisoned blade stays poisoned across multiple
+  // attacks until the player deliberately unchecks it.
+  const poisonedToggleHtml = isThief
+    ? `<label class="attack-poisoned-wrap" title="Poisoned blade - a natural 1 on an attack roll with this weapon also poisons the thief themself, on top of any Fumble result. Stays checked across multiple attacks until you uncheck it (representing wiping the blade clean or the dose running out).">
+        <input type="checkbox" class="attack-poisoned" ${atk.poisoned ? "checked" : ""} />☠️
+      </label>`
+    : "";
 
   return `
     <div class="attack-row pc-attack-row${atk.equipped ? " equipped" : ""}" data-id="${atk.id}" data-line-deeds="${lineDeedsAttr}">
@@ -4243,6 +4262,7 @@ function attackRowHtml(atk, mode) {
         <input type="checkbox" class="attack-equipped" ${atk.equipped ? "checked" : ""} title="Currently wielded - normally one weapon at a time, but a configured two-weapon Primary+Off-hand pair can both be equipped - this is what determines your Initiative Die" />
         <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
         ${twSelectHtml}
+        ${poisonedToggleHtml}
         ${actDieSelectHtml}
       </div>
       ${badges.length ? `<div class="attack-row-badges">${badges.join(" ")}</div>` : ""}
@@ -4316,6 +4336,14 @@ function readAttacks(mode) {
       base.damageStrApplies = damageEl ? damageEl.dataset.damageStrApplies === "1" : false;
       const twRoleEl = row.querySelector(".attack-tw-role");
       base.twoWeaponRole = twRoleEl ? twRoleEl.value : "";
+      // Poisoned blade (Thief only - the checkbox doesn't exist on a
+      // non-Thief row at all, see attackRowHtml's poisonedToggleHtml) -
+      // same "not rendered = false" contract as Equipped/Two-Weapon Role
+      // above, rather than anything fancier: switching a character OUT of
+      // Thief and reading the attacks list while the checkbox is gone
+      // clears it, same as every other Thief/class-gated control here.
+      const poisonedEl = row.querySelector(".attack-poisoned");
+      base.poisoned = poisonedEl ? poisonedEl.checked : false;
       // Ammo (ranged weapons only - the input doesn't exist on a melee row
       // at all, see ammoLineHtml). Blank means untracked/unlimited; carried
       // forward as "" rather than "0" so a melee row (no ammo input to
@@ -4597,6 +4625,18 @@ function attachAttackRowListeners(mode) {
           scheduleSave();
           recalcPcInitiativeDie();
           syncWeaponsIntoEquipment();
+        });
+      }
+      // Poisoned (☠️) toggle - the generic "any input schedules a save"
+      // listener above already persists the checked state, but the Sheet's
+      // own "☠️ Poisoned" badge (attackRowHtml) is only computed at render
+      // time, so it needs an explicit re-render here to show/hide live
+      // (same reason weaponSel/twRoleSel above re-render, not just save).
+      const poisonedBox = row.querySelector(".attack-poisoned");
+      if (poisonedBox) {
+        poisonedBox.addEventListener("change", () => {
+          scheduleSave();
+          renderAttacks(mode, readAttacks(mode));
         });
       }
       const twRoleSel = row.querySelector(".attack-tw-role");
@@ -4922,19 +4962,20 @@ async function saveCurrent() {
   const cfg = MODES[currentMode];
   const data = readForm(currentMode);
   const name = nameEl.value;
-  await updateItem(currentItemId, item => {
-    item.metadata[cfg.metadataKey] = data;
-    item.metadata[MODE_METADATA_KEY] = currentMode;
-    if (name.trim()) {
-      item.name = name;
-      if (item.text) {
-        item.text.plainText = name;
-        item.text.type = "PLAIN";
+  await OBR.scene.items.updateItems([currentItemId], items => {
+    items.forEach(item => {
+      item.metadata[cfg.metadataKey] = data;
+      item.metadata[MODE_METADATA_KEY] = currentMode;
+      if (name.trim()) {
+        item.name = name;
+        if (item.text) {
+          item.text.plainText = name;
+          item.text.type = "PLAIN";
+        }
       }
-    }
+    });
   });
   cfg.render(data);
-
   showStatus("Saved");
 }
 
@@ -6465,7 +6506,7 @@ const THIEF_SKILL_DC_GUIDANCE = {
   forgeDocument: "DC 5-20, scaling with the complexity and originality of the source document being forged.",
   disguiseSelf: "DC 5 to resemble someone of the same basic race/build, DC 10 to change significant facial features, DC 15 to change mannerisms/height, DC 20+ minimum to fool someone close to the target (a parent, a spouse).",
   readLanguages: "DC 10 to interpret simple meaning, DC 15 for anything more detailed.",
-  handlePoison: "DC 10 safety check every time poison is applied to a blade or other surface - fail it and the thief accidentally poisons themself. A natural 1 on any attack roll made with a poisoned blade also self-poisons, on top of any Fumble result (not automated by this app - track it yourself).",
+  handlePoison: "DC 10 safety check every time poison is applied to a blade or other surface - fail it and the thief accidentally poisons themself. Mark the weapon's ☠️ Poisoned checkbox in the Attacks list: a natural 1 on any attack roll made with that weapon then also self-poisons the thief, on top of any Fumble result.",
   castSpellFromScroll: "DC is the spell's own normal spell check DC - roll the die shown (not a d20) to try to beat it. Spellburn may not be used to boost this roll.",
 };
 
@@ -7526,7 +7567,7 @@ document.getElementById("owner-select").addEventListener("change", async () => {
 
   let item;
   try {
-    item = await getItem(itemId);
+    [item] = await OBR.scene.items.getItems([itemId]);
   } catch (err) {
     console.error("DCC sheet: failed to fetch item for owner assignment", err);
   }
@@ -7588,7 +7629,9 @@ document.getElementById("owner-select").addEventListener("change", async () => {
     // immediately in the current scene, not just on next sync. Unassigning
     // hands createdUserId back to the GM, since the GM is exempt from Owner
     // Only anyway and there's no real "nobody" value to set it to.
-    updateItem(itemId, it => { it.createdUserId = id || currentPlayerId; }),
+    OBR.scene.items.updateItems([itemId], items => {
+      items.forEach(it => { it.createdUserId = id || currentPlayerId; });
+    }),
   ]);
 
   sel.disabled = false;
@@ -7854,6 +7897,12 @@ function trackerLineHtml(item, stats, line) {
     }
     if (canBackstab) {
       badges.push(`<span class="weapon-badge weapon-badge-backstab" title="This weapon has a Backstab damage die (${escapeHtml(entry.backstabDamage)}) - use the Backstab toggle below to apply it to this line's next roll.">Backstab d.: ${escapeHtml(entry.backstabDamage)}</span>`);
+    }
+    // Poisoned blade (see attackRowHtml's poisonedToggleHtml/badge) - a
+    // reminder here too, since this is where the roll (and thus the
+    // natural-1 self-poison consequence) actually happens.
+    if (isThief && atk.poisoned) {
+      badges.push(`<span class="weapon-badge weapon-badge-poisoned" title="Poisoned blade - a natural 1 on an attack roll with this weapon also poisons the thief themself, on top of any Fumble result. Toggle it off on the Sheet's Attacks list once the blade's been wiped clean or the dose runs out.">☠️ Poisoned</span>`);
     }
     if (isFavoriteWeaponMatch(stats, atk)) {
       const lckMod = abilityModifierFromRaw(stats.data.lck);
@@ -8134,7 +8183,7 @@ function consumeForcedD20() {
 // any "+NdM" bonus damage a crit result calls for, and builds a clearly
 // marked alert into both the Tracker toast and the persisted Log entry.
 async function rollAttackFor(itemId, attackId, slotKey) {
-  const item = await getItem(itemId);
+  const [item] = await OBR.scene.items.getItems([itemId]);
   if (!item) return;
   const stats = getStatsForItem(item);
   const atk = stats.attacks.find(a => a.id === attackId);
@@ -8233,7 +8282,12 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     const fumbleRow = fumbleRoll ? lookupTableRow(FUMBLE_TABLE, fumbleRoll.total) : null;
     if (fumbleRoll) rollDice.push(...fumbleRoll.dice);
     const rowText = fumbleRow ? fumbleRow.text : "";
-    text = `${atk.name || "Attack"}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${wasForced ? " (GM-forced)" : ""} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}).${untrainedNote} ${rowText}`;
+    // "On a natural 1 on any attack roll with a poisoned blade, the thief
+    // automatically poisons themself, in addition to any fumble results" -
+    // atk.poisoned is a persistent per-weapon flag (see attackRowHtml's
+    // poisonedToggleHtml), independent of the Fumble Die/table above.
+    const poisonNote = atk.poisoned ? " ☠️ The poisoned blade turns on its wielder too - you're poisoned!" : "";
+    text = `${atk.name || "Attack"}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${wasForced ? " (GM-forced)" : ""} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}).${untrainedNote} ${rowText}${poisonNote}`;
     label = "💀 FUMBLE! Natural 1 — automatic miss";
   } else {
     // Fresh Deed Die roll for THIS attack - see rollDeedDieForStats (no
@@ -8386,7 +8440,7 @@ async function rollAttackFor(itemId, attackId, slotKey) {
 // Die picker for a TW-configured row and always rolls the character's
 // first/main pair - keeps working unchanged.
 async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slotKey = "tw") {
-  const item = await getItem(itemId);
+  const [item] = await OBR.scene.items.getItems([itemId]);
   if (!item) return;
   const stats = getStatsForItem(item);
   const primaryAtk = stats.attacks.find(a => a.id === primaryAttackId);
@@ -8459,6 +8513,13 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     const isFumble = isNat1 && !twProfile.halflingFumbleRule;
     const isPlainMiss = isNat1 && twProfile.halflingFumbleRule && !halflingDoubleFumble;
 
+    // "On a natural 1 on any attack roll with a poisoned blade, the thief
+    // automatically poisons themself, in addition to any fumble results" -
+    // applies to THIS hand's own natural 1 regardless of whether it's a
+    // full Fumble or (Halfling two-weapon fighting) just a lone-die miss,
+    // since the rule is about the natural roll itself, not the fumble
+    // determination - see rollAttackFor's own identical note.
+    const poisonNote = (isFumble || isPlainMiss) && atk.poisoned ? " ☠️ The poisoned blade turns on its wielder too - you're poisoned!" : "";
     if (isFumble) {
       anyFumble = true;
       const fumbleDie = fumbleDieForStats(stats);
@@ -8466,10 +8527,10 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
       const fumbleRow = fumbleRoll ? lookupTableRow(FUMBLE_TABLE, fumbleRoll.total) : null;
       if (fumbleRoll) rollDice.push(...fumbleRoll.dice);
       const rowText = fumbleRow ? fumbleRow.text : "";
-      return `${label}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${forcedNote} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}). ${rowText}`;
+      return `${label}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${forcedNote} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}). ${rowText}${poisonNote}`;
     }
     if (isPlainMiss) {
-      return `${label}: Natural 1${forcedNote} — miss (Halfling two-weapon fighting: a lone natural 1 doesn't fumble by itself).`;
+      return `${label}: Natural 1${forcedNote} — miss (Halfling two-weapon fighting: a lone natural 1 doesn't fumble by itself).${poisonNote}`;
     }
 
     // A Favorite Weapon's Luck modifier (checked per hand, since primary
@@ -8569,7 +8630,17 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     const fumbleRow = fumbleRoll ? lookupTableRow(FUMBLE_TABLE, fumbleRoll.total) : null;
     if (fumbleRoll) rollDice.push(...fumbleRoll.dice);
     const rowText = fumbleRow ? fumbleRow.text : "";
-    fumbleNote = `${markFumbleAlert("💀 FUMBLE!")} Both hands rolled natural 1s${wasForced ? " (primary GM-forced)" : ""} — automatic miss with both weapons (Halfling two-weapon fighting; Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}). ${rowText}`;
+    // Both hands rolled a natural 1 here, so either (or both) weapon's own
+    // poison can turn on its wielder - same rule as resolveHand's own
+    // poisonNote, just checked for each weapon independently since this
+    // branch never calls resolveHand at all.
+    const poisonedWeapons = [primaryAtk, offhandAtk].filter(a => a.poisoned);
+    const poisonNote = poisonedWeapons.length
+      ? poisonedWeapons.length > 1
+        ? ` ☠️ ${poisonedWeapons.map(a => a.name || "Your weapon").join(" and ")} poisoned blades also turn on their wielder - you're poisoned!`
+        : ` ☠️ ${poisonedWeapons[0].name || "Your"} poisoned blade also turns on its wielder - you're poisoned!`
+      : "";
+    fumbleNote = `${markFumbleAlert("💀 FUMBLE!")} Both hands rolled natural 1s${wasForced ? " (primary GM-forced)" : ""} — automatic miss with both weapons (Halfling two-weapon fighting; Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}). ${rowText}${poisonNote}`;
     primaryText = `${primaryAtk.name || "Primary hand"}: natural 1`;
     offhandText = `${offhandAtk.name || "Off-hand"}: natural 1`;
   } else {
@@ -8629,7 +8700,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
 // rolls for whichever token was clicked, not necessarily the one open on
 // the Sheet tab.
 async function rollAttackForTrackerRow(itemId, attackId, slotKey) {
-  const item = await getItem(itemId);
+  const [item] = await OBR.scene.items.getItems([itemId]);
   if (!item) return;
   const stats = getStatsForItem(item);
   const atk = stats.attacks.find(a => a.id === attackId);
@@ -8772,23 +8843,26 @@ function scheduleTrackerUpdate(id, field, value) {
 
 async function applyTrackerUpdate(id, field, value) {
   if (field === "initiative" || field === "enabled") {
-    await updateItem(id, item => {
-      const combat = item.metadata[COMBAT_METADATA_KEY] || {};
-      item.metadata[COMBAT_METADATA_KEY] = { ...combat, [field]: value };
+    await OBR.scene.items.updateItems([id], items => {
+      items.forEach(item => {
+        const combat = item.metadata[COMBAT_METADATA_KEY] || {};
+        item.metadata[COMBAT_METADATA_KEY] = { ...combat, [field]: value };
+      });
     });
     await refreshTracker();
     return;
   }
-  await updateItem(id, item => {
-    const mode = item.metadata[MODE_METADATA_KEY] || "monster";
-    const key = mode === "pc" ? PC_METADATA_KEY : MONSTER_METADATA_KEY;
-    const data = { ...(item.metadata[key] || defaultData(mode)) };
-    data[field] = value;
-    item.metadata[key] = data;
+  await OBR.scene.items.updateItems([id], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      const key = mode === "pc" ? PC_METADATA_KEY : MONSTER_METADATA_KEY;
+      const data = { ...(item.metadata[key] || defaultData(mode)) };
+      data[field] = value;
+      item.metadata[key] = data;
+    });
   });
   await refreshTracker();
 }
-
 
 // Debounced write for one field of one attack line's Backstab/Mighty Deed
 // declaration - same 300ms-coalescing pattern as scheduleTrackerUpdate,
@@ -9258,13 +9332,15 @@ async function setTokenDimmed(id, dim) {
 }
 
 async function toggleEnabled(id) {
-  const item = await getItem(id);
+  const [item] = await OBR.scene.items.getItems([id]);
   if (!item) return;
   const stats = getStatsForItem(item);
   const nextEnabled = !stats.enabled;
-  await updateItem(id, it => {
-    const combat = it.metadata[COMBAT_METADATA_KEY] || {};
-    it.metadata[COMBAT_METADATA_KEY] = { ...combat, enabled: nextEnabled };
+  await OBR.scene.items.updateItems([id], items => {
+    items.forEach(it => {
+      const combat = it.metadata[COMBAT_METADATA_KEY] || {};
+      it.metadata[COMBAT_METADATA_KEY] = { ...combat, enabled: nextEnabled };
+    });
   });
   await setTokenDimmed(id, !nextEnabled);
   // If we just deactivated the token whose turn it currently is, hand off to the next active combatant.
@@ -9275,7 +9351,7 @@ async function toggleEnabled(id) {
 }
 
 async function rollInitiativeFor(id) {
-  const item = await getItem(id);
+  const [item] = await OBR.scene.items.getItems([id]);
   if (!item) return;
   const stats = getStatsForItem(item);
   const mod = parseModifier(stats.initBonus);
@@ -9283,9 +9359,11 @@ async function rollInitiativeFor(id) {
   const initDie = hasTwoHanded ? 16 : 20;
   const dieValue = Math.floor(Math.random() * initDie) + 1;
   const roll = dieValue + mod;
-  await updateItem(id, it => {
-    const combat = it.metadata[COMBAT_METADATA_KEY] || {};
-    it.metadata[COMBAT_METADATA_KEY] = { ...combat, initiative: roll };
+  await OBR.scene.items.updateItems([id], items => {
+    items.forEach(it => {
+      const combat = it.metadata[COMBAT_METADATA_KEY] || {};
+      it.metadata[COMBAT_METADATA_KEY] = { ...combat, initiative: roll };
+    });
   });
   await refreshTracker();
   await appendChatLog({
@@ -9677,7 +9755,7 @@ OBR.onReady(async () => {
 
   try {
     if (currentItemId) {
-      const item = await getItem(currentItemId);
+      const [item] = await OBR.scene.items.getItems([currentItemId]);
       if (item) refreshOwnerSelectForItem(item);
     }
   } catch (err) {
