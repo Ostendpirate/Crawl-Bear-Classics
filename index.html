@@ -566,6 +566,19 @@
     cursor: pointer;
     accent-color: #4d7a2f;
   }
+  .spell-concentration-wrap {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    flex: none;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .spell-concentration {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+  }
   .attack-weapon {
     /* A weapon name (e.g. "Two-Handed Sword (2H)") needs real room to stay
        readable - flex:1 alone will happily let a plain flex item shrink to
@@ -6248,7 +6261,7 @@ function pcSpellCheckModifierBreakdownForStats(stats, atk) {
 }
 
 function emptySpellItem() {
-  return { id: "g" + Math.random().toString(36).slice(2, 9), name: "", mercurial: null, mercurialNote: "", mercurialBonus: "", mercurialDieSteps: "", manifestation: "" };
+  return { id: "g" + Math.random().toString(36).slice(2, 9), name: "", mercurial: null, mercurialNote: "", mercurialBonus: "", mercurialDieSteps: "", manifestation: "", concentration: false };
 }
 
 // This roster is a known-spells list, not an action - rolling a Spell
@@ -6267,6 +6280,7 @@ function spellRowHtml(item) {
       <div class="attack-row pc-attack-row" data-id="${item.id}">
         <div class="attack-weapon-line">
           <input type="text" class="attack-name spell-row-name" placeholder="Spell name" value="${escapeHtml(item.name || "")}" />
+          ${concentrationCheckboxHtml(item)}
           <button type="button" class="attack-remove-btn spell-row-remove-btn" title="Remove">×</button>
         </div>
         ${manifestationFieldHtml(item)}
@@ -6320,11 +6334,29 @@ function spellRowHtml(item) {
         <input type="text" class="attack-name spell-row-custom-name" placeholder="Custom/patron spell name"${isCustom ? "" : ' style="display:none"'} value="${escapeHtml(isCustom ? item.name : "")}" />
         <button type="button" class="hp-btn spell-row-custom-back"${isCustom ? "" : ' style="display:none"'} title="Back to spell list">↩</button>
         ${mercurialBtnHtml}
+        ${concentrationCheckboxHtml(item)}
         <button type="button" class="attack-remove-btn spell-row-remove-btn" title="Remove">×</button>
       </div>
       ${manifestationFieldHtml(item)}
       ${mercurialRowHtml}
     </div>`;
+}
+
+// Concentration (DCC RPG core rulebook) - some spells require it: while
+// concentrating, the caster can take no action beyond walking at half
+// speed, and combat damage, a fall, or another significant interruption
+// forces a Will save (DC 11) or the caster loses concentration. This
+// checkbox just flags WHICH known spells need it (a persistent property
+// of the spell, like Manifestation/Mercurial, not something rolled) - the
+// actual save is DC 11 flat regardless of which spell is active, so it
+// isn't spell-specific and instead surfaces as a standing Combat Tracker
+// action (see hasConcentrationSpellStats/concentrationSaveLineHtml)
+// whenever a caster knows at least one flagged spell. Shown for every
+// class, not gated on Wizard/Elf - Clerics can require concentration too.
+function concentrationCheckboxHtml(item) {
+  return `<label class="spell-concentration-wrap" title="Requires Concentration (DCC RPG core rulebook) - while concentrating, this caster can take no action beyond walking at half speed; combat damage, a fall, or another significant interruption forces a Will save (DC 11) or the caster loses concentration.">
+    <input type="checkbox" class="spell-concentration" ${item.concentration ? "checked" : ""} />🧠
+  </label>`;
 }
 
 // Manifestation - what casting a spell actually looks/sounds/feels like -
@@ -6394,7 +6426,12 @@ function readSpellItems() {
     // button has to work around.
     const manifestationEl = row.querySelector(".manifestation-note");
     const manifestation = manifestationEl ? manifestationEl.value : "";
-    return { id: row.dataset.id, name, mercurial, mercurialNote, mercurialBonus, mercurialDieSteps, manifestation };
+    // Concentration (see concentrationCheckboxHtml) - a plain persistent
+    // checkbox, rendered for every row regardless of class, same "always
+    // there, no appear-later gap" contract as Manifestation.
+    const concentrationEl = row.querySelector(".spell-concentration");
+    const concentration = concentrationEl ? concentrationEl.checked : false;
+    return { id: row.dataset.id, name, mercurial, mercurialNote, mercurialBonus, mercurialDieSteps, manifestation, concentration };
   });
 }
 
@@ -6407,6 +6444,9 @@ function attachSpellRowListeners() {
     // Present on every row regardless of class (see manifestationFieldHtml).
     const manifestationEl = row.querySelector(".manifestation-note");
     if (manifestationEl) manifestationEl.addEventListener("input", scheduleSave);
+    // Present on every row regardless of class (see concentrationCheckboxHtml).
+    const concentrationEl = row.querySelector(".spell-concentration");
+    if (concentrationEl) concentrationEl.addEventListener("change", scheduleSave);
     const selectEl = row.querySelector(".spell-row-select");
     const customEl = row.querySelector(".spell-row-custom-name");
     const backBtn = row.querySelector(".spell-row-custom-back");
@@ -9004,9 +9044,21 @@ function deriveTrackerLines(item, stats) {
   return lines.map(tagUsed);
 }
 
+// Whether this PC knows at least one spell flagged "Requires
+// Concentration" (see concentrationCheckboxHtml) - the Concentration Save
+// itself is DC 11 flat regardless of which spell is active, so it isn't
+// tied to a specific spell/Action Die the way the attack/spell lines
+// above are; this just decides whether the standing Combat Tracker action
+// should be offered for this token at all. Monster tokens have no
+// pcSpells roster - never true for them.
+function hasConcentrationSpellStats(stats) {
+  return stats.mode === "pc" && (stats.data.pcSpells || []).some(s => s.concentration);
+}
+
 function trackerRowHtml(item, stats, isActive) {
   const lines = deriveTrackerLines(item, stats);
-  const hasAttacks = lines.length > 0;
+  const showsConcentration = hasConcentrationSpellStats(stats);
+  const hasAttacks = lines.length > 0 || showsConcentration;
   const expanded = hasAttacks && expandedAttackRows.has(item.id);
   const initDie = (stats.mode === "pc" && stats.attacks.some(a => a.equipped && dccWeaponEntry(a.weapon).twoHanded)) ? 16 : 20;
   // Mouseover breakdown of the Initiative bonus - Agility modifier, plus a
