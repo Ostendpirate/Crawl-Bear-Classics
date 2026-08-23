@@ -635,6 +635,9 @@
     color: var(--muted);
     line-height: 1.3;
   }
+  .mercurial-row { display: flex; align-items: flex-start; gap: 6px; margin-top: 4px; }
+  .mercurial-roll-label { flex: none; font-size: 10px; font-weight: 700; color: var(--accent); padding: 4px 6px; background: var(--border); border-radius: 5px; white-space: nowrap; }
+  .mercurial-row .mercurial-note { flex: 1; min-width: 0; font-size: 11px; padding: 4px 6px; min-height: 32px; }
   .attack-ammo-line {
     display: flex;
     align-items: center;
@@ -6170,7 +6173,7 @@ function pcSpellCheckModifierBreakdownForStats(stats, atk) {
 }
 
 function emptySpellItem() {
-  return { id: "g" + Math.random().toString(36).slice(2, 9), name: "" };
+  return { id: "g" + Math.random().toString(36).slice(2, 9), name: "", mercurial: null, mercurialNote: "" };
 }
 
 // This roster is a known-spells list, not an action - rolling a Spell
@@ -6194,12 +6197,36 @@ function spellRowHtml(item) {
   const knownNames = DCC_WIZARD_SPELLS.map(s => s.name);
   const isCustom = !!item.name && !knownNames.includes(item.name);
   const selectValue = isCustom ? SPELL_CUSTOM_KEY : (item.name || "");
+  // Mercurial Magic (Table 5-2, DCC RPG core rulebook) - Wizard/Elf only,
+  // a permanent quirk rolled once per known spell. This app deliberately
+  // does NOT embed that table's text (core-rulebook content, not the free
+  // Reference Booklet this app's other tables source from, and mostly
+  // original descriptive prose - real copyright exposure on a public,
+  // live-hosted repo). Only the mechanic (roll d%, store the number) is
+  // implemented; the note field is blank for the player to fill in
+  // themselves from their own book, same as any other free-text field.
+  // Only offered once a spell is actually named - nothing to attach a
+  // roll to for a blank slot.
+  const hasSpell = !!(item.name && item.name.trim());
+  const mercurialBtnHtml = hasSpell
+    ? `<button type="button" class="hp-btn spell-row-mercurial-btn" title="${item.mercurial ? "Reroll" : "Roll"} this spell's Mercurial Magic (d%, Table 5-2 - DCC RPG core rulebook) - a permanent quirk unique to how this caster casts this spell, normally rolled once when it's learned.">✨</button>`
+    : "";
+  const mercurialRowHtml = item.mercurial
+    ? `<div class="mercurial-row">
+        <span class="mercurial-roll-label" title="Rolled on Table 5-2: Mercurial Magic (DCC RPG core rulebook) - this app doesn't include that table's text; look up what ${item.mercurial} means in your own rulebook and jot it into the note field.">Mercurial: ${item.mercurial}</span>
+        <textarea class="mercurial-note" placeholder="What this roll means (from your own rulebook) - optional" rows="2">${escapeHtml(item.mercurialNote || "")}</textarea>
+      </div>`
+    : "";
   return `
-    <div class="attack-row" data-id="${item.id}">
-      <select class="attack-name spell-row-select"${isCustom ? ' style="display:none"' : ""}>${dccWizardSpellOptionsHtml(selectValue)}</select>
-      <input type="text" class="attack-name spell-row-custom-name" placeholder="Custom/patron spell name"${isCustom ? "" : ' style="display:none"'} value="${escapeHtml(isCustom ? item.name : "")}" />
-      <button type="button" class="hp-btn spell-row-custom-back"${isCustom ? "" : ' style="display:none"'} title="Back to spell list">↩</button>
-      <button type="button" class="attack-remove-btn spell-row-remove-btn" title="Remove">×</button>
+    <div class="attack-row pc-attack-row" data-id="${item.id}" data-mercurial="${item.mercurial || ""}">
+      <div class="attack-weapon-line">
+        <select class="attack-name spell-row-select"${isCustom ? ' style="display:none"' : ""}>${dccWizardSpellOptionsHtml(selectValue)}</select>
+        <input type="text" class="attack-name spell-row-custom-name" placeholder="Custom/patron spell name"${isCustom ? "" : ' style="display:none"'} value="${escapeHtml(isCustom ? item.name : "")}" />
+        <button type="button" class="hp-btn spell-row-custom-back"${isCustom ? "" : ' style="display:none"'} title="Back to spell list">↩</button>
+        ${mercurialBtnHtml}
+        <button type="button" class="attack-remove-btn spell-row-remove-btn" title="Remove">×</button>
+      </div>
+      ${mercurialRowHtml}
     </div>`;
 }
 
@@ -6231,7 +6258,15 @@ function readSpellItems() {
       const textEl = row.querySelector(".spell-row-name");
       name = textEl ? textEl.value : "";
     }
-    return { id: row.dataset.id, name };
+    // Mercurial Magic's rolled number isn't a form field - like lineDeeds
+    // on Attacks rows, it's carried as a data attribute (see
+    // spellRowHtml/clearMercurial) so this full field-by-field rebuild
+    // doesn't drop it. The note itself IS a normal form field.
+    const mercurialRaw = row.dataset.mercurial;
+    const mercurial = mercurialRaw ? (parseInt(mercurialRaw, 10) || null) : null;
+    const mercurialNoteEl = row.querySelector(".mercurial-note");
+    const mercurialNote = mercurialNoteEl ? mercurialNoteEl.value : "";
+    return { id: row.dataset.id, name, mercurial, mercurialNote };
   });
 }
 
@@ -6259,6 +6294,13 @@ function attachSpellRowListeners() {
           else customEl.value = "";
         }
         if (backBtn) backBtn.style.display = isCustom ? "" : "none";
+        // The spell this row represents just changed (a different known
+        // spell, or dropping into Custom/Patron mode with no name typed
+        // yet) - any Mercurial Magic already rolled belongs to whichever
+        // spell was here before, so it no longer applies. Not cleared on
+        // customEl's own "input" listener below, so correcting a typo in
+        // a custom name doesn't also wipe an already-rolled quirk for it.
+        clearMercurial(row);
         scheduleSave();
       });
     }
@@ -6279,6 +6321,35 @@ function attachSpellRowListeners() {
           customEl.style.display = "none";
         }
         backBtn.style.display = "none";
+        clearMercurial(row);
+        scheduleSave();
+      });
+    }
+    // Present at render time only for an already-rolled spell (see
+    // spellRowHtml) - the roll button below creates this on the fly for a
+    // spell that hasn't been rolled yet, wiring its own listener then.
+    const mercurialNoteEl = row.querySelector(".mercurial-note");
+    if (mercurialNoteEl) mercurialNoteEl.addEventListener("input", scheduleSave);
+    const mercurialBtn = row.querySelector(".spell-row-mercurial-btn");
+    if (mercurialBtn) {
+      mercurialBtn.addEventListener("click", () => {
+        const rolled = Math.floor(Math.random() * 100) + 1;
+        row.dataset.mercurial = String(rolled);
+        let mercurialRowEl = row.querySelector(".mercurial-row");
+        if (!mercurialRowEl) {
+          row.insertAdjacentHTML("beforeend", `
+            <div class="mercurial-row">
+              <span class="mercurial-roll-label"></span>
+              <textarea class="mercurial-note" placeholder="What this roll means (from your own rulebook) - optional" rows="2"></textarea>
+            </div>`);
+          mercurialRowEl = row.querySelector(".mercurial-row");
+          mercurialRowEl.querySelector(".mercurial-note").addEventListener("input", scheduleSave);
+        }
+        const labelEl = mercurialRowEl.querySelector(".mercurial-roll-label");
+        labelEl.textContent = `Mercurial: ${rolled}`;
+        labelEl.title = `Rolled on Table 5-2: Mercurial Magic (DCC RPG core rulebook) - this app doesn't include that table's text; look up what ${rolled} means in your own rulebook and jot it into the note field.`;
+        mercurialBtn.title = "Reroll this spell's Mercurial Magic (d%, Table 5-2 - DCC RPG core rulebook).";
+        showStatus(`Mercurial Magic: rolled ${rolled} - check Table 5-2 in your rulebook for what that means, or jot it into the note field.`, false, 6000);
         scheduleSave();
       });
     }
@@ -6287,6 +6358,18 @@ function attachSpellRowListeners() {
       scheduleSave();
     });
   });
+}
+
+// Removes a row's rolled Mercurial Magic (see spellRowHtml) - it's tied
+// to a SPECIFIC known spell, not to this row/slot, so switching which
+// spell the row represents invalidates whatever was rolled (and noted)
+// before.
+function clearMercurial(row) {
+  delete row.dataset.mercurial;
+  const el = row.querySelector(".mercurial-row");
+  if (el) el.remove();
+  const btn = row.querySelector(".spell-row-mercurial-btn");
+  if (btn) btn.title = "Roll this spell's Mercurial Magic (d%, Table 5-2 - DCC RPG core rulebook) - a permanent quirk unique to how this caster casts this spell, normally rolled once when it's learned.";
 }
 
 document.getElementById("add-spell-pc").addEventListener("click", () => {
