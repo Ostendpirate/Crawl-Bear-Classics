@@ -8781,15 +8781,17 @@ function trackerLineHtml(item, stats, line) {
 // A "Cast a Spell" line's Combat Tracker row - a live picker for WHICH
 // known spell this line casts (spellSelectOptionsHtmlForStats, same
 // roster as the Sheet's own picker - see pcKnownSpellNamesForStats), its
-// Spell Check modifier (computed fresh from this token's own saved stats
-// via pcSpellCheckModifierBreakdownForStats, same "don't trust a
-// possibly-stale saved field" contract deriveTrackerLines' dieSides
-// already uses for weapon lines), and a roll button. line.label is now
-// just which Action Die this particular line represents ("1st attack"/
-// "Cast a Spell" - see deriveTrackerLines), since the select itself is
-// what shows/picks the actual spell name - folded into the meta span
-// next to the Spell Check bonus rather than a separate name element, so
-// the row keeps the same name/select-meta-button layout every other
+// die badge (same weapon-badge-die styling trackerLineHtml's weapon lines
+// use - a Spell Check is always a plain d20, see line.dieSides in
+// deriveTrackerLines), its Spell Check modifier (computed fresh from this
+// token's own saved stats via pcSpellCheckModifierBreakdownForStats, same
+// "don't trust a possibly-stale saved field" contract deriveTrackerLines'
+// dieSides already uses for weapon lines), and a roll button. line.label
+// is now just which Action Die this particular line represents ("1st
+// attack"/"Cast a Spell" - see deriveTrackerLines), since the select
+// itself is what shows/picks the actual spell name - folded into the meta
+// span next to the Spell Check bonus rather than a separate name element,
+// so the row keeps the same name/select-meta-button layout every other
 // tracker line uses. No damage, crit/fumble, Deed Die, Backstab, or ammo
 // - none of that applies to a Spell Check.
 function spellTrackerLineHtml(item, stats, line) {
@@ -8806,6 +8808,7 @@ function spellTrackerLineHtml(item, stats, line) {
         </span>
         <button class="hp-btn attack-roll-btn" title="Roll Spell Check">🎲</button>
       </div>
+      ${line.dieSides ? `<div class="attack-detail-badges"><span class="weapon-badge weapon-badge-die" title="A Spell Check always rolls a plain d${line.dieSides}">d${line.dieSides}</span></div>` : ""}
     </div>`;
 }
 
