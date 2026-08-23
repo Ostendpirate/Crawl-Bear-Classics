@@ -638,6 +638,8 @@
   .mercurial-row { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
   .mercurial-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .mercurial-roll-label { flex: none; font-size: 10px; font-weight: 700; color: var(--accent); padding: 4px 6px; background: var(--border); border-radius: 5px; white-space: nowrap; }
+  .mercurial-field { display: flex; align-items: center; gap: 4px; flex: none; }
+  .mercurial-field-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--muted); white-space: nowrap; }
   .mercurial-controls input[type=text] { flex: none; width: 46px; text-align: center; font-size: 11px; padding: 4px 2px; }
   .mercurial-row .mercurial-note { flex: 1; min-width: 0; font-size: 11px; padding: 4px 6px; min-height: 32px; }
   .manifestation-note { font-size: 11px; padding: 4px 6px; min-height: 32px; margin-top: 4px; }
@@ -6299,8 +6301,14 @@ function spellRowHtml(item) {
     ? `<div class="mercurial-row">
         <div class="mercurial-controls">
           <span class="mercurial-roll-label" title="Rolled on Table 5-2: Mercurial Magic (DCC RPG core rulebook) - this app doesn't include that table's text; look up what ${item.mercurial} means in your own rulebook and jot it into the note field.">Mercurial: ${item.mercurial}</span>
-          <input type="text" class="mercurial-bonus" placeholder="+0" title="Flat bonus/penalty this spell's Mercurial Magic applies to its Spell Check (e.g. Table 5-2's '-4 penalty to spell checks' or a flat bonus result) - added automatically to every roll of this spell." value="${escapeHtml(item.mercurialBonus || "")}" />
-          <input type="text" class="mercurial-die-steps" placeholder="±0" title="Steps this spell's Mercurial Magic shifts its Spell Check die along the dice chain - positive improves it (Table 5-2's 'die improved by one step', d20→d24), negative worsens it ('reduced by two steps', d20→d14) - applied automatically to every roll of this spell." value="${escapeHtml(item.mercurialDieSteps || "")}" />
+          <label class="mercurial-field">
+            <span class="mercurial-field-label">Check Bonus</span>
+            <input type="text" class="mercurial-bonus" placeholder="+0" title="Flat bonus/penalty this spell's Mercurial Magic applies to its Spell Check (e.g. Table 5-2's '-4 penalty to spell checks' or a flat bonus result) - added automatically to every roll of this spell." value="${escapeHtml(item.mercurialBonus || "")}" />
+          </label>
+          <label class="mercurial-field">
+            <span class="mercurial-field-label">Die Step</span>
+            <input type="text" class="mercurial-die-steps" placeholder="±0" title="Steps this spell's Mercurial Magic shifts its Spell Check die along the dice chain - positive improves it (Table 5-2's 'die improved by one step', d20→d24), negative worsens it ('reduced by two steps', d20→d14) - applied automatically to every roll of this spell." value="${escapeHtml(item.mercurialDieSteps || "")}" />
+          </label>
         </div>
         <textarea class="mercurial-note" placeholder="What this roll means (from your own rulebook) - optional" rows="2">${escapeHtml(item.mercurialNote || "")}</textarea>
       </div>`
@@ -6495,8 +6503,14 @@ function attachMercurialRollHandler(row, mercurialBtn) {
         <div class="mercurial-row">
           <div class="mercurial-controls">
             <span class="mercurial-roll-label"></span>
-            <input type="text" class="mercurial-bonus" placeholder="+0" title="Flat bonus/penalty this spell's Mercurial Magic applies to its Spell Check (e.g. Table 5-2's '-4 penalty to spell checks' or a flat bonus result) - added automatically to every roll of this spell." />
-            <input type="text" class="mercurial-die-steps" placeholder="±0" title="Steps this spell's Mercurial Magic shifts its Spell Check die along the dice chain - positive improves it (Table 5-2's 'die improved by one step', d20→d24), negative worsens it ('reduced by two steps', d20→d14) - applied automatically to every roll of this spell." />
+            <label class="mercurial-field">
+              <span class="mercurial-field-label">Check Bonus</span>
+              <input type="text" class="mercurial-bonus" placeholder="+0" title="Flat bonus/penalty this spell's Mercurial Magic applies to its Spell Check (e.g. Table 5-2's '-4 penalty to spell checks' or a flat bonus result) - added automatically to every roll of this spell." />
+            </label>
+            <label class="mercurial-field">
+              <span class="mercurial-field-label">Die Step</span>
+              <input type="text" class="mercurial-die-steps" placeholder="±0" title="Steps this spell's Mercurial Magic shifts its Spell Check die along the dice chain - positive improves it (Table 5-2's 'die improved by one step', d20→d24), negative worsens it ('reduced by two steps', d20→d14) - applied automatically to every roll of this spell." />
+            </label>
           </div>
           <textarea class="mercurial-note" placeholder="What this roll means (from your own rulebook) - optional" rows="2"></textarea>
         </div>`);
