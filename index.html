@@ -1602,7 +1602,6 @@
           <div class="fumble-die-line">Fumble Die: <span id="pc-fumble-die">d4</span> <span class="fumble-die-note">(based on equipped armor/shield)</span> <button type="button" class="tables-btn" id="pc-tables-btn" title="View this character's Crit and Fumble tables">📖 Crit/Fumble Tables</button></div>
           <div class="attack-list" id="attack-list-pc"></div>
           <button type="button" class="add-attack-btn" id="add-attack-pc">+ Add Attack</button>
-          <button type="button" class="add-attack-btn" id="add-spell-attack-pc" style="margin-top:6px;">+ Add Spell Attack</button>
           <div class="fumble-die-note" id="pc-tw-note" style="margin-top:6px;">Mark one attack "Primary" and another "Off-hand" to fight with two weapons (Table 4-3). A weapon row can also be switched to "🔮 Cast a Spell" from its own dropdown.</div>
         </fieldset>
 
@@ -5051,11 +5050,6 @@ document.getElementById("add-attack-pc").addEventListener("click", () => {
   attachAttackRowListeners("pc");
   recalcPcInitiativeDie();
   syncWeaponsIntoEquipment();
-});
-document.getElementById("add-spell-attack-pc").addEventListener("click", () => {
-  attackListEl("pc").insertAdjacentHTML("beforeend", attackRowHtml(emptySpellAttack(), "pc"));
-  attachAttackRowListeners("pc");
-  scheduleSave();
 });
 
 function firstLine(text) {
