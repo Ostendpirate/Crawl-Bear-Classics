@@ -640,6 +640,7 @@
   .mercurial-roll-label { flex: none; font-size: 10px; font-weight: 700; color: var(--accent); padding: 4px 6px; background: var(--border); border-radius: 5px; white-space: nowrap; }
   .mercurial-controls input[type=text] { flex: none; width: 46px; text-align: center; font-size: 11px; padding: 4px 2px; }
   .mercurial-row .mercurial-note { flex: 1; min-width: 0; font-size: 11px; padding: 4px 6px; min-height: 32px; }
+  .manifestation-note { font-size: 11px; padding: 4px 6px; min-height: 32px; margin-top: 4px; }
   .attack-ammo-line {
     display: flex;
     align-items: center;
@@ -6245,7 +6246,7 @@ function pcSpellCheckModifierBreakdownForStats(stats, atk) {
 }
 
 function emptySpellItem() {
-  return { id: "g" + Math.random().toString(36).slice(2, 9), name: "", mercurial: null, mercurialNote: "", mercurialBonus: "", mercurialDieSteps: "" };
+  return { id: "g" + Math.random().toString(36).slice(2, 9), name: "", mercurial: null, mercurialNote: "", mercurialBonus: "", mercurialDieSteps: "", manifestation: "" };
 }
 
 // This roster is a known-spells list, not an action - rolling a Spell
@@ -6261,9 +6262,12 @@ function spellRowHtml(item) {
   // from before this dropdown existed.
   if (cls !== "Wizard" && cls !== "Elf") {
     return `
-      <div class="attack-row" data-id="${item.id}">
-        <input type="text" class="attack-name spell-row-name" placeholder="Spell name" value="${escapeHtml(item.name || "")}" />
-        <button type="button" class="attack-remove-btn spell-row-remove-btn" title="Remove">×</button>
+      <div class="attack-row pc-attack-row" data-id="${item.id}">
+        <div class="attack-weapon-line">
+          <input type="text" class="attack-name spell-row-name" placeholder="Spell name" value="${escapeHtml(item.name || "")}" />
+          <button type="button" class="attack-remove-btn spell-row-remove-btn" title="Remove">×</button>
+        </div>
+        ${manifestationFieldHtml(item)}
       </div>`;
   }
   const knownNames = DCC_WIZARD_SPELLS.map(s => s.name);
@@ -6310,8 +6314,27 @@ function spellRowHtml(item) {
         ${mercurialBtnHtml}
         <button type="button" class="attack-remove-btn spell-row-remove-btn" title="Remove">×</button>
       </div>
+      ${manifestationFieldHtml(item)}
       ${mercurialRowHtml}
     </div>`;
+}
+
+// Manifestation - what casting a spell actually looks/sounds/feels like -
+// is rolled per-spell in DCC RPG's own spell write-ups (each one specs
+// its own die size and table, unlike Mercurial Magic's single universal
+// Table 5-2), and applies to EVERY caster (Cleric spells have their own
+// Manifestation entries too, not just Wizard/Elf - it's about the
+// sensory effect, not tied to how a Wizard personally learned a spell).
+// Since this app has no per-spell tables to roll against anyway, this is
+// deliberately just a plain persistent note - no roll button, no die, no
+// stored number - the player rolls whatever their own book calls for at
+// the table and writes the result straight in. Always rendered (once the
+// row exists at all) rather than gated on a name being set, so there's no
+// "appears only after an event I have to remember to also update" gap to
+// get wrong (see the Mercurial Magic button's own history of exactly that
+// bug) - an unused field on a still-blank row is harmless.
+function manifestationFieldHtml(item) {
+  return `<textarea class="manifestation-note" placeholder="Manifestation (roll per this spell's own entry in your rulebook) - optional" rows="2">${escapeHtml(item.manifestation || "")}</textarea>`;
 }
 
 function spellsListEl() {
@@ -6357,7 +6380,13 @@ function readSpellItems() {
     const mercurialBonus = mercurialBonusEl ? mercurialBonusEl.value : "";
     const mercurialDieStepsEl = row.querySelector(".mercurial-die-steps");
     const mercurialDieSteps = mercurialDieStepsEl ? mercurialDieStepsEl.value : "";
-    return { id: row.dataset.id, name, mercurial, mercurialNote, mercurialBonus, mercurialDieSteps };
+    // Manifestation (see manifestationFieldHtml) - a plain persistent
+    // note field, rendered for every row regardless of class/name, so no
+    // null-guard-driven "hasn't appeared yet" gap like Mercurial's roll
+    // button has to work around.
+    const manifestationEl = row.querySelector(".manifestation-note");
+    const manifestation = manifestationEl ? manifestationEl.value : "";
+    return { id: row.dataset.id, name, mercurial, mercurialNote, mercurialBonus, mercurialDieSteps, manifestation };
   });
 }
 
@@ -6367,6 +6396,9 @@ function attachSpellRowListeners() {
   listEl.querySelectorAll(".attack-row").forEach(row => {
     const textEl = row.querySelector(".spell-row-name");
     if (textEl) textEl.addEventListener("input", scheduleSave);
+    // Present on every row regardless of class (see manifestationFieldHtml).
+    const manifestationEl = row.querySelector(".manifestation-note");
+    if (manifestationEl) manifestationEl.addEventListener("input", scheduleSave);
     const selectEl = row.querySelector(".spell-row-select");
     const customEl = row.querySelector(".spell-row-custom-name");
     const backBtn = row.querySelector(".spell-row-custom-back");
