@@ -626,6 +626,7 @@
   .weapon-badge-poisoned { background: #4d7a2f; color: #fff; font-weight: 700; }
   .weapon-badge-ammo { background: var(--border); color: var(--text); font-weight: 700; }
   .weapon-badge-ammo-out { background: #e0665a; color: #1e1b18; }
+  .weapon-badge-concentration { background: #2f6a8a; color: #fff; font-weight: 700; }
   .hp-btn.disabled, .hp-btn[disabled] {
     opacity: 0.4;
     cursor: not-allowed;
@@ -9107,6 +9108,18 @@ function hasConcentrationSpellStats(stats) {
   return stats.mode === "pc" && (stats.data.pcSpells || []).some(s => s.concentration);
 }
 
+// Whether ONE specific known spell (by name) is flagged "Requires
+// Concentration" - used by spellTrackerLineHtml to mark a "Cast a Spell"
+// line's currently-picked spell, same lookup-by-name pattern
+// mercurialAdjustmentForSpellStats already uses since that data lives on
+// the Spells section roster item, not the Attacks-row/line itself.
+function isConcentrationSpellStats(stats, name) {
+  const trimmed = (name || "").trim();
+  if (!trimmed) return false;
+  const spellItem = (stats.data.pcSpells || []).find(s => (s.name || "").trim() === trimmed);
+  return !!(spellItem && spellItem.concentration);
+}
+
 function trackerRowHtml(item, stats, isActive) {
   const lines = deriveTrackerLines(item, stats);
   const showsConcentration = hasConcentrationSpellStats(stats);
@@ -9330,6 +9343,13 @@ function spellTrackerLineHtml(item, stats, line) {
   const check = pcSpellCheckModifierBreakdownForStats(stats, { ...atk, actionDieIndex: line.slotKey });
   const bonusText = check ? formatSignedNumber(check.modifier) : "+0";
   const bonusTooltip = check ? check.breakdown : "Only Cleric/Wizard/Elf have a Spell Check.";
+  // Reminder badge (same 🧠 icon as the Spells section's own checkbox -
+  // see concentrationCheckboxHtml) for whichever spell is CURRENTLY picked
+  // in the select above - re-evaluated fresh off atk.name each render, so
+  // switching the picker to a different known spell updates this too.
+  const badges = [];
+  if (line.dieSides) badges.push(`<span class="weapon-badge weapon-badge-die" title="Spell Check die this line rolls">d${line.dieSides}</span>`);
+  if (isConcentrationSpellStats(stats, atk.name)) badges.push(`<span class="weapon-badge weapon-badge-concentration" title="Requires Concentration (DCC RPG core rulebook) - while concentrating, this caster can take no action beyond walking at half speed; combat damage, a fall, or another significant interruption forces a Will save (DC 11) or the caster loses concentration.">🧠 Concentration</span>`);
   return `
     <div class="attack-detail-row-wrap">
       <div class="attack-detail-row" data-attack-id="${line.attackId}" data-slot-key="${line.slotKey || ""}">
@@ -9339,7 +9359,7 @@ function spellTrackerLineHtml(item, stats, line) {
         </span>
         <button class="hp-btn attack-roll-btn" title="Roll Spell Check">🎲</button>
       </div>
-      ${line.dieSides ? `<div class="attack-detail-badges"><span class="weapon-badge weapon-badge-die" title="Spell Check die this line rolls">d${line.dieSides}</span></div>` : ""}
+      ${badges.length ? `<div class="attack-detail-badges">${badges.join(" ")}</div>` : ""}
     </div>`;
 }
 
