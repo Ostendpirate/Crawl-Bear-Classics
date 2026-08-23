@@ -735,6 +735,17 @@
   .attack-row .attack-name { flex: 1.6; }
   .attack-row .attack-bonus { flex: 0.7; text-align: center; }
   .attack-row .attack-damage { flex: 0.9; text-align: center; }
+  /* .spell-attack-select sits where .attack-name normally does but had no
+     flex rule of its own, leaving it sized to its longest <option> text
+     and squeezing .attack-bonus down to almost nothing next to it. */
+  .attack-row .spell-attack-select { flex: 1.6; min-width: 0; }
+  /* input:read-only only recolors the TEXT (var(--accent), bold) - left on
+     the same var(--panel) background as the row around it, a readonly
+     Spell Check Bonus barely registered as a field at all. Giving it the
+     same "computed value" chip look weapon-badge-die/.hp-btn already use
+     elsewhere (var(--border) background) makes it read as a distinct,
+     intentional readout instead of blending into the row. */
+  .attack-row .spell-attack-bonus { background: var(--border); border-color: var(--border); }
   .attack-quick-btn {
     flex: none;
     width: 22px;
@@ -6409,16 +6420,21 @@ function spellAttackRowHtml(atk) {
   const check = pcSpellCheckModifierBreakdown({ actionDieIndex: effectiveActionDieIndex });
   const bonusText = check ? formatSignedNumber(check.modifier) : "";
   const bonusTitle = check ? check.breakdown : "Only Cleric/Wizard/Elf have a Spell Check - pick a caster Class above.";
+  // Same die badge weapon rows show (attackRowHtml's weapon-badge-die) -
+  // check.sides already IS this row's Action Die size (see
+  // pcSpellCheckModifierBreakdown), so there's nothing left to compute.
+  const dieBadgeHtml = check ? `<div class="attack-row-badges"><span class="weapon-badge weapon-badge-die" title="Spell Check die this row rolls">d${check.sides}</span></div>` : "";
   return `
     <div class="attack-row pc-attack-row spell-attack-row" data-id="${atk.id}" data-line-deeds="{}">
       <div class="attack-weapon-line">
         <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
         ${actDieSelectHtml}
       </div>
+      ${dieBadgeHtml}
       <div class="attack-row-fields">
         <input type="hidden" class="attack-name" value="${escapeHtml(atk.name || "")}" />
         <select class="spell-attack-select" title="Which known spell this row casts - add more in the Spells section below.">${spellSelectOptionsHtml(atk.name)}</select>
-        <input type="text" class="attack-bonus" readonly value="${escapeHtml(bonusText)}" title="${escapeHtml(bonusTitle)}" />
+        <input type="text" class="attack-bonus spell-attack-bonus" readonly value="${escapeHtml(bonusText)}" title="${escapeHtml(bonusTitle)}" />
         <input type="hidden" class="attack-damage" value="" />
         <button type="button" class="hp-btn spell-attack-roll-btn" title="Roll Spell Check">🎲</button>
         <button type="button" class="attack-remove-btn" title="Remove">×</button>
@@ -6453,6 +6469,22 @@ function refreshSpellAttackRows() {
     const check = pcSpellCheckModifierBreakdown({ actionDieIndex: actDieEl ? actDieEl.value : "" });
     bonusInput.value = check ? formatSignedNumber(check.modifier) : "";
     bonusInput.title = check ? check.breakdown : "Only Cleric/Wizard/Elf have a Spell Check - pick a caster Class above.";
+    // Die badge (see spellAttackRowHtml) can go stale between full row
+    // rebuilds on its own - a class/level change can shift an EXTRA
+    // Action Die's size (Table 1-12's 2nd attack: d14 at level 5, d16 at
+    // 6, d20 at 7+) without this row ever being removed/re-added, so it
+    // needs the same "recompute every passive pass" treatment as Bonus.
+    let badgeWrap = row.querySelector(".attack-row-badges");
+    if (check) {
+      if (!badgeWrap) {
+        badgeWrap = document.createElement("div");
+        badgeWrap.className = "attack-row-badges";
+        row.querySelector(".attack-weapon-line").insertAdjacentElement("afterend", badgeWrap);
+      }
+      badgeWrap.innerHTML = `<span class="weapon-badge weapon-badge-die" title="Spell Check die this row rolls">d${check.sides}</span>`;
+    } else if (badgeWrap) {
+      badgeWrap.remove();
+    }
   });
 }
 
