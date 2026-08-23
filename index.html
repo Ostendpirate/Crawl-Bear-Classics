@@ -4565,6 +4565,15 @@ function readAttacks(mode) {
       } catch (e) {
         base.lineDeeds = {};
       }
+      // Per-Action-Die spell overrides for an expanded "Cast a Spell" row
+      // (see spellAttackRowHtml's own comment) - same "declared/edited in
+      // the Tracker, just carried forward here unchanged" contract as
+      // lineDeeds just above, via the matching data-spell-by-slot attribute.
+      try {
+        base.spellBySlot = JSON.parse(row.dataset.spellBySlot || "{}");
+      } catch (e) {
+        base.spellBySlot = {};
+      }
     }
     return base;
   });
@@ -6750,7 +6759,15 @@ function spellAttackRowHtml(atk) {
   // exist here even though this row has no visible use for either. Name
   // mirrors the selected spell (kept in sync by the change listener in
   // attachAttackRowListeners) so formatAttacksSummary's statline preview
-  // still reads sensibly ("Fireball +4") instead of showing nothing.
+  // still reads sensibly ("Fireball +4") instead of showing nothing. This
+  // IS the row's own default pick, used as-is whenever a single Action Die
+  // means there's nothing to expand into multiple Tracker lines - but when
+  // this row DOES expand across several dice (deriveTrackerLines), each
+  // resulting line can independently override it via `spellBySlot`
+  // (slotKey -> spell name, see applyTrackerSpellSelection/data-spell-by-slot
+  // below), so a caster with 2 Action Dice can cast a different known
+  // spell on each without needing a second Cast-a-Spell row (which is
+  // blocked entirely - see ensureCasterHasSpellAttackRow).
   // Same Action Die picker as an ordinary weapon row (attackRowHtml) - a
   // spell cast spends one Action Die exactly like a weapon swing does (see
   // actionSlotKey), so a caster with multiple Action Dice needs to say
@@ -6772,8 +6789,9 @@ function spellAttackRowHtml(atk) {
   // check.sides already IS this row's Action Die size (see
   // pcSpellCheckModifierBreakdown), so there's nothing left to compute.
   const dieBadgeHtml = check ? `<div class="attack-row-badges"><span class="weapon-badge weapon-badge-die" title="Spell Check die this row rolls">d${check.sides}</span></div>` : "";
+  const spellBySlotAttr = escapeHtml(JSON.stringify(atk.spellBySlot || {}));
   return `
-    <div class="attack-row pc-attack-row spell-attack-row" data-id="${atk.id}" data-line-deeds="{}">
+    <div class="attack-row pc-attack-row spell-attack-row" data-id="${atk.id}" data-line-deeds="{}" data-spell-by-slot="${spellBySlotAttr}">
       <div class="attack-weapon-line">
         <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
         ${actDieSelectHtml}
@@ -6792,7 +6810,7 @@ function spellAttackRowHtml(atk) {
 }
 
 function emptySpellAttack() {
-  return { ...emptyAttack(), weapon: SPELL_ATTACK_KEY };
+  return { ...emptyAttack(), weapon: SPELL_ATTACK_KEY, spellBySlot: {} };
 }
 
 // Casters get exactly one "Cast a Spell" Attacks row, added automatically
@@ -9069,17 +9087,28 @@ function deriveTrackerLines(item, stats) {
   const spellAttacks = stats.attacks.filter(a => a.weapon === SPELL_ATTACK_KEY);
   if (spellAttacks.length === 1 && actDieOptions.length > 0) {
     const atk = spellAttacks[0];
-    // Mercurial Magic's die-step adjustment (see mercurialAdjustmentForSpellStats)
-    // has to be folded in here too, not just in the actual roll
-    // (pcSpellCheckModifierBreakdownForStats) - otherwise this line's
-    // displayed die badge (see spellTrackerLineHtml) would show the plain
-    // Action Die size while the roll it triggers uses a different one.
-    const mercurial = mercurialAdjustmentForSpellStats(stats, atk.name);
+    const spellBySlot = atk.spellBySlot || {};
     actDieOptions.forEach(opt => {
+      // Each expanded line can independently pick which known spell it
+      // casts (see spellAttackRowHtml/applyTrackerSpellSelection) rather
+      // than every Action Die sharing this row's one atk.name - falls back
+      // to the row's own default pick until a line-specific override has
+      // actually been made for that Action Die. line.atk carries the
+      // resolved name so spellTrackerLineHtml/rollSpellAttackForTracker/
+      // isConcentrationSpellStats etc. all just read atk.name as usual,
+      // with no separate spellBySlot-awareness needed on their part.
+      const effectiveName = spellBySlot[opt.value] || atk.name;
+      const lineAtk = { ...atk, name: effectiveName };
       const profile = actionDieProfileForAttack(stats, { actionDieIndex: opt.value });
+      // Mercurial Magic's die-step adjustment (see mercurialAdjustmentForSpellStats)
+      // has to be resolved per-line off the EFFECTIVE spell here, not
+      // atk.name - otherwise this line's displayed die badge (see
+      // spellTrackerLineHtml) would show the wrong spell's adjustment once
+      // two lines are casting two different known spells.
+      const mercurial = mercurialAdjustmentForSpellStats(stats, effectiveName);
       const dieSides = mercurial && mercurial.dieSteps ? stepDiceChain(profile.sides, mercurial.dieSteps) : profile.sides;
       lines.push({
-        atk, attackId: atk.id, slotKey: opt.value, isTw: false, isSpell: true,
+        atk: lineAtk, attackId: atk.id, slotKey: opt.value, isTw: false, isSpell: true,
         label: `🔮 ${opt.label.replace(/\s*\(d\d+\)$/, "")}`,
         dieSides,
       });
@@ -10128,14 +10157,19 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   const stats = getStatsForItem(item);
   const atk = stats.attacks.find(a => a.id === attackId);
   if (!atk) return;
-  const check = pcSpellCheckModifierBreakdownForStats(stats, { ...atk, actionDieIndex: slotKey });
+  // atk.spellBySlot[slotKey] (see deriveTrackerLines/applyTrackerSpellSelection)
+  // is only ever populated once this row has expanded into multiple
+  // Action-Die lines - falls back to the row's own default pick otherwise,
+  // same resolution deriveTrackerLines already applies for display.
+  const effectiveName = (atk.spellBySlot && atk.spellBySlot[slotKey]) || atk.name;
+  const check = pcSpellCheckModifierBreakdownForStats(stats, { ...atk, name: effectiveName, actionDieIndex: slotKey });
   if (!check) {
     const msg = `${item.name || "Token"}: Only Cleric/Wizard/Elf roll a Spell Check.`;
     showTrackerStatus(msg, true);
     showStatus(msg, true);
     return;
   }
-  const label = (atk.name || "").trim() || "Spell";
+  const label = (effectiveName || "").trim() || "Spell";
   const forcedD20 = consumeForcedD20();
   const rolled = forcedD20 !== null ? Math.min(forcedD20, check.sides) : (Math.floor(Math.random() * check.sides) + 1);
   // Natural max/natural 1 (see spellCheckNaturalResultText) apply here
@@ -10258,16 +10292,19 @@ function attachTrackerRowListeners() {
       const slotKey = row.dataset.slotKey || null;
       row.querySelector(".attack-roll-btn").addEventListener("click", () => rollAttackForTrackerRow(parentId, attackId, slotKey));
 
-      // Picking a spell here persists it straight to the attack's `name`
-      // field (applyTrackerSpellSelection) - same field the Sheet's own
-      // .spell-attack-select listener writes, so the two stay in sync.
-      // Same un-debounced "commits atomically on user choice" contract as
-      // .attack-deed-type just below - unlike a typed text field, a
-      // <select> doesn't need scheduleTrackerLineUpdate's 300ms coalescing.
+      // Picking a spell here persists it via applyTrackerSpellSelection,
+      // which writes straight to the attack's `name` field (kept in sync
+      // with the Sheet's own .spell-attack-select) UNLESS this row has
+      // expanded into multiple Action-Die lines, in which case each line's
+      // pick is kept independently in spellBySlot[slotKey] instead - see
+      // that function's own comment. Same un-debounced "commits atomically
+      // on user choice" contract as .attack-deed-type just below - unlike a
+      // typed text field, a <select> doesn't need scheduleTrackerLineUpdate's
+      // 300ms coalescing.
       const spellSelect = wrap.querySelector(".tracker-spell-select");
       if (spellSelect) {
         spellSelect.addEventListener("change", () => {
-          applyTrackerSpellSelection(parentId, attackId, spellSelect.value);
+          applyTrackerSpellSelection(parentId, attackId, slotKey, spellSelect.value);
         });
       }
 
@@ -10467,20 +10504,33 @@ async function applyAttackAmmoDelta(itemId, attackId, delta) {
 }
 
 // Persists the Tracker's own spell picker (spellTrackerLineHtml) - same
-// shape as applyAttackAmmoDelta, but writes the attack's `name` field
-// directly (the same field the Sheet's own .spell-attack-select listener
-// writes - see attachAttackRowListeners) rather than a delta, so a spell
-// picked here shows up identically on the Sheet's own Cast-a-Spell row
-// the next time it's opened. PC-only, same no-op-for-monsters guard as
-// every other per-attack Tracker write.
-async function applyTrackerSpellSelection(itemId, attackId, name) {
+// shape as applyAttackAmmoDelta. Mirrors deriveTrackerLines' own
+// spellAttacks.length === 1 && actDieOptions.length > 0 expansion check
+// exactly: when a lone Cast-a-Spell row has spread across multiple Action
+// Dice, each expanded line needs to keep its own pick independently, so
+// this writes into attacks[].spellBySlot[slotKey] instead of the row's
+// shared `name` (see spellAttackRowHtml/emptySpellAttack). Every other
+// shape - a single-die caster, or several actual spell rows each already
+// on their own die - only ever has one line per row, so it keeps writing
+// straight to that row's own `name` field, the same field the Sheet's own
+// .spell-attack-select listener writes, so the two stay in sync exactly
+// as before. PC-only, same no-op-for-monsters guard as every other
+// per-attack Tracker write.
+async function applyTrackerSpellSelection(itemId, attackId, slotKey, name) {
   await OBR.scene.items.updateItems([itemId], items => {
     items.forEach(item => {
       const mode = item.metadata[MODE_METADATA_KEY] || "monster";
       if (mode !== "pc") return;
       const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
-      const attacks = (data.attacks || []).map(a => a.id === attackId ? { ...a, name } : a);
-      data.attacks = attacks;
+      const attacks = data.attacks || [];
+      const spellAttacks = attacks.filter(a => a.weapon === SPELL_ATTACK_KEY);
+      const actDieOptions = actionDieSelectOptions((data.class || "").trim(), data.level).filter(o => o.value !== "shieldbash");
+      const expanded = spellAttacks.length === 1 && actDieOptions.length > 0;
+      data.attacks = attacks.map(a => {
+        if (a.id !== attackId) return a;
+        if (expanded) return { ...a, spellBySlot: { ...(a.spellBySlot || {}), [slotKey]: name } };
+        return { ...a, name };
+      });
       item.metadata[PC_METADATA_KEY] = data;
     });
   });
