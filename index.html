@@ -6091,6 +6091,29 @@ function pcSpellCheckModifierBreakdown() {
   return { cls, abilityId, level, abilityMod, penalty, modifier, breakdown };
 }
 
+// Same math as pcSpellCheckModifierBreakdown, but sourced from a token's
+// saved stats.data (class/level/ability scores/armorItems) instead of the
+// live Sheet DOM - needed so the Combat Tracker can roll a Spell Check for
+// whichever token was clicked, not just whichever one happens to be open
+// on the Sheet tab (same "ForStats" pattern as shieldEquippedForStats/
+// twoWeaponProfileForStats etc. just below).
+function pcSpellCheckModifierBreakdownForStats(stats) {
+  const cls = (stats.data.class || "").trim();
+  const abilityId = pcCasterAbilityId(cls);
+  if (!abilityId) return null;
+  const level = parseLevelNumber(stats.data.level) || 0;
+  const abilityMod = abilityModifierFromRaw(stats.data[abilityId]);
+  const hinderedByArmor = classSpellcastingHinderedByArmor(cls);
+  const equippedItems = (stats.data.armorItems || []).filter(item => item.equipped);
+  const penalty = hinderedByArmor ? equippedItems.reduce((sum, item) => sum + (parseInt(item.checkPenalty, 10) || 0), 0) : 0;
+  const modifier = level + abilityMod + penalty;
+  const abilityLabel = abilityId === "per" ? "Personality" : "Intelligence";
+  const parts = [`Level ${formatSignedNumber(level)}`, `${abilityLabel} ${formatSignedNumber(abilityMod)}`];
+  if (hinderedByArmor && penalty) parts.push(`Armor Check Penalty ${formatSignedNumber(penalty)}`);
+  const breakdown = `Spell Check = ${parts.join(" + ")} = ${formatSignedNumber(modifier)}.${hinderedByArmor ? "" : " Not hindered by armor (Cleric)."}`;
+  return { cls, abilityId, level, abilityMod, penalty, modifier, breakdown };
+}
+
 function emptySpellItem() {
   return { id: "g" + Math.random().toString(36).slice(2, 9), name: "" };
 }
@@ -8503,6 +8526,16 @@ function deriveTrackerLines(item, stats) {
     }
   }
 
+  // "Cast a Spell" Attacks rows (spellAttackRowHtml) never go through the
+  // Equipped checkbox at all - there isn't one on that row template - so
+  // they're pulled straight from stats.attacks here instead of the
+  // `equipped` list above. One line per known spell a caster has added as
+  // an Attacks row, same slotKey ("spell") for all of them since a spell
+  // isn't tied to any particular Action Die the way a weapon attack is.
+  stats.attacks.filter(a => a.weapon === SPELL_ATTACK_KEY).forEach(atk => {
+    lines.push({ atk, attackId: atk.id, slotKey: "spell", isTw: false, isSpell: true, label: atk.name ? `🔮 ${atk.name}` : "🔮 Cast a Spell", dieSides: 20 });
+  });
+
   return lines.map(tagUsed);
 }
 
@@ -8566,6 +8599,13 @@ function attackDetailHtml(item, stats, lines) {
 // every other line, including other lines sharing the same underlying
 // weapon row.
 function trackerLineHtml(item, stats, line) {
+  // A "Cast a Spell" line (see deriveTrackerLines) is structurally nothing
+  // like a weapon line - no die-chain/crit/fumble/damage, no Deed Die,
+  // Backstab, ammo, or weapon badges - so it short-circuits into its own
+  // tiny template here, same "spell rows are different, branch out early"
+  // pattern attackRowHtml's own spell short-circuit already uses on the
+  // Sheet.
+  if (line.isSpell) return spellTrackerLineHtml(item, stats, line);
   const atk = line.atk;
   const entry = stats.mode === "pc" ? dccWeaponEntry(atk.weapon) : null;
   const isThief = stats.mode === "pc" && (stats.data.class || "").trim() === "Thief";
@@ -8661,6 +8701,28 @@ function trackerLineHtml(item, stats, line) {
       </div>
       ${badges.length ? `<div class="attack-detail-badges">${badges.join(" ")}</div>` : ""}
       ${extraControls.length ? `<div class="attack-detail-extra">${extraControls.join("")}</div>` : ""}
+    </div>`;
+}
+
+// A "Cast a Spell" line's Combat Tracker row - the spell name, its Spell
+// Check modifier (computed fresh from this token's own saved stats via
+// pcSpellCheckModifierBreakdownForStats, same "don't trust a possibly-
+// stale saved field" contract deriveTrackerLines' dieSides already uses
+// for weapon lines), and a roll button. No damage, crit/fumble, Deed Die,
+// Backstab, or ammo - none of that applies to a Spell Check.
+function spellTrackerLineHtml(item, stats, line) {
+  const check = pcSpellCheckModifierBreakdownForStats(stats);
+  const bonusText = check ? formatSignedNumber(check.modifier) : "+0";
+  const bonusTooltip = check ? check.breakdown : "Only Cleric/Wizard/Elf have a Spell Check.";
+  return `
+    <div class="attack-detail-row-wrap">
+      <div class="attack-detail-row" data-attack-id="${line.attackId}" data-slot-key="${line.slotKey || ""}">
+        <span class="attack-detail-name">${escapeHtml(line.label)}</span>
+        <span class="attack-detail-meta">
+          <span class="attack-detail-meta-part" title="${escapeHtml(bonusTooltip)}">Spell Check <b>${escapeHtml(bonusText)}</b></span>
+        </span>
+        <button class="hp-btn attack-roll-btn" title="Roll Spell Check">🎲</button>
+      </div>
     </div>`;
 }
 
@@ -9394,6 +9456,47 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
   });
 }
 
+// Rolls a Spell Check for one "Cast a Spell" line in the Combat Tracker -
+// same modifier math as the Sheet's rollSpellAttackRow (shared indirectly
+// via pcSpellCheckModifierBreakdownForStats, the ForStats sibling of the
+// modifier calc rollSpellAttackRow itself uses), but posted through the
+// same tracker-status/chat-log/broadcast/used-slot plumbing every other
+// Tracker roll goes through, and reading whichever token was clicked
+// rather than whatever's open on the Sheet tab. Honors the GM's "force
+// next attack's d20" testing field (Dice tab) exactly like an ordinary
+// attack roll would, since a Spell Check is still just a d20 roll.
+async function rollSpellAttackForTracker(itemId, attackId) {
+  const [item] = await OBR.scene.items.getItems([itemId]);
+  if (!item) return;
+  const stats = getStatsForItem(item);
+  const atk = stats.attacks.find(a => a.id === attackId);
+  if (!atk) return;
+  const check = pcSpellCheckModifierBreakdownForStats(stats);
+  if (!check) {
+    const msg = `${item.name || "Token"}: Only Cleric/Wizard/Elf roll a Spell Check.`;
+    showTrackerStatus(msg, true);
+    showStatus(msg, true);
+    return;
+  }
+  const label = (atk.name || "").trim() || "Spell";
+  const forcedD20 = consumeForcedD20();
+  const rolled = forcedD20 !== null ? forcedD20 : (Math.floor(Math.random() * 20) + 1);
+  const total = rolled + check.modifier;
+  const text = `${label} - Spell Check: d20 (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(check.modifier)} = ${markRollTotal(total)}`;
+
+  // Same "this line is spent for the round" tracking as any other Tracker
+  // attack line (see USED_ACTION_SLOTS_KEY/deriveTrackerLines) - keyed by
+  // this spell's own attackId, so casting one known spell only hides THAT
+  // spell's line until the round advances; a caster with several "Cast a
+  // Spell" rows can still cast a different one this round.
+  await markActionSlotsUsed(itemId, [actionSlotKey(attackId, "spell")]);
+
+  showTrackerStatus(`${item.name || "Token"} — ${text}`, false, 6500);
+  showStatus(`${item.name || "Token"} — ${text}`, false, 6500);
+  await appendChatLog({ kind: "spell", tokenName: item.name || "Token", text, gmOnly: false });
+  broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: 20, value: rolled }], modifier: check.modifier, notation: "d20", total, label: `${label} — Spell Check` });
+}
+
 // Rolling an attack from the Combat Tracker's expanded attack list used to
 // always go through the plain single-weapon path (rollAttackFor), even
 // for a PC attack that's actually one half of a configured Primary/
@@ -9413,6 +9516,14 @@ async function rollAttackForTrackerRow(itemId, attackId, slotKey) {
   if (!item) return;
   const stats = getStatsForItem(item);
   const atk = stats.attacks.find(a => a.id === attackId);
+  // A "Cast a Spell" line (see deriveTrackerLines) has none of the
+  // weapon-roll machinery below - it's a plain Spell Check, not an
+  // attack roll - so it routes to its own roll function before any of
+  // the two-weapon-pairing logic here even looks at it.
+  if (atk && atk.weapon === SPELL_ATTACK_KEY) {
+    rollSpellAttackForTracker(itemId, attackId);
+    return;
+  }
   // A Primary/Off-hand weapon row's OWN "tw" line (see deriveTrackerLines)
   // is the only one that actually routes through the combined two-weapon
   // roll - a character with extra Action Dice from level also gets one or
