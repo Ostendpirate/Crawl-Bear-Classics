@@ -9096,15 +9096,48 @@ function trackerRowHtml(item, stats, isActive) {
 // instead of just silently rendering an empty panel.
 function attackDetailHtml(item, stats, lines) {
   const visibleLines = lines.filter(line => !line.used);
+  // Concentration Save (see hasConcentrationSpellStats/concentrationSaveLineHtml)
+  // is a reactive save, not an Action-Die-consuming action - it never
+  // gets marked "used this round" the way attack/spell lines do, so it's
+  // appended unconditionally here rather than folded into `lines`
+  // (deriveTrackerLines' used-slot filtering above would be meaningless
+  // for it, and could hide it entirely on a round where every OTHER line
+  // happens to be used up).
+  const concentrationHtml = hasConcentrationSpellStats(stats) ? concentrationSaveLineHtml(item, stats) : "";
   if (!visibleLines.length) {
     return `
       <div class="attack-detail" data-parent-id="${item.id}">
+        ${concentrationHtml}
         <div class="attack-detail-used-up">All of this token's attacks have been used this round. They'll reappear when the round advances (Next Turn) or the tracker is reset.</div>
       </div>`;
   }
   return `
     <div class="attack-detail" data-parent-id="${item.id}">
       ${visibleLines.map(line => trackerLineHtml(item, stats, line)).join("")}
+      ${concentrationHtml}
+    </div>`;
+}
+
+// DCC RPG core rulebook: some spells require concentration - while
+// concentrating, the caster can take no action beyond walking at half
+// speed, and combat damage, a fall, or another significant interruption
+// forces a Will save (DC 11) or the caster loses concentration. This line
+// is shown whenever hasConcentrationSpellStats is true for the token -
+// same .attack-detail-row-wrap/.attack-detail-row shape every other
+// tracker line uses, so it picks up the same layout/styling, but its
+// roll button (rollConcentrationSaveForTracker) is wired separately in
+// attachTrackerRowListeners rather than going through
+// rollAttackForTrackerRow, since it isn't an attackId/slotKey-keyed line.
+function concentrationSaveLineHtml(item, stats) {
+  return `
+    <div class="attack-detail-row-wrap">
+      <div class="attack-detail-row">
+        <span class="attack-detail-name">🧠 Concentration Save</span>
+        <span class="attack-detail-meta">
+          <span class="attack-detail-meta-part" title="1d20 + this character's Will save bonus, vs DC 11 - required after combat damage, a fall, or another significant interruption while concentrating on a spell; failing means losing concentration.">DC 11 Will</span>
+        </span>
+        <button class="hp-btn concentration-save-btn" title="Roll a Concentration Save (DC 11 Will).">🎲</button>
+      </div>
     </div>`;
 }
 
@@ -10105,10 +10138,49 @@ async function rollAttackForTrackerRow(itemId, attackId, slotKey) {
   rollAttackFor(itemId, attackId, slotKey);
 }
 
+// Rolls a Concentration Save (DC 11 Will) for whichever token was clicked
+// - 1d20 + this character's own Will save bonus (stats.data.will, the
+// same field the Sheet's own Will save box shows), read from the token's
+// saved data rather than the live Sheet DOM, same reasoning every other
+// Tracker roll already follows. DCC RPG core rulebook: required whenever
+// a concentrating caster takes combat damage, falls, or suffers another
+// significant interruption; failing means losing concentration. Not tied
+// to any specific spell/attack line (see hasConcentrationSpellStats), so
+// it's never marked "used this round" the way Action-Die-consuming lines
+// are - a caster can be interrupted, and need this save, more than once
+// in the same round.
+async function rollConcentrationSaveForTracker(itemId) {
+  const [item] = await OBR.scene.items.getItems([itemId]);
+  if (!item) return;
+  const stats = getStatsForItem(item);
+  const willMod = parseModifier(stats.data.will);
+  const rolled = Math.floor(Math.random() * 20) + 1;
+  const total = rolled + willMod;
+  const DC = 11;
+  const resultText = total >= DC
+    ? markCritAlert("✅ Concentration held.")
+    : markFumbleAlert("💥 Concentration lost!");
+  const text = `Concentration Save: d20 (${rolled}) ${formatSignedNumber(willMod)} = ${markRollTotal(total)} vs DC ${DC} - ${resultText}`;
+  showTrackerStatus(`${item.name || "Token"} — ${text}`, false, 6500);
+  showStatus(`${item.name || "Token"} — ${text}`, false, 6500);
+  await appendChatLog({ kind: "save", tokenName: item.name || "Token", text, gmOnly: false });
+  broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: 20, value: rolled }], modifier: willMod, notation: "d20", total, label: "Concentration Save (DC 11 Will)" });
+}
+
 function attachTrackerRowListeners() {
   document.querySelectorAll("#tracker-list .attack-detail").forEach(detail => {
     const parentId = detail.dataset.parentId;
     detail.querySelectorAll(".attack-detail-row-wrap").forEach(wrap => {
+      // Concentration Save (see concentrationSaveLineHtml) isn't keyed by
+      // attackId/slotKey like every other line here - it's a standing,
+      // always-available reactive save, not tied to a specific attack/
+      // spell row - so it's wired separately and skips the rest of this
+      // per-line setup entirely (which all assumes those two exist).
+      const concentrationBtn = wrap.querySelector(".concentration-save-btn");
+      if (concentrationBtn) {
+        concentrationBtn.addEventListener("click", () => rollConcentrationSaveForTracker(parentId));
+        return;
+      }
       const row = wrap.querySelector(".attack-detail-row");
       const attackId = row.dataset.attackId;
       const slotKey = row.dataset.slotKey || null;
