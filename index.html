@@ -6772,6 +6772,36 @@ function refreshSpellAttackRows() {
   });
 }
 
+// A Spell Check's natural-roll results (DCC RPG core rulebook): a natural
+// MAX face is always a critical success - the caster adds their own
+// LEVEL as a second, additional bonus on top of the normal Spell Check
+// modifier, then compares the total to that specific spell's own casting
+// table for the exact effect (this app has no per-spell casting tables to
+// look that up automatically, same reason Manifestation is a plain note
+// field rather than something this app resolves for the player). A
+// natural 1 always fails regardless of total, and may trigger corruption
+// or patron disapproval per that spell's own write-up - flagged here, not
+// resolved further, for the same reason. "Natural max" means the highest
+// face of whichever die this SPECIFIC roll actually used (an extra Action
+// Die, or a Mercurial Magic-adjusted die - see pcSpellCheckModifierBreakdown),
+// not literally the number 20 - same dice-chain-scaled convention weapon
+// attacks' own crit threat already follows for a non-d20 attack die.
+function spellCheckNaturalResultText(rolled, sides, level) {
+  if (rolled === sides) {
+    return {
+      critBonus: level,
+      note: ` ${markCritAlert("💥 CRITICAL SUCCESS!")} Natural ${rolled} - ${formatSignedNumber(level)} caster level bonus applied on top. Compare the total to this spell's own casting table for the exact effect.`,
+    };
+  }
+  if (rolled === 1) {
+    return {
+      critBonus: 0,
+      note: ` ${markFumbleAlert("💀 FAILURE")} Natural 1 always fails, regardless of total - check this spell's own write-up for corruption or patron disapproval.`,
+    };
+  }
+  return { critBonus: 0, note: "" };
+}
+
 // Rolls the Spell Check for one "Cast a Spell" Attacks row (shared math
 // via pcSpellCheckModifierBreakdown) - the only place a Spell Check is
 // actually rolled from the Sheet; the Spells section below is just the
@@ -6789,12 +6819,13 @@ function rollSpellAttackRow(row) {
   }
   const label = (selectEl && selectEl.value.trim()) || "Spell";
   const rolled = Math.floor(Math.random() * check.sides) + 1;
-  const total = rolled + check.modifier;
+  const { critBonus, note } = spellCheckNaturalResultText(rolled, check.sides, check.level);
+  const total = rolled + check.modifier + critBonus;
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
-  const text = `${label} - Spell Check: d${check.sides} (${rolled}) ${formatSignedNumber(check.modifier)} = ${markRollTotal(total)}`;
-  showStatus(text, false, 4000);
+  const text = `${label} - Spell Check: d${check.sides} (${rolled}) ${formatSignedNumber(check.modifier)}${critBonus ? ` ${formatSignedNumber(critBonus)}(level)` : ""} = ${markRollTotal(total)}${note}`;
+  showStatus(text, false, note ? 8000 : 4000);
   appendChatLog({ kind: "spell", tokenName: rollerName, text, gmOnly: false });
-  broadcastDiceRoll({ rollerName, dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
+  broadcastDiceRoll({ rollerName, dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier + critBonus, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
 }
 
 // AC is fully deterministic in DCC (10 + Agi mod + equipped Armor +
@@ -9948,8 +9979,13 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   const label = (atk.name || "").trim() || "Spell";
   const forcedD20 = consumeForcedD20();
   const rolled = forcedD20 !== null ? Math.min(forcedD20, check.sides) : (Math.floor(Math.random() * check.sides) + 1);
-  const total = rolled + check.modifier;
-  const text = `${label} - Spell Check: d${check.sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(check.modifier)} = ${markRollTotal(total)}`;
+  // Natural max/natural 1 (see spellCheckNaturalResultText) apply here
+  // too, including when the GM forces one via the testing field above -
+  // same "a forced roll still triggers the natural-result text" contract
+  // rollAttackFor's own crit/fumble handling already follows.
+  const { critBonus, note } = spellCheckNaturalResultText(rolled, check.sides, check.level);
+  const total = rolled + check.modifier + critBonus;
+  const text = `${label} - Spell Check: d${check.sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(check.modifier)}${critBonus ? ` ${formatSignedNumber(critBonus)}(level)` : ""} = ${markRollTotal(total)}${note}`;
 
   // This casting spends the same one Action Die a weapon attack at this
   // slot would (see actionSlotKey) - marking it used here hides not just
@@ -9958,10 +9994,11 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   // the round.
   await markActionSlotsUsed(itemId, [actionSlotKey(stats.mode, attackId, slotKey)]);
 
-  showTrackerStatus(`${item.name || "Token"} — ${text}`, false, 6500);
-  showStatus(`${item.name || "Token"} — ${text}`, false, 6500);
+  const rollDuration = note ? 9000 : 6500;
+  showTrackerStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
+  showStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
   await appendChatLog({ kind: "spell", tokenName: item.name || "Token", text, gmOnly: false });
-  broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
+  broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier + critBonus, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
 }
 
 // Rolling an attack from the Combat Tracker's expanded attack list used to
