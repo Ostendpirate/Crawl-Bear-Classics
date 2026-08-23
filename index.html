@@ -635,8 +635,10 @@
     color: var(--muted);
     line-height: 1.3;
   }
-  .mercurial-row { display: flex; align-items: flex-start; gap: 6px; margin-top: 4px; }
+  .mercurial-row { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+  .mercurial-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .mercurial-roll-label { flex: none; font-size: 10px; font-weight: 700; color: var(--accent); padding: 4px 6px; background: var(--border); border-radius: 5px; white-space: nowrap; }
+  .mercurial-controls input[type=text] { flex: none; width: 46px; text-align: center; font-size: 11px; padding: 4px 2px; }
   .mercurial-row .mercurial-note { flex: 1; min-width: 0; font-size: 11px; padding: 4px 6px; min-height: 32px; }
   .attack-ammo-line {
     display: flex;
@@ -6116,17 +6118,57 @@ function pcCasterAbilityId(cls) {
   return null;
 }
 
+// A spell's Mercurial Magic bonus/die-step adjustment (see spellRowHtml's
+// mercurialBonus/mercurialDieSteps fields), looked up by NAME - that data
+// lives on the Spells section's roster item, not on whichever "Cast a
+// Spell" Attacks row happens to be casting it (the same known spell can
+// be picked from more than one Attacks row, or from the Tracker's own
+// live picker - see spellTrackerLineHtml - so the roster is the single
+// source of truth). Returns null if the spell isn't found on the roster,
+// or is but has no adjustment set, so callers can treat "nothing to
+// apply" and "not found" the same way.
+function mercurialAdjustmentForSpell(name) {
+  const trimmed = (name || "").trim();
+  if (!trimmed) return null;
+  const item = readSpellItems().find(s => (s.name || "").trim() === trimmed);
+  if (!item) return null;
+  const bonus = parseModifier(item.mercurialBonus);
+  const dieSteps = parseModifier(item.mercurialDieSteps);
+  if (!bonus && !dieSteps) return null;
+  return { bonus, dieSteps };
+}
+
+// Stats-based sibling of mercurialAdjustmentForSpell, sourced from a
+// token's saved stats.data.pcSpells instead of the live Sheet DOM - same
+// "ForStats" pattern as pcKnownSpellNamesForStats, needed so the Combat
+// Tracker can apply a spell's Mercurial adjustment for whichever token
+// was clicked.
+function mercurialAdjustmentForSpellStats(stats, name) {
+  const trimmed = (name || "").trim();
+  if (!trimmed) return null;
+  const item = (stats.data.pcSpells || []).find(s => (s.name || "").trim() === trimmed);
+  if (!item) return null;
+  const bonus = parseModifier(item.mercurialBonus);
+  const dieSteps = parseModifier(item.mercurialDieSteps);
+  if (!bonus && !dieSteps) return null;
+  return { bonus, dieSteps };
+}
+
 // Shared "what's the number, and how is it built" for a Spell Check -
 // used everywhere a "Cast a Spell" Attacks row computes or rolls its
 // check (spellAttackRowHtml/refreshSpellAttackRows/rollSpellAttackRow), so
 // none of them can quietly drift apart. Returns null for a non-caster
 // Class, same "nothing to compute" signal recalcPcSpellSection's own
 // visibility check already uses. `atk` carries the row's declared Action
-// Die (`actionDieIndex`) - a Spell Check uses this character's own
-// class/level Action Dice table exactly like a weapon attack does (Table
-// 1-5/1-12/1-16), so casting on an extra Action Die (2nd attack, etc)
-// rolls that die's smaller size, not always a d20 (see
-// actionDieProfileForAttackLive).
+// Die (`actionDieIndex`) AND the spell's name - a Spell Check uses this
+// character's own class/level Action Dice table exactly like a weapon
+// attack does (Table 1-5/1-12/1-16), so casting on an extra Action Die
+// (2nd attack, etc) rolls that die's smaller size, not always a d20 (see
+// actionDieProfileForAttackLive); the spell's own Mercurial Magic
+// adjustment (see mercurialAdjustmentForSpell), if any, then shifts that
+// die further along the dice chain and/or adds a flat bonus/penalty on
+// top - Table 5-2 has many results shaped exactly like that (e.g. "die
+// improved by one step" or "-4 penalty to spell checks").
 function pcSpellCheckModifierBreakdown(atk) {
   const classEl = document.getElementById("pc-class");
   const cls = classEl ? classEl.value : "";
@@ -6137,23 +6179,28 @@ function pcSpellCheckModifierBreakdown(atk) {
   const abilityMod = abilityModifierFromField(`pc-${abilityId}`);
   const hinderedByArmor = classSpellcastingHinderedByArmor(cls);
   const penalty = hinderedByArmor ? computePcCheckPenaltyTotal() : 0;
-  const modifier = level + abilityMod + penalty;
-  const sides = actionDieProfileForAttackLive(atk).sides;
+  const baseSides = actionDieProfileForAttackLive(atk).sides;
+  const mercurial = mercurialAdjustmentForSpell(atk && atk.name);
+  const sides = mercurial && mercurial.dieSteps ? stepDiceChain(baseSides, mercurial.dieSteps) : baseSides;
+  const mercurialBonus = mercurial ? mercurial.bonus : 0;
+  const modifier = level + abilityMod + penalty + mercurialBonus;
   const abilityLabel = abilityId === "per" ? "Personality" : "Intelligence";
   const parts = [`Level ${formatSignedNumber(level)}`, `${abilityLabel} ${formatSignedNumber(abilityMod)}`];
   if (hinderedByArmor && penalty) parts.push(`Armor Check Penalty ${formatSignedNumber(penalty)}`);
+  if (mercurialBonus) parts.push(`Mercurial Magic ${formatSignedNumber(mercurialBonus)}`);
   const breakdown = `Spell Check = d${sides} ${parts.join(" + ")} = ${formatSignedNumber(modifier)}.${hinderedByArmor ? "" : " Not hindered by armor (Cleric)."}`;
   return { cls, abilityId, level, abilityMod, penalty, sides, modifier, breakdown };
 }
 
 // Same math as pcSpellCheckModifierBreakdown, but sourced from a token's
-// saved stats.data (class/level/ability scores/armorItems) instead of the
-// live Sheet DOM - needed so the Combat Tracker can roll a Spell Check for
-// whichever token was clicked, not just whichever one happens to be open
-// on the Sheet tab (same "ForStats" pattern as shieldEquippedForStats/
-// twoWeaponProfileForStats etc. just below). `atk` carries whichever
-// Action Die this particular roll/line is spending - see
-// pcSpellCheckModifierBreakdown's own comment on why that changes the die.
+// saved stats.data (class/level/ability scores/armorItems/pcSpells)
+// instead of the live Sheet DOM - needed so the Combat Tracker can roll a
+// Spell Check for whichever token was clicked, not just whichever one
+// happens to be open on the Sheet tab (same "ForStats" pattern as
+// shieldEquippedForStats/twoWeaponProfileForStats etc. just below). `atk`
+// carries whichever Action Die this particular roll/line is spending AND
+// the spell's name - see pcSpellCheckModifierBreakdown's own comment on
+// why both matter.
 function pcSpellCheckModifierBreakdownForStats(stats, atk) {
   const cls = (stats.data.class || "").trim();
   const abilityId = pcCasterAbilityId(cls);
@@ -6163,17 +6210,21 @@ function pcSpellCheckModifierBreakdownForStats(stats, atk) {
   const hinderedByArmor = classSpellcastingHinderedByArmor(cls);
   const equippedItems = (stats.data.armorItems || []).filter(item => item.equipped);
   const penalty = hinderedByArmor ? equippedItems.reduce((sum, item) => sum + (parseInt(item.checkPenalty, 10) || 0), 0) : 0;
-  const modifier = level + abilityMod + penalty;
-  const sides = actionDieProfileForAttack(stats, atk || {}).sides;
+  const baseSides = actionDieProfileForAttack(stats, atk || {}).sides;
+  const mercurial = mercurialAdjustmentForSpellStats(stats, atk && atk.name);
+  const sides = mercurial && mercurial.dieSteps ? stepDiceChain(baseSides, mercurial.dieSteps) : baseSides;
+  const mercurialBonus = mercurial ? mercurial.bonus : 0;
+  const modifier = level + abilityMod + penalty + mercurialBonus;
   const abilityLabel = abilityId === "per" ? "Personality" : "Intelligence";
   const parts = [`Level ${formatSignedNumber(level)}`, `${abilityLabel} ${formatSignedNumber(abilityMod)}`];
   if (hinderedByArmor && penalty) parts.push(`Armor Check Penalty ${formatSignedNumber(penalty)}`);
+  if (mercurialBonus) parts.push(`Mercurial Magic ${formatSignedNumber(mercurialBonus)}`);
   const breakdown = `Spell Check = d${sides} ${parts.join(" + ")} = ${formatSignedNumber(modifier)}.${hinderedByArmor ? "" : " Not hindered by armor (Cleric)."}`;
   return { cls, abilityId, level, abilityMod, penalty, sides, modifier, breakdown };
 }
 
 function emptySpellItem() {
-  return { id: "g" + Math.random().toString(36).slice(2, 9), name: "", mercurial: null, mercurialNote: "" };
+  return { id: "g" + Math.random().toString(36).slice(2, 9), name: "", mercurial: null, mercurialNote: "", mercurialBonus: "", mercurialDieSteps: "" };
 }
 
 // This roster is a known-spells list, not an action - rolling a Spell
@@ -6211,9 +6262,21 @@ function spellRowHtml(item) {
   const mercurialBtnHtml = hasSpell
     ? `<button type="button" class="hp-btn spell-row-mercurial-btn" title="${item.mercurial ? "Reroll" : "Roll"} this spell's Mercurial Magic (d%, Table 5-2 - DCC RPG core rulebook) - a permanent quirk unique to how this caster casts this spell, normally rolled once when it's learned.">✨</button>`
     : "";
+  // Many Table 5-2 results reduce to just two numbers - a flat bonus/
+  // penalty to the Spell Check, and/or a shift along the dice chain (see
+  // stepDiceChain) - so those two are offered as small editable fields
+  // that feed straight into pcSpellCheckModifierBreakdown's actual roll
+  // math (via mercurialAdjustmentForSpell), rather than only ever living
+  // in the free-text note the player has to remember to apply by hand.
+  // Everything else (the majority of the table - narrative/conditional
+  // effects with no clean numeric shape) still only has the note field.
   const mercurialRowHtml = item.mercurial
     ? `<div class="mercurial-row">
-        <span class="mercurial-roll-label" title="Rolled on Table 5-2: Mercurial Magic (DCC RPG core rulebook) - this app doesn't include that table's text; look up what ${item.mercurial} means in your own rulebook and jot it into the note field.">Mercurial: ${item.mercurial}</span>
+        <div class="mercurial-controls">
+          <span class="mercurial-roll-label" title="Rolled on Table 5-2: Mercurial Magic (DCC RPG core rulebook) - this app doesn't include that table's text; look up what ${item.mercurial} means in your own rulebook and jot it into the note field.">Mercurial: ${item.mercurial}</span>
+          <input type="text" class="mercurial-bonus" placeholder="+0" title="Flat bonus/penalty this spell's Mercurial Magic applies to its Spell Check (e.g. Table 5-2's '-4 penalty to spell checks' or a flat bonus result) - added automatically to every roll of this spell." value="${escapeHtml(item.mercurialBonus || "")}" />
+          <input type="text" class="mercurial-die-steps" placeholder="±0" title="Steps this spell's Mercurial Magic shifts its Spell Check die along the dice chain - positive improves it (Table 5-2's 'die improved by one step', d20→d24), negative worsens it ('reduced by two steps', d20→d14) - applied automatically to every roll of this spell." value="${escapeHtml(item.mercurialDieSteps || "")}" />
+        </div>
         <textarea class="mercurial-note" placeholder="What this roll means (from your own rulebook) - optional" rows="2">${escapeHtml(item.mercurialNote || "")}</textarea>
       </div>`
     : "";
@@ -6266,7 +6329,14 @@ function readSpellItems() {
     const mercurial = mercurialRaw ? (parseInt(mercurialRaw, 10) || null) : null;
     const mercurialNoteEl = row.querySelector(".mercurial-note");
     const mercurialNote = mercurialNoteEl ? mercurialNoteEl.value : "";
-    return { id: row.dataset.id, name, mercurial, mercurialNote };
+    // Bonus/die-steps ARE normal form fields (see spellRowHtml) - read
+    // like any other, and feed pcSpellCheckModifierBreakdown's actual
+    // roll math via mercurialAdjustmentForSpell.
+    const mercurialBonusEl = row.querySelector(".mercurial-bonus");
+    const mercurialBonus = mercurialBonusEl ? mercurialBonusEl.value : "";
+    const mercurialDieStepsEl = row.querySelector(".mercurial-die-steps");
+    const mercurialDieSteps = mercurialDieStepsEl ? mercurialDieStepsEl.value : "";
+    return { id: row.dataset.id, name, mercurial, mercurialNote, mercurialBonus, mercurialDieSteps };
   });
 }
 
@@ -6327,9 +6397,17 @@ function attachSpellRowListeners() {
     }
     // Present at render time only for an already-rolled spell (see
     // spellRowHtml) - the roll button below creates this on the fly for a
-    // spell that hasn't been rolled yet, wiring its own listener then.
+    // spell that hasn't been rolled yet, wiring its own listeners then.
+    // Bonus/die-steps changes reschedule a save just like the note does -
+    // they're read straight off the DOM by mercurialAdjustmentForSpell
+    // whenever a Spell Check actually needs them, not cached anywhere, so
+    // no extra recompute step is needed here beyond persisting the value.
     const mercurialNoteEl = row.querySelector(".mercurial-note");
     if (mercurialNoteEl) mercurialNoteEl.addEventListener("input", scheduleSave);
+    const mercurialBonusEl = row.querySelector(".mercurial-bonus");
+    if (mercurialBonusEl) mercurialBonusEl.addEventListener("input", scheduleSave);
+    const mercurialDieStepsEl = row.querySelector(".mercurial-die-steps");
+    if (mercurialDieStepsEl) mercurialDieStepsEl.addEventListener("input", scheduleSave);
     const mercurialBtn = row.querySelector(".spell-row-mercurial-btn");
     if (mercurialBtn) {
       mercurialBtn.addEventListener("click", () => {
@@ -6339,11 +6417,25 @@ function attachSpellRowListeners() {
         if (!mercurialRowEl) {
           row.insertAdjacentHTML("beforeend", `
             <div class="mercurial-row">
-              <span class="mercurial-roll-label"></span>
+              <div class="mercurial-controls">
+                <span class="mercurial-roll-label"></span>
+                <input type="text" class="mercurial-bonus" placeholder="+0" title="Flat bonus/penalty this spell's Mercurial Magic applies to its Spell Check (e.g. Table 5-2's '-4 penalty to spell checks' or a flat bonus result) - added automatically to every roll of this spell." />
+                <input type="text" class="mercurial-die-steps" placeholder="±0" title="Steps this spell's Mercurial Magic shifts its Spell Check die along the dice chain - positive improves it (Table 5-2's 'die improved by one step', d20→d24), negative worsens it ('reduced by two steps', d20→d14) - applied automatically to every roll of this spell." />
+              </div>
               <textarea class="mercurial-note" placeholder="What this roll means (from your own rulebook) - optional" rows="2"></textarea>
             </div>`);
           mercurialRowEl = row.querySelector(".mercurial-row");
           mercurialRowEl.querySelector(".mercurial-note").addEventListener("input", scheduleSave);
+          mercurialRowEl.querySelector(".mercurial-bonus").addEventListener("input", scheduleSave);
+          mercurialRowEl.querySelector(".mercurial-die-steps").addEventListener("input", scheduleSave);
+        } else {
+          // Rerolling: the note/bonus/die-steps already there describe
+          // the OLD result, not this new one - clear them rather than
+          // leaving stale numbers silently applying to a roll they no
+          // longer correspond to.
+          mercurialRowEl.querySelector(".mercurial-note").value = "";
+          mercurialRowEl.querySelector(".mercurial-bonus").value = "";
+          mercurialRowEl.querySelector(".mercurial-die-steps").value = "";
         }
         const labelEl = mercurialRowEl.querySelector(".mercurial-roll-label");
         labelEl.textContent = `Mercurial: ${rolled}`;
@@ -6500,7 +6592,7 @@ function spellAttackRowHtml(atk) {
   const actDieSelectHtml = actDieOptions.length ? `<select class="attack-action-die" title="Which of this character's Action Dice this spell cast uses (Table 1-5/1-7/1-10/1-12/1-14/1-16/1-18) - shares the same one-action-per-die pool as this character's weapon attacks (see the Combat Tracker).">${actDieOptions.map(o =>
     `<option value="${o.value}"${o.value === effectiveActionDieIndex ? " selected" : ""}>${escapeHtml(o.label)}</option>`
   ).join("")}</select>` : "";
-  const check = pcSpellCheckModifierBreakdown({ actionDieIndex: effectiveActionDieIndex });
+  const check = pcSpellCheckModifierBreakdown({ ...atk, actionDieIndex: effectiveActionDieIndex });
   const bonusText = check ? formatSignedNumber(check.modifier) : "";
   const bonusTitle = check ? check.breakdown : "Only Cleric/Wizard/Elf have a Spell Check - pick a caster Class above.";
   // Same die badge weapon rows show (attackRowHtml's weapon-badge-die) -
@@ -6549,7 +6641,8 @@ function refreshSpellAttackRows() {
     const bonusInput = row.querySelector(".attack-bonus");
     if (!bonusInput) return;
     const actDieEl = row.querySelector(".attack-action-die");
-    const check = pcSpellCheckModifierBreakdown({ actionDieIndex: actDieEl ? actDieEl.value : "" });
+    const nameEl2 = row.querySelector(".attack-name");
+    const check = pcSpellCheckModifierBreakdown({ actionDieIndex: actDieEl ? actDieEl.value : "", name: nameEl2 ? nameEl2.value : "" });
     bonusInput.value = check ? formatSignedNumber(check.modifier) : "";
     bonusInput.title = check ? check.breakdown : "Only Cleric/Wizard/Elf have a Spell Check - pick a caster Class above.";
     // Die badge (see spellAttackRowHtml) can go stale between full row
@@ -6581,7 +6674,7 @@ function refreshSpellAttackRows() {
 function rollSpellAttackRow(row) {
   const selectEl = row.querySelector(".spell-attack-select");
   const actDieEl = row.querySelector(".attack-action-die");
-  const check = pcSpellCheckModifierBreakdown({ actionDieIndex: actDieEl ? actDieEl.value : "" });
+  const check = pcSpellCheckModifierBreakdown({ actionDieIndex: actDieEl ? actDieEl.value : "", name: selectEl ? selectEl.value : "" });
   if (!check) {
     showStatus("Only Cleric/Wizard/Elf roll a Spell Check.", true, 4000);
     return;
@@ -8742,19 +8835,28 @@ function deriveTrackerLines(item, stats) {
   const spellAttacks = stats.attacks.filter(a => a.weapon === SPELL_ATTACK_KEY);
   if (spellAttacks.length === 1 && actDieOptions.length > 0) {
     const atk = spellAttacks[0];
+    // Mercurial Magic's die-step adjustment (see mercurialAdjustmentForSpellStats)
+    // has to be folded in here too, not just in the actual roll
+    // (pcSpellCheckModifierBreakdownForStats) - otherwise this line's
+    // displayed die badge (see spellTrackerLineHtml) would show the plain
+    // Action Die size while the roll it triggers uses a different one.
+    const mercurial = mercurialAdjustmentForSpellStats(stats, atk.name);
     actDieOptions.forEach(opt => {
       const profile = actionDieProfileForAttack(stats, { actionDieIndex: opt.value });
+      const dieSides = mercurial && mercurial.dieSteps ? stepDiceChain(profile.sides, mercurial.dieSteps) : profile.sides;
       lines.push({
         atk, attackId: atk.id, slotKey: opt.value, isTw: false, isSpell: true,
         label: `🔮 ${opt.label.replace(/\s*\(d\d+\)$/, "")}`,
-        dieSides: profile.sides,
+        dieSides,
       });
     });
   } else {
     spellAttacks.forEach(atk => {
       const slotKey = actDieOptions.some(o => o.value === atk.actionDieIndex) ? atk.actionDieIndex : "0";
       const profile = actionDieProfileForAttack(stats, { actionDieIndex: slotKey });
-      lines.push({ atk, attackId: atk.id, slotKey, isTw: false, isSpell: true, label: "🔮 Cast a Spell", dieSides: profile.sides });
+      const mercurial = mercurialAdjustmentForSpellStats(stats, atk.name);
+      const dieSides = mercurial && mercurial.dieSteps ? stepDiceChain(profile.sides, mercurial.dieSteps) : profile.sides;
+      lines.push({ atk, attackId: atk.id, slotKey, isTw: false, isSpell: true, label: "🔮 Cast a Spell", dieSides });
     });
   }
 
@@ -8947,7 +9049,7 @@ function trackerLineHtml(item, stats, line) {
 // to a Spell Check.
 function spellTrackerLineHtml(item, stats, line) {
   const atk = line.atk;
-  const check = pcSpellCheckModifierBreakdownForStats(stats, { actionDieIndex: line.slotKey });
+  const check = pcSpellCheckModifierBreakdownForStats(stats, { ...atk, actionDieIndex: line.slotKey });
   const bonusText = check ? formatSignedNumber(check.modifier) : "+0";
   const bonusTooltip = check ? check.breakdown : "Only Cleric/Wizard/Elf have a Spell Check.";
   return `
@@ -8990,6 +9092,19 @@ function stepDiceChainDown(sides, steps) {
   const idx = DICE_CHAIN.indexOf(sides);
   const startIdx = idx === -1 ? DICE_CHAIN.length - 1 : idx; // unknown die: treat as already at the top (d20-ish)
   return DICE_CHAIN[Math.max(0, startIdx - steps)];
+}
+
+// Bidirectional sibling of stepDiceChainDown - positive `steps` moves UP
+// the chain (a bigger, better die), negative moves DOWN, clamped at both
+// ends (d3 floor, d30 ceiling). Needed for Mercurial Magic (Table 5-2),
+// which has results that IMPROVE a spell's check die ("rolls a die
+// improved by one step"), not just penalize it the way every other
+// die-step modifier in this app (untrained weapons, two-weapon fighting)
+// already does via stepDiceChainDown alone.
+function stepDiceChain(sides, steps) {
+  const idx = DICE_CHAIN.indexOf(sides);
+  const startIdx = idx === -1 ? DICE_CHAIN.length - 1 : idx;
+  return DICE_CHAIN[Math.max(0, Math.min(DICE_CHAIN.length - 1, startIdx + steps))];
 }
 
 // Table 4-3 (Reference Booklet p.29) - fighting with two weapons steps
@@ -9715,7 +9830,7 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   const stats = getStatsForItem(item);
   const atk = stats.attacks.find(a => a.id === attackId);
   if (!atk) return;
-  const check = pcSpellCheckModifierBreakdownForStats(stats, { actionDieIndex: slotKey });
+  const check = pcSpellCheckModifierBreakdownForStats(stats, { ...atk, actionDieIndex: slotKey });
   if (!check) {
     const msg = `${item.name || "Token"}: Only Cleric/Wizard/Elf roll a Spell Check.`;
     showTrackerStatus(msg, true);
