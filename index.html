@@ -4236,7 +4236,13 @@ function attackRowHtml(atk, mode) {
   // above - a row that no longer offers this character's current Action
   // Dice (e.g. Class/Level changed) just shows the default 1st attack.
   const levelElForActDie = document.getElementById("pc-level");
-  const actDieOptions = effectiveTwRole ? [] : actionDieSelectOptions(classEl ? classEl.value : "", levelElForActDie ? levelElForActDie.value : "");
+  const rawActDieOptions = effectiveTwRole ? [] : actionDieSelectOptions(classEl ? classEl.value : "", levelElForActDie ? levelElForActDie.value : "");
+  // Table 1-12: a Wizard's extra Action Dice can only be spent casting a
+  // spell (see the matching restriction in deriveTrackerLines/
+  // spellAttackRowHtml) - so a weapon row never offers anything past the
+  // 1st here, rather than showing an option the Combat Tracker would
+  // silently refuse to honor anyway.
+  const actDieOptions = (classEl && classEl.value === "Wizard") ? rawActDieOptions.filter(o => o.value === "0") : rawActDieOptions;
   const effectiveActionDieIndex = actDieOptions.some(o => o.value === atk.actionDieIndex) ? atk.actionDieIndex : "0";
   // Small at-a-glance reminder of the actual die this row's attack roll
   // uses right now - normally d20, but a configured Primary/Off-hand
@@ -6076,8 +6082,16 @@ function pcCasterAbilityId(cls) {
 // and a "Cast a Spell" Attacks row (spellAttackRowHtml/
 // rollSpellAttackRow), so the two can never quietly drift apart. Returns
 // null for a non-caster Class, same "nothing to compute" signal
-// recalcPcSpellSection's own visibility check already uses.
-function pcSpellCheckModifierBreakdown() {
+// recalcPcSpellSection's own visibility check already uses. `atk` is
+// optional and only matters for an Attacks-list "Cast a Spell" row - a
+// Spell Check uses this character's own class/level Action Dice table
+// exactly like a weapon attack does (Table 1-5/1-12/1-16), so casting on
+// an extra Action Die (2nd attack, etc) rolls that die's smaller size, not
+// always a d20 (see actionDieProfileForAttackLive). Omitting `atk`
+// (rollPcSpell's standalone Spells-section roll, which has no Action Die
+// concept of its own) resolves to this character's first/main die - a
+// plain d20 for every class at every level.
+function pcSpellCheckModifierBreakdown(atk) {
   const classEl = document.getElementById("pc-class");
   const cls = classEl ? classEl.value : "";
   const abilityId = pcCasterAbilityId(cls);
@@ -6088,11 +6102,12 @@ function pcSpellCheckModifierBreakdown() {
   const hinderedByArmor = classSpellcastingHinderedByArmor(cls);
   const penalty = hinderedByArmor ? computePcCheckPenaltyTotal() : 0;
   const modifier = level + abilityMod + penalty;
+  const sides = actionDieProfileForAttackLive(atk || {}).sides;
   const abilityLabel = abilityId === "per" ? "Personality" : "Intelligence";
   const parts = [`Level ${formatSignedNumber(level)}`, `${abilityLabel} ${formatSignedNumber(abilityMod)}`];
   if (hinderedByArmor && penalty) parts.push(`Armor Check Penalty ${formatSignedNumber(penalty)}`);
-  const breakdown = `Spell Check = ${parts.join(" + ")} = ${formatSignedNumber(modifier)}.${hinderedByArmor ? "" : " Not hindered by armor (Cleric)."}`;
-  return { cls, abilityId, level, abilityMod, penalty, modifier, breakdown };
+  const breakdown = `Spell Check = d${sides} ${parts.join(" + ")} = ${formatSignedNumber(modifier)}.${hinderedByArmor ? "" : " Not hindered by armor (Cleric)."}`;
+  return { cls, abilityId, level, abilityMod, penalty, sides, modifier, breakdown };
 }
 
 // Same math as pcSpellCheckModifierBreakdown, but sourced from a token's
@@ -6100,8 +6115,10 @@ function pcSpellCheckModifierBreakdown() {
 // live Sheet DOM - needed so the Combat Tracker can roll a Spell Check for
 // whichever token was clicked, not just whichever one happens to be open
 // on the Sheet tab (same "ForStats" pattern as shieldEquippedForStats/
-// twoWeaponProfileForStats etc. just below).
-function pcSpellCheckModifierBreakdownForStats(stats) {
+// twoWeaponProfileForStats etc. just below). `atk` carries whichever
+// Action Die this particular roll/line is spending - see
+// pcSpellCheckModifierBreakdown's own comment on why that changes the die.
+function pcSpellCheckModifierBreakdownForStats(stats, atk) {
   const cls = (stats.data.class || "").trim();
   const abilityId = pcCasterAbilityId(cls);
   if (!abilityId) return null;
@@ -6111,11 +6128,12 @@ function pcSpellCheckModifierBreakdownForStats(stats) {
   const equippedItems = (stats.data.armorItems || []).filter(item => item.equipped);
   const penalty = hinderedByArmor ? equippedItems.reduce((sum, item) => sum + (parseInt(item.checkPenalty, 10) || 0), 0) : 0;
   const modifier = level + abilityMod + penalty;
+  const sides = actionDieProfileForAttack(stats, atk || {}).sides;
   const abilityLabel = abilityId === "per" ? "Personality" : "Intelligence";
   const parts = [`Level ${formatSignedNumber(level)}`, `${abilityLabel} ${formatSignedNumber(abilityMod)}`];
   if (hinderedByArmor && penalty) parts.push(`Armor Check Penalty ${formatSignedNumber(penalty)}`);
-  const breakdown = `Spell Check = ${parts.join(" + ")} = ${formatSignedNumber(modifier)}.${hinderedByArmor ? "" : " Not hindered by armor (Cleric)."}`;
-  return { cls, abilityId, level, abilityMod, penalty, modifier, breakdown };
+  const breakdown = `Spell Check = d${sides} ${parts.join(" + ")} = ${formatSignedNumber(modifier)}.${hinderedByArmor ? "" : " Not hindered by armor (Cleric)."}`;
+  return { cls, abilityId, level, abilityMod, penalty, sides, modifier, breakdown };
 }
 
 function emptySpellItem() {
@@ -6380,7 +6398,6 @@ function spellSelectOptionsHtmlForStats(stats, selectedName) {
 }
 
 function spellAttackRowHtml(atk) {
-  const check = pcSpellCheckModifierBreakdown();
   // Hidden .attack-name/.attack-damage: readAttacks()/applyWeaponSelection
   // both unconditionally look these two up on every row regardless of
   // type (no null-guard - see their own definitions), so they have to
@@ -6388,13 +6405,13 @@ function spellAttackRowHtml(atk) {
   // mirrors the selected spell (kept in sync by the change listener in
   // attachAttackRowListeners) so formatAttacksSummary's statline preview
   // still reads sensibly ("Fireball +4") instead of showing nothing.
-  const bonusText = check ? formatSignedNumber(check.modifier) : "";
-  const bonusTitle = check ? check.breakdown : "Only Cleric/Wizard/Elf have a Spell Check - pick a caster Class above.";
   // Same Action Die picker as an ordinary weapon row (attackRowHtml) - a
   // spell cast spends one Action Die exactly like a weapon swing does (see
   // actionSlotKey), so a caster with multiple Action Dice needs to say
-  // which one this Cast-a-Spell row uses too. No two-weapon-role gate
-  // here, unlike attackRowHtml's version - spells never fight two-weapon.
+  // which one this Cast-a-Spell row uses too - and that die's own size,
+  // not always a d20, is what the Spell Check actually rolls (see
+  // pcSpellCheckModifierBreakdown). No two-weapon-role gate here, unlike
+  // attackRowHtml's version - spells never fight two-weapon.
   const classElForActDie = document.getElementById("pc-class");
   const levelElForActDie = document.getElementById("pc-level");
   const actDieOptions = actionDieSelectOptions(classElForActDie ? classElForActDie.value : "", levelElForActDie ? levelElForActDie.value : "");
@@ -6402,6 +6419,9 @@ function spellAttackRowHtml(atk) {
   const actDieSelectHtml = actDieOptions.length ? `<select class="attack-action-die" title="Which of this character's Action Dice this spell cast uses (Table 1-5/1-7/1-10/1-12/1-14/1-16/1-18) - shares the same one-action-per-die pool as this character's weapon attacks (see the Combat Tracker).">${actDieOptions.map(o =>
     `<option value="${o.value}"${o.value === effectiveActionDieIndex ? " selected" : ""}>${escapeHtml(o.label)}</option>`
   ).join("")}</select>` : "";
+  const check = pcSpellCheckModifierBreakdown({ actionDieIndex: effectiveActionDieIndex });
+  const bonusText = check ? formatSignedNumber(check.modifier) : "";
+  const bonusTitle = check ? check.breakdown : "Only Cleric/Wizard/Elf have a Spell Check - pick a caster Class above.";
   return `
     <div class="attack-row pc-attack-row spell-attack-row" data-id="${atk.id}" data-line-deeds="{}">
       <div class="attack-weapon-line">
@@ -6431,14 +6451,19 @@ function emptySpellAttack() {
 // just kept as its own function since a spell row's Bonus has nothing to
 // do with a weapon/ability toggle and no "auto-synced vs hand-typed"
 // state to respect (it's always computed fresh - see the readonly
-// attribute in spellAttackRowHtml).
+// attribute in spellAttackRowHtml). Each row's OWN .attack-action-die
+// pick now feeds the check (see pcSpellCheckModifierBreakdown), so this
+// has to read per-row rather than computing one shared value for all of
+// them - a row on the 2nd Action Die shows a different die/bonus than one
+// still on the 1st.
 function refreshSpellAttackRows() {
   const listEl = attackListEl("pc");
   if (!listEl) return;
-  const check = pcSpellCheckModifierBreakdown();
   listEl.querySelectorAll(".spell-attack-row").forEach(row => {
     const bonusInput = row.querySelector(".attack-bonus");
     if (!bonusInput) return;
+    const actDieEl = row.querySelector(".attack-action-die");
+    const check = pcSpellCheckModifierBreakdown({ actionDieIndex: actDieEl ? actDieEl.value : "" });
     bonusInput.value = check ? formatSignedNumber(check.modifier) : "";
     bonusInput.title = check ? check.breakdown : "Only Cleric/Wizard/Elf have a Spell Check - pick a caster Class above.";
   });
@@ -6447,22 +6472,25 @@ function refreshSpellAttackRows() {
 // Rolls the Spell Check for one "Cast a Spell" Attacks row - same
 // modifier math as the standalone rollPcSpell (shared via
 // pcSpellCheckModifierBreakdown), just reading its label from this row's
-// spell dropdown instead of the Spells section's own name field.
+// spell dropdown, and its Action Die (and therefore die size - see
+// pcSpellCheckModifierBreakdown) from this row's own .attack-action-die,
+// instead of the Spells section's own name field/always-d20 roll.
 function rollSpellAttackRow(row) {
   const selectEl = row.querySelector(".spell-attack-select");
-  const check = pcSpellCheckModifierBreakdown();
+  const actDieEl = row.querySelector(".attack-action-die");
+  const check = pcSpellCheckModifierBreakdown({ actionDieIndex: actDieEl ? actDieEl.value : "" });
   if (!check) {
     showStatus("Only Cleric/Wizard/Elf roll a Spell Check.", true, 4000);
     return;
   }
   const label = (selectEl && selectEl.value.trim()) || "Spell";
-  const rolled = Math.floor(Math.random() * 20) + 1;
+  const rolled = Math.floor(Math.random() * check.sides) + 1;
   const total = rolled + check.modifier;
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
-  const text = `${label} - Spell Check: d20 (${rolled}) ${formatSignedNumber(check.modifier)} = ${markRollTotal(total)}`;
+  const text = `${label} - Spell Check: d${check.sides} (${rolled}) ${formatSignedNumber(check.modifier)} = ${markRollTotal(total)}`;
   showStatus(text, false, 4000);
   appendChatLog({ kind: "spell", tokenName: rollerName, text, gmOnly: false });
-  broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: check.modifier, notation: "d20", total, label: `${label} — Spell Check` });
+  broadcastDiceRoll({ rollerName, dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
 }
 
 // AC is fully deterministic in DCC (10 + Agi mod + equipped Armor +
@@ -8507,6 +8535,16 @@ function deriveTrackerLines(item, stats) {
   // of the character's ordinary Action Dice, so it's filtered out of both.
   const actDieOptions = actionDieSelectOptions(cls, level).filter(o => o.value !== "shieldbash");
 
+  // Table 1-12: a Wizard's extra Action Dice (2nd attack, etc) represent
+  // additional SPELLCASTING, not sudden combat proficiency - unlike Elf
+  // (trained in both fighting and magic) or Cleric (a capable combatant
+  // who also casts), only a Wizard's FIRST Action Die can be spent on an
+  // ordinary weapon attack; every one beyond it can only cast a spell (see
+  // the spell block below, which is NOT restricted this way - a Wizard can
+  // cast on any of their Action Dice, including the first). Every weapon-
+  // attack branch below uses this instead of the full actDieOptions.
+  const weaponActDieOptions = cls === "Wizard" ? actDieOptions.filter(o => o.value === "0") : actDieOptions;
+
   const primary = shieldEquipped ? undefined : equipped.find(a => a.twoWeaponRole === "primary");
   const offhand = shieldEquipped ? undefined : equipped.find(a => a.twoWeaponRole === "offhand");
   const twPair = primary && offhand ? [primary, offhand] : null;
@@ -8536,7 +8574,7 @@ function deriveTrackerLines(item, stats) {
     // (actionDieProfileForAttack's isMain: false) - only the character's
     // very first Action Die (spent on the pair here) crits like an
     // ordinary main attack.
-    const extraActDieOptions = actDieOptions.filter(o => o.value !== "0");
+    const extraActDieOptions = weaponActDieOptions.filter(o => o.value !== "0");
     const primaryUntrainedForExtra = isWeaponUntrained(stats, primary);
     extraActDieOptions.forEach(opt => {
       const profile = actionDieProfileForAttack(stats, { ...primary, actionDieIndex: opt.value });
@@ -8549,10 +8587,10 @@ function deriveTrackerLines(item, stats) {
   }
   const remaining = equipped.filter(a => !twPair || (a.id !== primary.id && a.id !== offhand.id));
 
-  if (remaining.length === 1 && actDieOptions.length > 0) {
+  if (remaining.length === 1 && weaponActDieOptions.length > 0) {
     const atk = remaining[0];
     const untrained = isWeaponUntrained(stats, atk);
-    actDieOptions.forEach(opt => {
+    weaponActDieOptions.forEach(opt => {
       const profile = actionDieProfileForAttack(stats, { ...atk, actionDieIndex: opt.value });
       lines.push({
         atk, attackId: atk.id, slotKey: opt.value, isTw: false,
@@ -8562,7 +8600,7 @@ function deriveTrackerLines(item, stats) {
     });
   } else {
     remaining.forEach(atk => {
-      const slotKey = actDieOptions.some(o => o.value === atk.actionDieIndex) ? atk.actionDieIndex : "0";
+      const slotKey = weaponActDieOptions.some(o => o.value === atk.actionDieIndex) ? atk.actionDieIndex : "0";
       const untrained = isWeaponUntrained(stats, atk);
       const profile = actionDieProfileForAttack(stats, { ...atk, actionDieIndex: slotKey });
       lines.push({
@@ -8584,29 +8622,36 @@ function deriveTrackerLines(item, stats) {
   // Equipped checkbox at all - there isn't one on that row template - so
   // they're pulled straight from stats.attacks here instead of the
   // `equipped` list above. A spell cast spends an Action Die exactly like
-  // a weapon attack does (see actionSlotKey) - so this mirrors the
-  // single-remaining-weapon expansion above: exactly one Cast-a-Spell row
-  // expands into one line per Action Die this class/level gets, letting a
-  // caster with multiple Action Dice cast up to that many spells a round
-  // (competing with their weapon attacks for the same dice); more than one
-  // Cast-a-Spell row instead trusts each row's own declared Action Die,
-  // same as multiple equipped weapons. WHICH known spell a line casts is
-  // picked live in the Tracker itself (see spellTrackerLineHtml) - the
-  // label here is just which Action Die this line is.
+  // a weapon attack does (see actionSlotKey), rolling THAT die's own size
+  // (see actionDieProfileForAttack - a 2nd/3rd Action Die is smaller than
+  // d20, same table a weapon attack on that die would use) - so this
+  // mirrors the single-remaining-weapon expansion above: exactly one
+  // Cast-a-Spell row expands into one line per Action Die this class/level
+  // gets (unrestricted by the Wizard-only weaponActDieOptions limit above
+  // - a Wizard can cast on ANY of their Action Dice, including the 1st),
+  // letting a caster with multiple Action Dice cast up to that many spells
+  // a round (competing with their weapon attacks for the same dice); more
+  // than one Cast-a-Spell row instead trusts each row's own declared
+  // Action Die, same as multiple equipped weapons. WHICH known spell a
+  // line casts is picked live in the Tracker itself (see
+  // spellTrackerLineHtml) - the label here is just which Action Die this
+  // line is.
   const spellAttacks = stats.attacks.filter(a => a.weapon === SPELL_ATTACK_KEY);
   if (spellAttacks.length === 1 && actDieOptions.length > 0) {
     const atk = spellAttacks[0];
     actDieOptions.forEach(opt => {
+      const profile = actionDieProfileForAttack(stats, { actionDieIndex: opt.value });
       lines.push({
         atk, attackId: atk.id, slotKey: opt.value, isTw: false, isSpell: true,
         label: `🔮 ${opt.label.replace(/\s*\(d\d+\)$/, "")}`,
-        dieSides: 20,
+        dieSides: profile.sides,
       });
     });
   } else {
     spellAttacks.forEach(atk => {
       const slotKey = actDieOptions.some(o => o.value === atk.actionDieIndex) ? atk.actionDieIndex : "0";
-      lines.push({ atk, attackId: atk.id, slotKey, isTw: false, isSpell: true, label: "🔮 Cast a Spell", dieSides: 20 });
+      const profile = actionDieProfileForAttack(stats, { actionDieIndex: slotKey });
+      lines.push({ atk, attackId: atk.id, slotKey, isTw: false, isSpell: true, label: "🔮 Cast a Spell", dieSides: profile.sides });
     });
   }
 
@@ -8782,21 +8827,24 @@ function trackerLineHtml(item, stats, line) {
 // known spell this line casts (spellSelectOptionsHtmlForStats, same
 // roster as the Sheet's own picker - see pcKnownSpellNamesForStats), its
 // die badge (same weapon-badge-die styling trackerLineHtml's weapon lines
-// use - a Spell Check is always a plain d20, see line.dieSides in
-// deriveTrackerLines), its Spell Check modifier (computed fresh from this
-// token's own saved stats via pcSpellCheckModifierBreakdownForStats, same
-// "don't trust a possibly-stale saved field" contract deriveTrackerLines'
-// dieSides already uses for weapon lines), and a roll button. line.label
-// is now just which Action Die this particular line represents ("1st
-// attack"/"Cast a Spell" - see deriveTrackerLines), since the select
-// itself is what shows/picks the actual spell name - folded into the meta
-// span next to the Spell Check bonus rather than a separate name element,
-// so the row keeps the same name/select-meta-button layout every other
-// tracker line uses. No damage, crit/fumble, Deed Die, Backstab, or ammo
-// - none of that applies to a Spell Check.
+// use - line.dieSides is THIS line's own Action Die size, not always a
+// d20, see deriveTrackerLines/actionDieProfileForAttack), its Spell Check
+// modifier (computed fresh from this token's own saved stats via
+// pcSpellCheckModifierBreakdownForStats, same "don't trust a possibly-
+// stale saved field" contract deriveTrackerLines' dieSides already uses
+// for weapon lines - line.slotKey is passed in as the die to roll, since
+// an auto-expanded line's die can differ from atk's own saved
+// actionDieIndex), and a roll button. line.label is now just which Action
+// Die this particular line represents ("1st attack"/"Cast a Spell" - see
+// deriveTrackerLines), since the select itself is what shows/picks the
+// actual spell name - folded into the meta span next to the Spell Check
+// bonus rather than a separate name element, so the row keeps the same
+// name/select-meta-button layout every other tracker line uses. No
+// damage, crit/fumble, Deed Die, Backstab, or ammo - none of that applies
+// to a Spell Check.
 function spellTrackerLineHtml(item, stats, line) {
   const atk = line.atk;
-  const check = pcSpellCheckModifierBreakdownForStats(stats);
+  const check = pcSpellCheckModifierBreakdownForStats(stats, { actionDieIndex: line.slotKey });
   const bonusText = check ? formatSignedNumber(check.modifier) : "+0";
   const bonusTooltip = check ? check.breakdown : "Only Cleric/Wizard/Elf have a Spell Check.";
   return `
@@ -8808,7 +8856,7 @@ function spellTrackerLineHtml(item, stats, line) {
         </span>
         <button class="hp-btn attack-roll-btn" title="Roll Spell Check">🎲</button>
       </div>
-      ${line.dieSides ? `<div class="attack-detail-badges"><span class="weapon-badge weapon-badge-die" title="A Spell Check always rolls a plain d${line.dieSides}">d${line.dieSides}</span></div>` : ""}
+      ${line.dieSides ? `<div class="attack-detail-badges"><span class="weapon-badge weapon-badge-die" title="Spell Check die this line rolls">d${line.dieSides}</span></div>` : ""}
     </div>`;
 }
 
@@ -9555,14 +9603,16 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
 // Tracker roll goes through, and reading whichever token was clicked
 // rather than whatever's open on the Sheet tab. Honors the GM's "force
 // next attack's d20" testing field (Dice tab) exactly like an ordinary
-// attack roll would, since a Spell Check is still just a d20 roll.
+// attack roll would - clamped to this line's own die size (check.sides,
+// per actionDieProfileForAttack), same as rollAttackFor's own clamp,
+// since a Spell Check on an extra Action Die isn't always a d20.
 async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   const [item] = await OBR.scene.items.getItems([itemId]);
   if (!item) return;
   const stats = getStatsForItem(item);
   const atk = stats.attacks.find(a => a.id === attackId);
   if (!atk) return;
-  const check = pcSpellCheckModifierBreakdownForStats(stats);
+  const check = pcSpellCheckModifierBreakdownForStats(stats, { actionDieIndex: slotKey });
   if (!check) {
     const msg = `${item.name || "Token"}: Only Cleric/Wizard/Elf roll a Spell Check.`;
     showTrackerStatus(msg, true);
@@ -9571,9 +9621,9 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   }
   const label = (atk.name || "").trim() || "Spell";
   const forcedD20 = consumeForcedD20();
-  const rolled = forcedD20 !== null ? forcedD20 : (Math.floor(Math.random() * 20) + 1);
+  const rolled = forcedD20 !== null ? Math.min(forcedD20, check.sides) : (Math.floor(Math.random() * check.sides) + 1);
   const total = rolled + check.modifier;
-  const text = `${label} - Spell Check: d20 (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(check.modifier)} = ${markRollTotal(total)}`;
+  const text = `${label} - Spell Check: d${check.sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(check.modifier)} = ${markRollTotal(total)}`;
 
   // This casting spends the same one Action Die a weapon attack at this
   // slot would (see actionSlotKey) - marking it used here hides not just
@@ -9585,7 +9635,7 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   showTrackerStatus(`${item.name || "Token"} — ${text}`, false, 6500);
   showStatus(`${item.name || "Token"} — ${text}`, false, 6500);
   await appendChatLog({ kind: "spell", tokenName: item.name || "Token", text, gmOnly: false });
-  broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: 20, value: rolled }], modifier: check.modifier, notation: "d20", total, label: `${label} — Spell Check` });
+  broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
 }
 
 // Rolling an attack from the Combat Tracker's expanded attack list used to
