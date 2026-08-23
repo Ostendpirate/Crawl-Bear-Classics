@@ -2009,7 +2009,25 @@ function fillForm(mode, data) {
     syncArmorIntoEquipment();
     syncWeaponsIntoEquipment();
   }
-  if (mode === "pc") { setEquipTab("armor"); refreshEquipTabDots(); }
+  // fillForm re-runs constantly for reasons that have nothing to do with
+  // the player actually switching characters - a passive background
+  // refresh (this same token's own debounced save echoing back, another
+  // player's unrelated edit elsewhere in the scene, etc, see
+  // OBR.scene.items.onChange's signature-guarded branch) rebuilds the
+  // whole form the same way a genuine token switch does. Forcing the
+  // Equipment sub-tabs back to Armor on every single one of those used to
+  // mean clicking Weapons/Gear/Food/Treasure could get silently snapped
+  // back to Armor moments later by an unrelated refresh - preserving
+  // whichever sub-tab is already showing (falling back to "armor" only
+  // when nothing's active yet, e.g. this app's very first render) fixes
+  // that without losing the "new sheet defaults to Armor" behavior, since
+  // the Armor button starts as the only one with the "active" class in
+  // the static HTML.
+  if (mode === "pc") {
+    const currentEquipTab = document.querySelector(".equip-tab-btn.active")?.dataset.equipTab || "armor";
+    setEquipTab(currentEquipTab);
+    refreshEquipTabDots();
+  }
   // Restores which of Init/Fort/Ref/Will were still auto-managed (as
   // opposed to hand-typed) when this token was last saved, so that flag
   // - and therefore live Class/Level/ability updates to those fields -
