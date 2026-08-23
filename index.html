@@ -658,6 +658,18 @@
   .mercurial-row .mercurial-note { flex: 1; min-width: 0; font-size: 11px; padding: 4px 6px; min-height: 32px; }
   .manifestation-note { font-size: 11px; padding: 4px 6px; min-height: 32px; margin-top: 4px; }
   .spellburn-row, .attack-detail-burn-row { margin-top: 4px; }
+  /* .hp-btn's base size (22x22px, meant for one icon glyph) squeezes any
+     button that also carries a text label - both this row's own
+     Spellburn button and #pc-spellburn-newday-btn need the same
+     auto-width/padded treatment .backstab-toggle-btn already gets for the
+     same reason. */
+  .spell-attack-burn-btn, .tracker-burn-btn, #pc-spellburn-newday-btn, .newday-modal-recover {
+    width: auto;
+    height: auto;
+    padding: 3px 8px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
   .spellburn-modal-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid rgba(69, 57, 46, 0.5); }
   .spellburn-modal-label { flex: 1; color: var(--text); }
   .spellburn-modal-score { flex: none; font-variant-numeric: tabular-nums; color: var(--muted); min-width: 54px; text-align: right; }
@@ -1468,7 +1480,7 @@
             <div class="save-box"><label>Int</label><input type="text" id="pc-int" placeholder="9 (+0)"/></div>
             <div class="save-box"><label>Lck</label><input type="text" id="pc-lck" placeholder="11 (+0)"/></div>
           </div>
-          <button type="button" id="pc-spellburn-newday-btn" class="hp-btn" style="margin-top:6px;" title="Spellburn recovery - recovers 1 point to every Str/Agi/Sta ability score spent on Spellburn (see the Cast a Spell row), up to what it was before any Spellburn (DCC RPG core rulebook: burned ability scores recover 1 point per day of rest). Click once per in-game day that passes without spellburning again.">🌙 New Day</button>
+          <button type="button" id="pc-spellburn-newday-btn" class="hp-btn" style="margin-top:6px;" title="Spellburn recovery (DCC RPG core rulebook: a burned ability score recovers 1 point per day of rest) - recovers 1 point to ONE Str/Agi/Sta ability spent on Spellburn (see the Cast a Spell row), up to what it was before any Spellburn. Asks which ability if more than one is burned. Click once per in-game day that passes.">🌙 New Day</button>
           <input type="hidden" id="pc-spellburnMax" value="" />
         </fieldset>
 
@@ -1830,6 +1842,19 @@
           <span class="spellburn-modal-total" id="spellburn-modal-total">0</span>
         </div>
       </div>
+    </div>
+  </div>
+
+  <div id="newday-modal-backdrop" class="tables-modal-backdrop" style="display:none">
+    <div class="tables-modal">
+      <div class="tables-modal-header">
+        <div>
+          <div class="tables-modal-title">New Day</div>
+          <div class="tables-modal-subtitle">A burned ability score recovers 1 point per day of rest (DCC RPG core rulebook) - choose which one heals today.</div>
+        </div>
+        <button type="button" class="tables-modal-close" id="newday-modal-close" title="Close">×</button>
+      </div>
+      <div class="tables-modal-body" id="newday-modal-body"></div>
     </div>
   </div>
 
@@ -5665,32 +5690,92 @@ function applySpellburnLive(ability, points) {
 }
 
 // "New Day" recovery (DCC RPG core rulebook: a burned ability score
-// recovers 1 point per day of rest). This app has no in-game calendar, so
-// this is a manual, click-once-per-day-that-passes button rather than
-// anything automatic - each click recovers 1 point to every ability
-// Spellburn has ever lowered, capped at pc-spellburnMax's snapshotted true
-// score so recovery can't overshoot. An ability's snapshot is cleared once
-// fully recovered, so a later burn re-snapshots fresh (self-correcting if
-// the true score ever changes, e.g. a level-based ability increase).
-document.getElementById("pc-spellburn-newday-btn").addEventListener("click", () => {
+// recovers 1 point per day of rest - ONE point, not one per ability). This
+// app has no in-game calendar, so this is a manual, click-once-per-day-
+// that-passes button rather than anything automatic. Which abilities are
+// even eligible is read off pc-spellburnMax's snapshotted true scores
+// (see applySpellburnLive) - only an ability actually lowered by
+// Spellburn, and not yet back to that snapshot, counts.
+function spellburnRecoverableAbilities() {
   const maxEl = document.getElementById("pc-spellburnMax");
   let maxMap = {};
   try { maxMap = JSON.parse((maxEl && maxEl.value) || "{}"); } catch (e) { maxMap = {}; }
-  const recovered = [];
-  SPELLBURN_ABILITIES.forEach(ability => {
-    if (maxMap[ability] === undefined) return;
+  return SPELLBURN_ABILITIES.filter(ability => {
+    if (maxMap[ability] === undefined) return false;
     const el = document.getElementById(`pc-${ability}`);
-    const current = parseAbilityScore(el.value);
-    if (current === null || current >= maxMap[ability]) { delete maxMap[ability]; return; }
-    const next = current + 1;
-    el.value = `${next} (${formatSignedNumber(dccAbilityModifier(next))})`;
-    recovered.push(spellburnAbilityLabel(ability));
-    if (next >= maxMap[ability]) delete maxMap[ability];
+    const current = parseAbilityScore(el ? el.value : "");
+    return current !== null && current < maxMap[ability];
   });
+}
+
+// Recovers exactly 1 point on ONE ability, capped at pc-spellburnMax's
+// snapshotted true score so recovery can't overshoot. The snapshot is
+// cleared once that ability is fully recovered, so a later burn
+// re-snapshots fresh (self-correcting if the true score ever changes,
+// e.g. a level-based ability increase).
+function recoverSpellburnAbility(ability) {
+  const maxEl = document.getElementById("pc-spellburnMax");
+  let maxMap = {};
+  try { maxMap = JSON.parse((maxEl && maxEl.value) || "{}"); } catch (e) { maxMap = {}; }
+  if (maxMap[ability] === undefined) return;
+  const el = document.getElementById(`pc-${ability}`);
+  const current = parseAbilityScore(el ? el.value : "");
+  if (current === null) return;
+  if (current >= maxMap[ability]) { delete maxMap[ability]; if (maxEl) maxEl.value = JSON.stringify(maxMap); return; }
+  const next = current + 1;
+  el.value = `${next} (${formatSignedNumber(dccAbilityModifier(next))})`;
+  if (next >= maxMap[ability]) delete maxMap[ability];
   if (maxEl) maxEl.value = JSON.stringify(maxMap);
   refreshDerivedPcFields();
   scheduleSave();
-  showStatus(recovered.length ? `New Day: recovered 1 point of ${recovered.join(", ")}.` : "New Day: nothing to recover.", false, 5000);
+  showStatus(`New Day: recovered 1 point of ${spellburnAbilityLabel(ability)} (now ${next}).`, false, 5000);
+}
+
+// A day of rest only recovers ONE point total, so if more than one
+// ability is burned the player has to choose which one heals today - a
+// small popup listing just the eligible abilities (same tables-modal
+// chrome the Crit/Fumble Tables button uses, body built fresh each open
+// since which abilities qualify changes over time). With only one eligible
+// ability there's nothing to choose, so this recovers it directly instead
+// of asking.
+function openNewDayModal() {
+  const recoverable = spellburnRecoverableAbilities();
+  if (!recoverable.length) {
+    showStatus("New Day: nothing to recover.", false, 4000);
+    return;
+  }
+  if (recoverable.length === 1) {
+    recoverSpellburnAbility(recoverable[0]);
+    return;
+  }
+  const body = document.getElementById("newday-modal-body");
+  body.innerHTML = recoverable.map(ability => {
+    const el = document.getElementById(`pc-${ability}`);
+    const current = parseAbilityScore(el ? el.value : "");
+    return `
+    <div class="spellburn-modal-row">
+      <span class="spellburn-modal-label">${spellburnAbilityLabel(ability)}</span>
+      <span class="spellburn-modal-score">${current === null ? "—" : `${current} (${formatSignedNumber(dccAbilityModifier(current))})`}</span>
+      <button type="button" class="hp-btn newday-modal-recover" data-ability="${ability}" title="Recover 1 ${spellburnAbilityLabel(ability)} point">+1</button>
+    </div>`;
+  }).join("");
+  body.querySelectorAll(".newday-modal-recover").forEach(btn => {
+    btn.addEventListener("click", () => {
+      recoverSpellburnAbility(btn.dataset.ability);
+      closeNewDayModal();
+    });
+  });
+  document.getElementById("newday-modal-backdrop").style.display = "flex";
+}
+
+function closeNewDayModal() {
+  document.getElementById("newday-modal-backdrop").style.display = "none";
+}
+
+document.getElementById("pc-spellburn-newday-btn").addEventListener("click", openNewDayModal);
+document.getElementById("newday-modal-close").addEventListener("click", closeNewDayModal);
+document.getElementById("newday-modal-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "newday-modal-backdrop") closeNewDayModal();
 });
 
 // The Spellburn popup (#spellburn-modal-backdrop) is one shared piece of
