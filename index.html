@@ -6773,21 +6773,23 @@ function refreshSpellAttackRows() {
 }
 
 // A Spell Check's natural-roll results (DCC RPG core rulebook): a natural
-// MAX face is always a critical success - the caster adds their own
-// LEVEL as a second, additional bonus on top of the normal Spell Check
-// modifier, then compares the total to that specific spell's own casting
-// table for the exact effect (this app has no per-spell casting tables to
-// look that up automatically, same reason Manifestation is a plain note
-// field rather than something this app resolves for the player). A
-// natural 1 always fails regardless of total, and may trigger corruption
-// or patron disapproval per that spell's own write-up - flagged here, not
-// resolved further, for the same reason. "Natural max" means the highest
-// face of whichever die this SPECIFIC roll actually used (an extra Action
-// Die, or a Mercurial Magic-adjusted die - see pcSpellCheckModifierBreakdown),
-// not literally the number 20 - same dice-chain-scaled convention weapon
-// attacks' own crit threat already follows for a non-d20 attack die.
+// MAX face on a d20-OR-BIGGER die is a critical success - the caster adds
+// their own LEVEL as a second, additional bonus on top of the normal
+// Spell Check modifier, then compares the total to that specific spell's
+// own casting table for the exact effect (this app has no per-spell
+// casting tables to look that up automatically, same reason Manifestation
+// is a plain note field rather than something this app resolves for the
+// player). The d20-or-bigger floor matters: unlike a weapon attack
+// fighting two-weapon (Table 4-3), which CAN still crit on a stepped-down
+// die's own natural max (e.g. a 16 on a d16 off-hand), a Spell Check
+// rolled on a smaller die - typically a 2nd/3rd Action Die, d14/d16 -
+// never counts as a critical success no matter what face comes up; only
+// a Mercurial Magic-improved die (d24/d30) or the character's own d20
+// qualifies. A natural 1 always fails regardless of total or die size,
+// and may trigger corruption or patron disapproval per that spell's own
+// write-up - flagged here, not resolved further, for the same reason.
 function spellCheckNaturalResultText(rolled, sides, level) {
-  if (rolled === sides) {
+  if (rolled === sides && sides >= 20) {
     return {
       critBonus: level,
       note: ` ${markCritAlert("💥 CRITICAL SUCCESS!")} Natural ${rolled} - ${formatSignedNumber(level)} caster level bonus applied on top. Compare the total to this spell's own casting table for the exact effect.`,
