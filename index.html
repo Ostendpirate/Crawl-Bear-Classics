@@ -5905,6 +5905,154 @@ document.getElementById("add-armor-pc").addEventListener("click", () => {
   syncArmorIntoEquipment();
 });
 
+// ---- Table 5-8: Wizard Spells (with page number) ----
+//
+// The canonical randomly-rolled "known spells" list for Wizards AND
+// Elves (Elves cast off this same wizard spell list, not a separate one
+// of their own) - used to populate the Spells section's spell-name field
+// as a dropdown for those two classes, so a rolled/chosen spell always
+// matches an actual named spell in the book instead of being typed
+// freehand (and easily mis-typed/mis-remembered). Cleric isn't on this
+// table at all and keeps the plain free-text field (see spellRowHtml) -
+// Clerics pray for any cleric spell they qualify for by level rather
+// than maintaining a fixed "known spells" list the way Wizard/Elf do.
+//
+// `cleric: true` marks a spell whose entry is "as per the cleric spell
+// of the same name" (Table 5-8's own * footnote) - shown with a trailing
+// "*" in the dropdown as a reminder that a -2 Spell Check penalty may
+// apply if the wizard/cleric version differs in level. `patron: true`
+// marks Invoke patron/Patron bond (the ** footnote: rolling either one
+// grants BOTH spells for a single spell slot). Table 5-8's own
+// "(Patron spell)***" table results aren't concrete named spells at all
+// (they resolve to whatever the character's specific patron grants), so
+// they're deliberately left off this list - the "✎ Custom / Patron
+// spell…" option in the dropdown (see dccWizardSpellOptionsHtml) is
+// where that gets named instead.
+const DCC_WIZARD_SPELLS = [
+  { name: "Animal summoning", level: 1, page: 129 },
+  { name: "Cantrip", level: 1, page: 130 },
+  { name: "Charm person", level: 1, page: 131 },
+  { name: "Chill touch", level: 1, page: 133 },
+  { name: "Choking cloud", level: 1, page: 134 },
+  { name: "Color spray", level: 1, page: 135 },
+  { name: "Comprehend languages", level: 1, page: 136 },
+  { name: "Detect magic", level: 1, page: 260, cleric: true },
+  { name: "Ekim's mystical mask", level: 1, page: 137 },
+  { name: "Enlarge", level: 1, page: 139 },
+  { name: "Feather fall", level: 1, page: 140 },
+  { name: "Find familiar", level: 1, page: 141 },
+  { name: "Flaming hands", level: 1, page: 142 },
+  { name: "Force manipulation", level: 1, page: 143 },
+  { name: "Invoke patron", level: 1, page: 144, patron: true },
+  { name: "Magic missile", level: 1, page: 144 },
+  { name: "Magic shield", level: 1, page: 146 },
+  { name: "Mending", level: 1, page: 147 },
+  { name: "Patron bond", level: 1, page: 148, patron: true },
+  { name: "Read magic", level: 1, page: 152 },
+  { name: "Ropework", level: 1, page: 153 },
+  { name: "Runic alphabet, mortal", level: 1, page: 154 },
+  { name: "Sleep", level: 1, page: 155 },
+  { name: "Spider climb", level: 1, page: 156 },
+  { name: "Ventriloquism", level: 1, page: 158 },
+  { name: "Ward portal", level: 1, page: 160 },
+
+  { name: "Arcane affinity", level: 2, page: 162 },
+  { name: "Detect evil", level: 2, page: 259, cleric: true },
+  { name: "Detect invisible", level: 2, page: 165 },
+  { name: "ESP", level: 2, page: 166 },
+  { name: "Fire resistance", level: 2, page: 169 },
+  { name: "Forget", level: 2, page: 170 },
+  { name: "Invisibility", level: 2, page: 172 },
+  { name: "Invisible companion", level: 2, page: 173 },
+  { name: "Knock", level: 2, page: 175 },
+  { name: "Levitate", level: 2, page: 176 },
+  { name: "Locate object", level: 2, page: 178 },
+  { name: "Magic mouth", level: 2, page: 180 },
+  { name: "Mirror image", level: 2, page: 182 },
+  { name: "Monster summoning", level: 2, page: 184 },
+  { name: "Nythuul's porcupine coat", level: 2, page: 186 },
+  { name: "Phantasm", level: 2, page: 187 },
+  { name: "Ray of enfeeblement", level: 2, page: 190 },
+  { name: "Scare", level: 2, page: 191 },
+  { name: "Scorching ray", level: 2, page: 192 },
+  { name: "Shatter", level: 2, page: 193 },
+  { name: "Spider web", level: 2, page: 196 },
+  { name: "Strength", level: 2, page: 198 },
+  { name: "Wizard staff", level: 2, page: 199 },
+
+  { name: "Binding", level: 3, page: 270, cleric: true },
+  { name: "Breathe life", level: 3, page: 202 },
+  { name: "Consult spirit", level: 3, page: 204 },
+  { name: "Demon summoning", level: 3, page: 206 },
+  { name: "Dispel magic", level: 3, page: 208 },
+  { name: "Eldritch hound", level: 3, page: 211 },
+  { name: "Emirikol's entropic maelstrom", level: 3, page: 213 },
+  { name: "Eternal champion", level: 3, page: 214 },
+  { name: "Fireball", level: 3, page: 216 },
+  { name: "Fly", level: 3, page: 217 },
+  { name: "Gust of wind", level: 3, page: 219 },
+  { name: "Haste", level: 3, page: 221 },
+  { name: "Lightning bolt", level: 3, page: 222 },
+  { name: "Make potion", level: 3, page: 223 },
+  { name: "Paralysis", level: 3, page: 264, cleric: true },
+  { name: "Planar step", level: 3, page: 225 },
+  { name: "Runic alphabet, fey", level: 3, page: 227 },
+  { name: "Slow", level: 3, page: 228 },
+  { name: "Sword magic", level: 3, page: 229 },
+  { name: "Transference", level: 3, page: 232 },
+  { name: "Turn to stone", level: 3, page: 233 },
+  { name: "Water breathing", level: 3, page: 235 },
+  { name: "Write magic", level: 3, page: 236 },
+
+  { name: "Control fire", level: 4, page: 238 },
+  { name: "Control ice", level: 4, page: 239 },
+  { name: "Lokerimon's orderly assistance", level: 4, page: 241 },
+  { name: "Polymorph", level: 4, page: 243 },
+  { name: "Transmute Earth", level: 4, page: 244 },
+  { name: "Wizard sense", level: 4, page: 245 },
+
+  { name: "Hepsoj's fecund fungi", level: 5, page: 247 },
+  { name: "Lokerimon's un-erring hunter", level: 5, page: 249 },
+  { name: "Magic bulwark", level: 5, page: 251 },
+  { name: "Mind purge", level: 5, page: 252 },
+  { name: "Replication", level: 5, page: 253 },
+];
+
+// Sentinel <option> value for "this row's spell isn't on Table 5-8" -
+// picking it reveals a plain text field for a patron-granted or homebrew
+// spell name (see spellRowHtml/attachSpellRowListeners), same "escape
+// hatch alongside a constrained picker" pattern DCC_WEAPONS' own
+// "Custom / Other" entry already uses for Attacks.
+const SPELL_CUSTOM_KEY = "__custom_spell__";
+
+// Builds the <option>/<optgroup> markup for a Wizard/Elf spell-name
+// dropdown, grouped by spell level the way Table 5-8 itself is laid out.
+// selectedValue is either a known spell's exact name, SPELL_CUSTOM_KEY
+// (custom/patron mode is active), or "" (nothing picked yet). A
+// selectedValue that's NEITHER a known name NOR SPELL_CUSTOM_KEY (data
+// saved before this dropdown existed, or a name that's since fallen off
+// the table) stays offered and selected as its own option rather than
+// silently disappearing - same "a stale pick shows as itself" contract
+// spellSelectOptionsHtml (the Attacks-row spell picker) already uses.
+function dccWizardSpellOptionsHtml(selectedValue) {
+  const isCustomSelected = selectedValue === SPELL_CUSTOM_KEY;
+  const knownNames = DCC_WIZARD_SPELLS.map(s => s.name);
+  const isStale = !isCustomSelected && selectedValue && !knownNames.includes(selectedValue);
+  const placeholder = `<option value=""${selectedValue ? "" : " selected"}>— Select a spell —</option>`;
+  const staleOption = isStale
+    ? `<option value="${escapeHtml(selectedValue)}" selected>${escapeHtml(selectedValue)}</option>`
+    : "";
+  const groups = [1, 2, 3, 4, 5].map(level => {
+    const opts = DCC_WIZARD_SPELLS.filter(s => s.level === level).map(s => {
+      const label = `${s.name}${s.cleric ? "*" : ""} (p.${s.page})`;
+      return `<option value="${escapeHtml(s.name)}"${s.name === selectedValue ? " selected" : ""}>${escapeHtml(label)}</option>`;
+    }).join("");
+    return `<optgroup label="Level ${level}">${opts}</optgroup>`;
+  }).join("");
+  const customOption = `<option value="${SPELL_CUSTOM_KEY}"${isCustomSelected ? " selected" : ""}>✎ Custom / Patron spell…</option>`;
+  return `${placeholder}${staleOption}${groups}<optgroup label="Other">${customOption}</optgroup>`;
+}
+
 // ---- Spell Check (Cleric/Wizard/Elf) ----
 //
 // Only these three classes roll a Spell Check at all - a Thief's own
@@ -5948,9 +6096,27 @@ function emptySpellItem() {
 }
 
 function spellRowHtml(item) {
+  const classEl = document.getElementById("pc-class");
+  const cls = classEl ? classEl.value : "";
+  // Cleric doesn't roll on Table 5-8 at all (see the table's own header
+  // comment above) - keeps the original plain free-text field, unchanged
+  // from before this dropdown existed.
+  if (cls !== "Wizard" && cls !== "Elf") {
+    return `
+      <div class="attack-row" data-id="${item.id}">
+        <input type="text" class="attack-name spell-row-name" placeholder="Spell name" value="${escapeHtml(item.name || "")}" />
+        <button type="button" class="hp-btn attack-roll-btn spell-row-roll-btn" title="Roll Spell Check">🎲</button>
+        <button type="button" class="attack-remove-btn spell-row-remove-btn" title="Remove">×</button>
+      </div>`;
+  }
+  const knownNames = DCC_WIZARD_SPELLS.map(s => s.name);
+  const isCustom = !!item.name && !knownNames.includes(item.name);
+  const selectValue = isCustom ? SPELL_CUSTOM_KEY : (item.name || "");
   return `
     <div class="attack-row" data-id="${item.id}">
-      <input type="text" class="attack-name spell-row-name" placeholder="Spell name" value="${escapeHtml(item.name || "")}" />
+      <select class="attack-name spell-row-select"${isCustom ? ' style="display:none"' : ""}>${dccWizardSpellOptionsHtml(selectValue)}</select>
+      <input type="text" class="attack-name spell-row-custom-name" placeholder="Custom/patron spell name"${isCustom ? "" : ' style="display:none"'} value="${escapeHtml(isCustom ? item.name : "")}" />
+      <button type="button" class="hp-btn spell-row-custom-back"${isCustom ? "" : ' style="display:none"'} title="Back to spell list">↩</button>
       <button type="button" class="hp-btn attack-roll-btn spell-row-roll-btn" title="Roll Spell Check">🎲</button>
       <button type="button" class="attack-remove-btn spell-row-remove-btn" title="Remove">×</button>
     </div>`;
@@ -5967,20 +6133,74 @@ function renderSpellItems(items) {
   attachSpellRowListeners();
 }
 
+// A row is either the plain free-text field (Cleric/no class yet - see
+// spellRowHtml) or the Wizard/Elf Table 5-8 dropdown pair (a <select>
+// plus a custom-name text field, only one of which is ever visible) -
+// this reads whichever one this particular row actually has.
 function readSpellItems() {
   const listEl = spellsListEl();
   if (!listEl) return [];
-  return Array.from(listEl.querySelectorAll(".attack-row")).map(row => ({
-    id: row.dataset.id,
-    name: row.querySelector(".spell-row-name").value,
-  }));
+  return Array.from(listEl.querySelectorAll(".attack-row")).map(row => {
+    const selectEl = row.querySelector(".spell-row-select");
+    let name;
+    if (selectEl) {
+      const customEl = row.querySelector(".spell-row-custom-name");
+      name = selectEl.value === SPELL_CUSTOM_KEY ? (customEl ? customEl.value : "") : selectEl.value;
+    } else {
+      const textEl = row.querySelector(".spell-row-name");
+      name = textEl ? textEl.value : "";
+    }
+    return { id: row.dataset.id, name };
+  });
 }
 
 function attachSpellRowListeners() {
   const listEl = spellsListEl();
   if (!listEl) return;
   listEl.querySelectorAll(".attack-row").forEach(row => {
-    row.querySelector(".spell-row-name").addEventListener("input", scheduleSave);
+    const textEl = row.querySelector(".spell-row-name");
+    if (textEl) textEl.addEventListener("input", scheduleSave);
+    const selectEl = row.querySelector(".spell-row-select");
+    const customEl = row.querySelector(".spell-row-custom-name");
+    const backBtn = row.querySelector(".spell-row-custom-back");
+    if (selectEl) {
+      selectEl.addEventListener("change", () => {
+        // Picking "✎ Custom / Patron spell…" swaps the dropdown out for
+        // a plain text field (plus a small ↩ button to switch back) -
+        // same show/hide-in-place pattern as the Attacks list's own
+        // weapon-vs-spell row switch, just without a full row rebuild
+        // since only these sibling fields differ.
+        const isCustom = selectEl.value === SPELL_CUSTOM_KEY;
+        selectEl.style.display = isCustom ? "none" : "";
+        if (customEl) {
+          customEl.style.display = isCustom ? "" : "none";
+          if (isCustom) customEl.focus();
+          else customEl.value = "";
+        }
+        if (backBtn) backBtn.style.display = isCustom ? "" : "none";
+        scheduleSave();
+      });
+    }
+    if (customEl) {
+      customEl.addEventListener("input", scheduleSave);
+    }
+    if (backBtn) {
+      backBtn.addEventListener("click", () => {
+        // Bails back out of Custom/Patron mode to the Table 5-8 dropdown -
+        // resets to the blank placeholder rather than trying to guess
+        // which known spell (if any) the custom name was meant to be.
+        if (selectEl) {
+          selectEl.value = "";
+          selectEl.style.display = "";
+        }
+        if (customEl) {
+          customEl.value = "";
+          customEl.style.display = "none";
+        }
+        backBtn.style.display = "none";
+        scheduleSave();
+      });
+    }
     row.querySelector(".spell-row-roll-btn").addEventListener("click", () => rollPcSpell(row.dataset.id));
     row.querySelector(".spell-row-remove-btn").addEventListener("click", () => {
       row.remove();
@@ -6032,8 +6252,19 @@ function recalcPcSpellSection() {
 // able to do this yet."
 function rollPcSpell(id) {
   const row = document.querySelector(`#pc-spells-list .attack-row[data-id="${id}"]`);
-  const input = row ? row.querySelector(".spell-row-name") : null;
-  if (!row || !input) return;
+  if (!row) return;
+  // Same "read whichever field this row actually has" logic as
+  // readSpellItems - a plain text field for Cleric, or the Table 5-8
+  // dropdown/custom-name pair for Wizard/Elf.
+  const selectEl = row.querySelector(".spell-row-select");
+  let nameValue;
+  if (selectEl) {
+    const customEl = row.querySelector(".spell-row-custom-name");
+    nameValue = selectEl.value === SPELL_CUSTOM_KEY ? (customEl ? customEl.value : "") : selectEl.value;
+  } else {
+    const textEl = row.querySelector(".spell-row-name");
+    nameValue = textEl ? textEl.value : "";
+  }
   const check = pcSpellCheckModifierBreakdown();
   if (!check) {
     showStatus("Only Cleric/Wizard/Elf roll a Spell Check.", true, 4000);
@@ -6041,7 +6272,7 @@ function rollPcSpell(id) {
   }
   const rolled = Math.floor(Math.random() * 20) + 1;
   const total = rolled + check.modifier;
-  const label = input.value.trim() || "Spell";
+  const label = nameValue.trim() || "Spell";
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
   const text = `${label} - Spell Check: d20 (${rolled}) ${formatSignedNumber(check.modifier)} = ${markRollTotal(total)}`;
   showStatus(text, false, 4000);
@@ -6638,6 +6869,12 @@ document.getElementById("pc-class").addEventListener("change", () => {
   // Deed-Die-none status might affect layout), and each row's Action Die #
   // selector (Table 1-5/.../1-18 - whose options are also class-driven).
   renderAttacks("pc", readAttacks("pc"));
+  // A new Class can also mean the Spells section's spell-name field
+  // switches between Table 5-8's dropdown (Wizard/Elf) and plain free
+  // text (Cleric/anything else) - see spellRowHtml. Re-render from
+  // whatever's currently on screen so already-picked spell names carry
+  // over into the new field type rather than being lost.
+  renderSpellItems(readSpellItems());
   cfgRenderFromCurrentForm("pc");
   scheduleSave();
 });
