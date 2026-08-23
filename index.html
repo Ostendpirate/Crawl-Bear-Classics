@@ -1028,6 +1028,7 @@
   .attack-detail-row-wrap:last-child { border-bottom: none; padding-bottom: 0; }
   .attack-detail-row { display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
   .attack-detail-name { flex: 1; color: var(--text); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tracker-spell-select { flex: 1; min-width: 0; padding: 3px 4px; font-size: 11px; font-weight: 600; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 4px; }
   .attack-detail-meta { color: var(--muted); white-space: nowrap; display: flex; gap: 8px; }
   .attack-detail-meta-part b { color: var(--text); font-weight: 600; }
   .attack-detail-used-up { color: var(--muted); font-size: 11px; line-height: 1.5; padding: 4px 2px; }
@@ -1759,9 +1760,10 @@ const MONSTER_METADATA_KEY = "com.claude.monster-sheet/dcc-data";
 const PC_METADATA_KEY = "com.claude.monster-sheet/dcc-pc-data";
 const MODE_METADATA_KEY = "com.claude.monster-sheet/sheet-mode";
 const COMBAT_METADATA_KEY = "com.claude.monster-sheet/combat-data";
-// Which of a token's Combat Tracker attack LINES (attackId + Action Die
-// slot, same key shape as lineDeeds - see actionSlotKey) have already been
-// rolled THIS round - round/session-scoped, invalidated whenever
+// Which of a token's Combat Tracker attack LINES have already been rolled
+// THIS round (see actionSlotKey for exactly what identifies a "line" - a
+// PC's own Action Dice are shared across every row that can spend one, a
+// monster's named attacks are each independent) - round/session-scoped, invalidated whenever
 // sceneState.round/session no longer match what was cached (nextTurn/
 // prevTurn/resetTracker are the only things that ever change either, so a
 // stale cache from a prior round or encounter is simply ignored, never
@@ -4823,11 +4825,13 @@ function attachAttackRowListeners(mode) {
         });
       }
       // Picking a different Action Die # (see actionDieSelectOptions) just
-      // changes which die THIS row rolls - unlike Two-Weapon role above,
-      // there's no "only one row can use it" restriction, since nothing
-      // stops declaring more than one attack with the same slot in a
-      // Judge's ruling (or simply not having gotten around to configuring
-      // every row yet).
+      // changes which die THIS row rolls - nothing on the Sheet stops
+      // declaring more than one attack (or a "Cast a Spell" row) with the
+      // same slot, e.g. mid-build before every row's been configured. The
+      // Combat Tracker is where that actually matters: rolling ANY line at
+      // a given Action Die now hides every other line sharing that same
+      // slot for the round (see actionSlotKey), so two rows left on the
+      // same die do end up competing for it there.
       const actDieSel = row.querySelector(".attack-action-die");
       if (actDieSel) {
         actDieSel.addEventListener("change", () => {
@@ -6321,17 +6325,31 @@ function pcKnownSpellNames() {
     .filter(Boolean);
 }
 
-function spellSelectOptionsHtml(selectedName) {
-  const names = pcKnownSpellNames();
+// Stats-based sibling of pcKnownSpellNames, sourced from a token's SAVED
+// pcSpells (see readForm's d.pcSpells) instead of the live Sheet DOM -
+// needed so the Combat Tracker's own spell picker (spellTrackerLineHtml)
+// can list whichever token was clicked, not just whatever's open on the
+// Sheet tab (same "ForStats" pattern as pcSpellCheckModifierBreakdownForStats
+// above).
+function pcKnownSpellNamesForStats(stats) {
+  return (stats.data.pcSpells || [])
+    .map(item => (item.name || "").trim())
+    .filter(Boolean);
+}
+
+// Shared option-building logic behind spellSelectOptionsHtml/
+// spellSelectOptionsHtmlForStats - takes an already-resolved names list so
+// each caller only differs in WHERE the names and "nothing known yet"
+// wording come from, not in how a selection is rendered/preserved.
+function buildSpellSelectOptions(names, selectedName, noneMessage) {
   if (!names.length) {
     // No known spells to choose from yet - still show whatever this row
     // already had selected (a name entered here before it was later
     // removed from the Spells list further down would otherwise vanish
     // silently) rather than only ever offering an empty dropdown.
-    const fallback = selectedName
+    return selectedName
       ? `<option value="${escapeHtml(selectedName)}" selected>${escapeHtml(selectedName)}</option>`
-      : `<option value="" disabled selected>No known spells - add some in the Spells section below</option>`;
-    return fallback;
+      : `<option value="" disabled selected>${escapeHtml(noneMessage)}</option>`;
   }
   const options = names.map(name =>
     `<option value="${escapeHtml(name)}"${name === selectedName ? " selected" : ""}>${escapeHtml(name)}</option>`
@@ -6349,6 +6367,18 @@ function spellSelectOptionsHtml(selectedName) {
   return options.join("");
 }
 
+function spellSelectOptionsHtml(selectedName) {
+  return buildSpellSelectOptions(pcKnownSpellNames(), selectedName, "No known spells - add some in the Spells section below");
+}
+
+// Tracker-side sibling of spellSelectOptionsHtml - same rendering contract,
+// sourced from a token's saved spell roster (pcKnownSpellNamesForStats)
+// rather than the live Sheet DOM, since the Tracker can be showing a
+// different token than whatever's open on the Sheet tab.
+function spellSelectOptionsHtmlForStats(stats, selectedName) {
+  return buildSpellSelectOptions(pcKnownSpellNamesForStats(stats), selectedName, "No known spells - add some in the Spells section on the Sheet");
+}
+
 function spellAttackRowHtml(atk) {
   const check = pcSpellCheckModifierBreakdown();
   // Hidden .attack-name/.attack-damage: readAttacks()/applyWeaponSelection
@@ -6360,10 +6390,23 @@ function spellAttackRowHtml(atk) {
   // still reads sensibly ("Fireball +4") instead of showing nothing.
   const bonusText = check ? formatSignedNumber(check.modifier) : "";
   const bonusTitle = check ? check.breakdown : "Only Cleric/Wizard/Elf have a Spell Check - pick a caster Class above.";
+  // Same Action Die picker as an ordinary weapon row (attackRowHtml) - a
+  // spell cast spends one Action Die exactly like a weapon swing does (see
+  // actionSlotKey), so a caster with multiple Action Dice needs to say
+  // which one this Cast-a-Spell row uses too. No two-weapon-role gate
+  // here, unlike attackRowHtml's version - spells never fight two-weapon.
+  const classElForActDie = document.getElementById("pc-class");
+  const levelElForActDie = document.getElementById("pc-level");
+  const actDieOptions = actionDieSelectOptions(classElForActDie ? classElForActDie.value : "", levelElForActDie ? levelElForActDie.value : "");
+  const effectiveActionDieIndex = actDieOptions.some(o => o.value === atk.actionDieIndex) ? atk.actionDieIndex : "0";
+  const actDieSelectHtml = actDieOptions.length ? `<select class="attack-action-die" title="Which of this character's Action Dice this spell cast uses (Table 1-5/1-7/1-10/1-12/1-14/1-16/1-18) - shares the same one-action-per-die pool as this character's weapon attacks (see the Combat Tracker).">${actDieOptions.map(o =>
+    `<option value="${o.value}"${o.value === effectiveActionDieIndex ? " selected" : ""}>${escapeHtml(o.label)}</option>`
+  ).join("")}</select>` : "";
   return `
     <div class="attack-row pc-attack-row spell-attack-row" data-id="${atk.id}" data-line-deeds="{}">
       <div class="attack-weapon-line">
         <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
+        ${actDieSelectHtml}
       </div>
       <div class="attack-row-fields">
         <input type="hidden" class="attack-name" value="${escapeHtml(atk.name || "")}" />
@@ -7713,12 +7756,23 @@ function rollDeedDieForStats(stats) {
 }
 
 // Identifies one rollable Combat Tracker line for "used this round"
-// purposes - same (attackId, slot) shape lineDeeds/rowKey already use
-// elsewhere, collapsed to one string so it can live in a plain array in
-// metadata (a Set isn't JSON-serializable) and be compared with ordinary
-// string equality.
-function actionSlotKey(attackId, slotKey) {
-  return `${attackId}:${slotKey || "0"}`;
+// purposes. For a monster/NPC, still (attackId, slot) collapsed to one
+// string - each of a monster's named attacks (Bite/Claw/Claw) is its own
+// independent action, never sharing a pool with any other attack, so
+// attackId has to stay part of the key. For a PC, `slotKey` ALONE is the
+// key: every PC Tracker line (see deriveTrackerLines) already computes
+// slotKey to mean "which Action Die (Table 1-5/etc, the 'tw' two-weapon
+// pair, or a Dwarf's Shield Bash) this line spends" - dropping attackId
+// here is what makes rolling ANY line at a given slot correctly block
+// every OTHER line spending that same slot, whether that's two different
+// equipped weapons, a weapon and a "Cast a Spell" row, or two different
+// known spells: one Action Die is one action, no matter which row
+// represents it. (lineDeeds/rowKey elsewhere use a similar (attackId,
+// slot) shape for a completely separate purpose - per-row Backstab/Mighty
+// Deed declarations - and are untouched by this.)
+function actionSlotKey(mode, attackId, slotKey) {
+  if (mode !== "pc") return `${attackId}:${slotKey || "0"}`;
+  return slotKey || "0";
 }
 
 // This round's already-used attack lines for one token (see
@@ -8437,7 +8491,7 @@ function computeActiveOrder(items) {
 //    "remaining" expansion below and roll as independent single attacks.
 function deriveTrackerLines(item, stats) {
   const usedSlots = usedActionSlotsSetForStats(stats);
-  const tagUsed = line => ({ ...line, used: usedSlots.has(actionSlotKey(line.attackId, line.slotKey)) });
+  const tagUsed = line => ({ ...line, used: usedSlots.has(actionSlotKey(stats.mode, line.attackId, line.slotKey)) });
   if (stats.mode !== "pc") {
     return stats.attacks.map(a => tagUsed({ atk: a, attackId: a.id, slotKey: null, isTw: false, label: a.name || "Attack", dieSides: null }));
   }
@@ -8529,12 +8583,32 @@ function deriveTrackerLines(item, stats) {
   // "Cast a Spell" Attacks rows (spellAttackRowHtml) never go through the
   // Equipped checkbox at all - there isn't one on that row template - so
   // they're pulled straight from stats.attacks here instead of the
-  // `equipped` list above. One line per known spell a caster has added as
-  // an Attacks row, same slotKey ("spell") for all of them since a spell
-  // isn't tied to any particular Action Die the way a weapon attack is.
-  stats.attacks.filter(a => a.weapon === SPELL_ATTACK_KEY).forEach(atk => {
-    lines.push({ atk, attackId: atk.id, slotKey: "spell", isTw: false, isSpell: true, label: atk.name ? `🔮 ${atk.name}` : "🔮 Cast a Spell", dieSides: 20 });
-  });
+  // `equipped` list above. A spell cast spends an Action Die exactly like
+  // a weapon attack does (see actionSlotKey) - so this mirrors the
+  // single-remaining-weapon expansion above: exactly one Cast-a-Spell row
+  // expands into one line per Action Die this class/level gets, letting a
+  // caster with multiple Action Dice cast up to that many spells a round
+  // (competing with their weapon attacks for the same dice); more than one
+  // Cast-a-Spell row instead trusts each row's own declared Action Die,
+  // same as multiple equipped weapons. WHICH known spell a line casts is
+  // picked live in the Tracker itself (see spellTrackerLineHtml) - the
+  // label here is just which Action Die this line is.
+  const spellAttacks = stats.attacks.filter(a => a.weapon === SPELL_ATTACK_KEY);
+  if (spellAttacks.length === 1 && actDieOptions.length > 0) {
+    const atk = spellAttacks[0];
+    actDieOptions.forEach(opt => {
+      lines.push({
+        atk, attackId: atk.id, slotKey: opt.value, isTw: false, isSpell: true,
+        label: `🔮 ${opt.label.replace(/\s*\(d\d+\)$/, "")}`,
+        dieSides: 20,
+      });
+    });
+  } else {
+    spellAttacks.forEach(atk => {
+      const slotKey = actDieOptions.some(o => o.value === atk.actionDieIndex) ? atk.actionDieIndex : "0";
+      lines.push({ atk, attackId: atk.id, slotKey, isTw: false, isSpell: true, label: "🔮 Cast a Spell", dieSides: 20 });
+    });
+  }
 
   return lines.map(tagUsed);
 }
@@ -8704,22 +8778,31 @@ function trackerLineHtml(item, stats, line) {
     </div>`;
 }
 
-// A "Cast a Spell" line's Combat Tracker row - the spell name, its Spell
-// Check modifier (computed fresh from this token's own saved stats via
-// pcSpellCheckModifierBreakdownForStats, same "don't trust a possibly-
-// stale saved field" contract deriveTrackerLines' dieSides already uses
-// for weapon lines), and a roll button. No damage, crit/fumble, Deed Die,
-// Backstab, or ammo - none of that applies to a Spell Check.
+// A "Cast a Spell" line's Combat Tracker row - a live picker for WHICH
+// known spell this line casts (spellSelectOptionsHtmlForStats, same
+// roster as the Sheet's own picker - see pcKnownSpellNamesForStats), its
+// Spell Check modifier (computed fresh from this token's own saved stats
+// via pcSpellCheckModifierBreakdownForStats, same "don't trust a
+// possibly-stale saved field" contract deriveTrackerLines' dieSides
+// already uses for weapon lines), and a roll button. line.label is now
+// just which Action Die this particular line represents ("1st attack"/
+// "Cast a Spell" - see deriveTrackerLines), since the select itself is
+// what shows/picks the actual spell name - folded into the meta span
+// next to the Spell Check bonus rather than a separate name element, so
+// the row keeps the same name/select-meta-button layout every other
+// tracker line uses. No damage, crit/fumble, Deed Die, Backstab, or ammo
+// - none of that applies to a Spell Check.
 function spellTrackerLineHtml(item, stats, line) {
+  const atk = line.atk;
   const check = pcSpellCheckModifierBreakdownForStats(stats);
   const bonusText = check ? formatSignedNumber(check.modifier) : "+0";
   const bonusTooltip = check ? check.breakdown : "Only Cleric/Wizard/Elf have a Spell Check.";
   return `
     <div class="attack-detail-row-wrap">
       <div class="attack-detail-row" data-attack-id="${line.attackId}" data-slot-key="${line.slotKey || ""}">
-        <span class="attack-detail-name">${escapeHtml(line.label)}</span>
+        <select class="tracker-spell-select" title="Which known spell this line casts - add more in the Spells section on the Sheet.">${spellSelectOptionsHtmlForStats(stats, atk.name)}</select>
         <span class="attack-detail-meta">
-          <span class="attack-detail-meta-part" title="${escapeHtml(bonusTooltip)}">Spell Check <b>${escapeHtml(bonusText)}</b></span>
+          <span class="attack-detail-meta-part" title="${escapeHtml(bonusTooltip)}">${escapeHtml(line.label)} <b>${escapeHtml(bonusText)}</b></span>
         </span>
         <button class="hp-btn attack-roll-btn" title="Roll Spell Check">🎲</button>
       </div>
@@ -9150,12 +9233,13 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     await applyTrackerLineFieldUpdate(itemId, attackId, effectiveSlotKey, "backstabActive", false);
   }
 
-  // This specific line has now been rolled this round - hide it from the
-  // Tracker's expanded attack list (see USED_ACTION_SLOTS_KEY/
-  // deriveTrackerLines) until the round advances or the tracker resets.
-  // Marked regardless of hit/miss/fumble - the character spent the action
-  // either way.
-  await markActionSlotsUsed(itemId, [actionSlotKey(attackId, effectiveSlotKey)]);
+  // This attack's Action Die has now been spent this round - hide this
+  // line, AND every other line (another weapon, or a "Cast a Spell" row)
+  // sharing that same die, from the Tracker's expanded attack list (see
+  // USED_ACTION_SLOTS_KEY/deriveTrackerLines/actionSlotKey) until the
+  // round advances or the tracker resets. Marked regardless of hit/miss/
+  // fumble - the character spent the action either way.
+  await markActionSlotsUsed(itemId, [actionSlotKey(stats.mode, attackId, effectiveSlotKey)]);
 
   // Firing a shot spends one piece of ammo whether it hits, misses, or
   // fumbles - the ammo check above already refused to even roll at 0, so
@@ -9433,10 +9517,14 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
   }
 
   // This whole pair-at-this-Action-Die has now been used this round - both
-  // hands' lines disappear from the Tracker together, since they're one
-  // action (see USED_ACTION_SLOTS_KEY/deriveTrackerLines). Marked even on
-  // a Halfling double-fumble - the action was still spent.
-  await markActionSlotsUsed(itemId, [actionSlotKey(primaryAttackId, slotKey), actionSlotKey(offhandAttackId, slotKey)]);
+  // hands' lines (and any weapon/spell line sharing this same Action Die)
+  // disappear from the Tracker together, since they're one action (see
+  // USED_ACTION_SLOTS_KEY/deriveTrackerLines/actionSlotKey). Marked even
+  // on a Halfling double-fumble - the action was still spent. Two-weapon
+  // fighting is PC-only, so primaryAttackId and offhandAttackId already
+  // collapse to the identical key under actionSlotKey's mode-aware PC
+  // branch - one entry is enough.
+  await markActionSlotsUsed(itemId, [actionSlotKey(stats.mode, primaryAttackId, slotKey)]);
 
   const rollDuration = (anyCrit || anyFumble) ? 9000 : 6500;
   showTrackerStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
@@ -9465,7 +9553,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
 // rather than whatever's open on the Sheet tab. Honors the GM's "force
 // next attack's d20" testing field (Dice tab) exactly like an ordinary
 // attack roll would, since a Spell Check is still just a d20 roll.
-async function rollSpellAttackForTracker(itemId, attackId) {
+async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   const [item] = await OBR.scene.items.getItems([itemId]);
   if (!item) return;
   const stats = getStatsForItem(item);
@@ -9484,12 +9572,12 @@ async function rollSpellAttackForTracker(itemId, attackId) {
   const total = rolled + check.modifier;
   const text = `${label} - Spell Check: d20 (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(check.modifier)} = ${markRollTotal(total)}`;
 
-  // Same "this line is spent for the round" tracking as any other Tracker
-  // attack line (see USED_ACTION_SLOTS_KEY/deriveTrackerLines) - keyed by
-  // this spell's own attackId, so casting one known spell only hides THAT
-  // spell's line until the round advances; a caster with several "Cast a
-  // Spell" rows can still cast a different one this round.
-  await markActionSlotsUsed(itemId, [actionSlotKey(attackId, "spell")]);
+  // This casting spends the same one Action Die a weapon attack at this
+  // slot would (see actionSlotKey) - marking it used here hides not just
+  // this "Cast a Spell" line, but every OTHER line (another known spell,
+  // or a weapon attack) sharing this same Action Die too, for the rest of
+  // the round.
+  await markActionSlotsUsed(itemId, [actionSlotKey(stats.mode, attackId, slotKey)]);
 
   showTrackerStatus(`${item.name || "Token"} — ${text}`, false, 6500);
   showStatus(`${item.name || "Token"} — ${text}`, false, 6500);
@@ -9521,7 +9609,7 @@ async function rollAttackForTrackerRow(itemId, attackId, slotKey) {
   // attack roll - so it routes to its own roll function before any of
   // the two-weapon-pairing logic here even looks at it.
   if (atk && atk.weapon === SPELL_ATTACK_KEY) {
-    rollSpellAttackForTracker(itemId, attackId);
+    rollSpellAttackForTracker(itemId, attackId, slotKey);
     return;
   }
   // A Primary/Off-hand weapon row's OWN "tw" line (see deriveTrackerLines)
@@ -9555,6 +9643,19 @@ function attachTrackerRowListeners() {
       const attackId = row.dataset.attackId;
       const slotKey = row.dataset.slotKey || null;
       row.querySelector(".attack-roll-btn").addEventListener("click", () => rollAttackForTrackerRow(parentId, attackId, slotKey));
+
+      // Picking a spell here persists it straight to the attack's `name`
+      // field (applyTrackerSpellSelection) - same field the Sheet's own
+      // .spell-attack-select listener writes, so the two stay in sync.
+      // Same un-debounced "commits atomically on user choice" contract as
+      // .attack-deed-type just below - unlike a typed text field, a
+      // <select> doesn't need scheduleTrackerLineUpdate's 300ms coalescing.
+      const spellSelect = wrap.querySelector(".tracker-spell-select");
+      if (spellSelect) {
+        spellSelect.addEventListener("change", () => {
+          applyTrackerSpellSelection(parentId, attackId, spellSelect.value);
+        });
+      }
 
       // Backstab and Mighty Deed are one declaration per LINE (attack +
       // Action Die slot), not per weapon - see trackerLineHtml/lineDeeds -
@@ -9744,6 +9845,27 @@ async function applyAttackAmmoDelta(itemId, attackId, delta) {
         const base = Number.isFinite(cur) ? cur : 0;
         return { ...a, ammo: String(Math.max(0, base + delta)) };
       });
+      data.attacks = attacks;
+      item.metadata[PC_METADATA_KEY] = data;
+    });
+  });
+  await refreshTracker();
+}
+
+// Persists the Tracker's own spell picker (spellTrackerLineHtml) - same
+// shape as applyAttackAmmoDelta, but writes the attack's `name` field
+// directly (the same field the Sheet's own .spell-attack-select listener
+// writes - see attachAttackRowListeners) rather than a delta, so a spell
+// picked here shows up identically on the Sheet's own Cast-a-Spell row
+// the next time it's opened. PC-only, same no-op-for-monsters guard as
+// every other per-attack Tracker write.
+async function applyTrackerSpellSelection(itemId, attackId, name) {
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      if (mode !== "pc") return;
+      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+      const attacks = (data.attacks || []).map(a => a.id === attackId ? { ...a, name } : a);
       data.attacks = attacks;
       item.metadata[PC_METADATA_KEY] = data;
     });
