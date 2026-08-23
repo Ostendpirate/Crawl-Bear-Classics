@@ -657,10 +657,14 @@
   .mercurial-controls input[type=text] { flex: none; width: 46px; text-align: center; font-size: 11px; padding: 4px 2px; }
   .mercurial-row .mercurial-note { flex: 1; min-width: 0; font-size: 11px; padding: 4px 6px; min-height: 32px; }
   .manifestation-note { font-size: 11px; padding: 4px 6px; min-height: 32px; margin-top: 4px; }
-  .spellburn-row, .attack-detail-burn-row { display: flex; align-items: center; gap: 5px; margin-top: 4px; }
-  .spellburn-label { flex: none; font-size: 12px; }
-  .spell-attack-burn-ability, .tracker-burn-ability { flex: none; font-size: 10.5px; padding: 3px 4px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 4px; }
-  .spell-attack-burn-points, .tracker-burn-points { flex: none; width: 40px; text-align: center; font-size: 10.5px; padding: 3px 2px; }
+  .spellburn-row, .attack-detail-burn-row { margin-top: 4px; }
+  .spellburn-modal-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid rgba(69, 57, 46, 0.5); }
+  .spellburn-modal-label { flex: 1; color: var(--text); }
+  .spellburn-modal-score { flex: none; font-variant-numeric: tabular-nums; color: var(--muted); min-width: 54px; text-align: right; }
+  .spellburn-modal-minus { flex: none; width: 32px; }
+  .spellburn-modal-total-row { display: flex; align-items: center; gap: 8px; padding: 8px 0 2px; margin-top: 4px; border-top: 1px solid var(--border); font-weight: 700; }
+  .spellburn-modal-total-row .spellburn-modal-label { color: var(--text); }
+  .spellburn-modal-total { flex: none; color: var(--accent); font-size: 15px; font-variant-numeric: tabular-nums; }
   .attack-ammo-line {
     display: flex;
     align-items: center;
@@ -1793,6 +1797,39 @@
         <button type="button" class="tables-modal-close" id="tables-modal-close" title="Close">×</button>
       </div>
       <div class="tables-modal-body" id="tables-modal-body"></div>
+    </div>
+  </div>
+
+  <div id="spellburn-modal-backdrop" class="tables-modal-backdrop" style="display:none">
+    <div class="tables-modal">
+      <div class="tables-modal-header">
+        <div>
+          <div class="tables-modal-title">Spellburn</div>
+          <div class="tables-modal-subtitle">Spend ability points for a bonus to your next Spell Check (DCC RPG core rulebook). Each point spent lowers that ability score by 1 - see the New Day button near Abilities to recover it over time.</div>
+        </div>
+        <button type="button" class="tables-modal-close" id="spellburn-modal-close" title="Close">×</button>
+      </div>
+      <div class="tables-modal-body">
+        <div class="spellburn-modal-row" data-ability="str">
+          <span class="spellburn-modal-label">Strength</span>
+          <span class="spellburn-modal-score" id="spellburn-modal-score-str"></span>
+          <button type="button" class="hp-btn spellburn-modal-minus" data-ability="str" title="Spend 1 Strength point">−1</button>
+        </div>
+        <div class="spellburn-modal-row" data-ability="agi">
+          <span class="spellburn-modal-label">Agility</span>
+          <span class="spellburn-modal-score" id="spellburn-modal-score-agi"></span>
+          <button type="button" class="hp-btn spellburn-modal-minus" data-ability="agi" title="Spend 1 Agility point">−1</button>
+        </div>
+        <div class="spellburn-modal-row" data-ability="sta">
+          <span class="spellburn-modal-label">Stamina</span>
+          <span class="spellburn-modal-score" id="spellburn-modal-score-sta"></span>
+          <button type="button" class="hp-btn spellburn-modal-minus" data-ability="sta" title="Spend 1 Stamina point">−1</button>
+        </div>
+        <div class="spellburn-modal-total-row">
+          <span class="spellburn-modal-label">Points spent this cast</span>
+          <span class="spellburn-modal-total" id="spellburn-modal-total">0</span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -4579,6 +4616,16 @@ function readAttacks(mode) {
       } catch (e) {
         base.spellBySlot = {};
       }
+      // Spellburn points already committed toward this row's next Spell
+      // Check, per Action Die slot (see the Spellburn modal's own comment
+      // near openSpellburnModal) - same "declared/edited elsewhere, just
+      // carried forward here unchanged" contract as lineDeeds/spellBySlot
+      // just above, via the matching data-spellburn-pending attribute.
+      try {
+        base.spellburnPending = JSON.parse(row.dataset.spellburnPending || "{}");
+      } catch (e) {
+        base.spellburnPending = {};
+      }
     }
     return base;
   });
@@ -4883,6 +4930,18 @@ function attachAttackRowListeners(mode) {
           clearTimeout(saveTimeout);
           await saveCurrent();
           rollSpellAttackRow(row);
+        });
+      }
+      // Opens the shared Spellburn popup (openSpellburnModal) targeting
+      // THIS row, on whichever Action Die it's currently set to - read
+      // fresh here rather than trusting a stale render-time value, same
+      // "always trust the live control" contract effectiveActionDieIndex
+      // itself already follows in spellAttackRowHtml.
+      const spellBurnBtn = row.querySelector(".spell-attack-burn-btn");
+      if (spellBurnBtn) {
+        spellBurnBtn.addEventListener("click", () => {
+          const actDieEl = row.querySelector(".attack-action-die");
+          openSpellburnModal({ kind: "sheet", row, slotKey: actDieEl ? actDieEl.value : "0" });
         });
       }
       const equippedBox = row.querySelector(".attack-equipped");
@@ -5568,26 +5627,30 @@ PC_ABILITY_FIELD_IDS.forEach(id => {
 
 // Spellburn (DCC RPG core rulebook, Wizard/Elf only) - spend points from
 // one of these three abilities before a Spell Check for a +1 bonus each,
-// temporarily lowering that ability score. See spellAttackRowHtml's own
-// comment for the full mechanic and applySpellburnLive/applySpellburnForStats
-// for where it's actually applied.
+// temporarily lowering that ability score. See openSpellburnModal's own
+// comment for the full popup flow and applySpellburnLive/
+// applySpellburnPointForStats for where a spend is actually applied.
 const SPELLBURN_ABILITIES = ["str", "agi", "sta"];
 function spellburnAbilityLabel(id) {
   return { str: "Strength", agi: "Agility", sta: "Stamina" }[id] || id;
 }
 
 // Mutates the live Sheet DOM the same way the ability field's own blur
-// handler above does - used right after a Spellburn roll (rollSpellAttackRow),
-// never on its own. pc-spellburnMax (a hidden field riding the same generic
-// PC_ALL_FIELD_IDS save/load pipeline as every visible field - see readForm/
-// fillForm) snapshots each ability's true score the FIRST time it's ever
-// burned, so the New Day button below knows what to recover back up to
-// without this app needing any actual day/calendar concept.
+// handler above does - called by the Spellburn popup's "-" click
+// (spellburnModalMinusClick). pc-spellburnMax (a hidden field riding the
+// same generic PC_ALL_FIELD_IDS save/load pipeline as every visible field
+// - see readForm/fillForm) snapshots each ability's true score the FIRST
+// time it's ever burned, so the New Day button below knows what to
+// recover back up to without this app needing any actual day/calendar
+// concept. Returns whether the spend actually happened (false if the
+// ability field couldn't be parsed) - the caller must only count a point
+// as "pending" toward the next roll's bonus if this returns true, or the
+// two would drift out of sync.
 function applySpellburnLive(ability, points) {
   const el = document.getElementById(`pc-${ability}`);
-  if (!el) return;
+  if (!el) return false;
   const current = parseAbilityScore(el.value);
-  if (current === null) return;
+  if (current === null) return false;
   const maxEl = document.getElementById("pc-spellburnMax");
   let maxMap = {};
   try { maxMap = JSON.parse((maxEl && maxEl.value) || "{}"); } catch (e) { maxMap = {}; }
@@ -5598,6 +5661,7 @@ function applySpellburnLive(ability, points) {
   refreshDerivedPcFields();
   scheduleSave();
   showStatus(`Spellburn: -${points} ${spellburnAbilityLabel(ability)} (now ${newScore}).`, false, 6000);
+  return true;
 }
 
 // "New Day" recovery (DCC RPG core rulebook: a burned ability score
@@ -5627,6 +5691,93 @@ document.getElementById("pc-spellburn-newday-btn").addEventListener("click", () 
   refreshDerivedPcFields();
   scheduleSave();
   showStatus(recovered.length ? `New Day: recovered 1 point of ${recovered.join(", ")}.` : "New Day: nothing to recover.", false, 5000);
+});
+
+// The Spellburn popup (#spellburn-modal-backdrop) is one shared piece of
+// DOM reused for every Cast-a-Spell row/Tracker line - spellburnModalCtx
+// says which one it's currently open for, so a "-" click knows whose
+// ability score to lower and whose pending total to add to:
+//   { kind: "sheet", row, slotKey }               - a Sheet Attacks row
+//   { kind: "tracker", itemId, attackId, slotKey } - one Tracker spell line
+// slotKey is the Action Die this declaration is FOR (the row/line's own
+// current pick at the moment the popup was opened) - the same key
+// spellBySlot/deriveTrackerLines already key expanded lines by, so a
+// multi-Action-Die caster can carry independent pending Spellburn per die.
+let spellburnModalCtx = null;
+
+function openSpellburnModal(ctx) {
+  spellburnModalCtx = ctx;
+  document.getElementById("spellburn-modal-backdrop").style.display = "flex";
+  refreshSpellburnModal();
+}
+
+function closeSpellburnModal() {
+  document.getElementById("spellburn-modal-backdrop").style.display = "none";
+  spellburnModalCtx = null;
+}
+
+// Repaints the popup's three ability scores and its "points spent" total
+// from whichever row/line spellburnModalCtx currently points at - called
+// on open and after every "-" click (spellburnModalMinusClick), since a
+// Tracker click writes to OBR metadata asynchronously rather than a DOM
+// element this function could just read back synchronously.
+async function refreshSpellburnModal() {
+  const ctx = spellburnModalCtx;
+  if (!ctx) return;
+  const scores = {};
+  let pendingPoints = 0;
+  if (ctx.kind === "sheet") {
+    SPELLBURN_ABILITIES.forEach(ability => {
+      const el = document.getElementById(`pc-${ability}`);
+      scores[ability] = parseAbilityScore(el ? el.value : "");
+    });
+    let pending = {};
+    try { pending = JSON.parse(ctx.row.dataset.spellburnPending || "{}"); } catch (e) { pending = {}; }
+    pendingPoints = pending[ctx.slotKey] || 0;
+  } else {
+    const [item] = await OBR.scene.items.getItems([ctx.itemId]);
+    if (!item || spellburnModalCtx !== ctx) return; // popup closed/retargeted while this was in flight
+    const stats = getStatsForItem(item);
+    SPELLBURN_ABILITIES.forEach(ability => { scores[ability] = parseAbilityScore(stats.data[ability]); });
+    const atk = stats.attacks.find(a => a.id === ctx.attackId);
+    pendingPoints = (atk && atk.spellburnPending && atk.spellburnPending[ctx.slotKey]) || 0;
+  }
+  SPELLBURN_ABILITIES.forEach(ability => {
+    const score = scores[ability];
+    document.getElementById(`spellburn-modal-score-${ability}`).textContent =
+      score === null || score === undefined ? "—" : `${score} (${formatSignedNumber(dccAbilityModifier(score))})`;
+  });
+  document.getElementById("spellburn-modal-total").textContent = String(pendingPoints);
+}
+
+// One "-" click = spend exactly 1 point from that ability: lowers the
+// score immediately (same live-effect contract as the rest of this app's
+// -/+ buttons, e.g. HP), and adds 1 to this declaration's running total,
+// which rollSpellAttackRow/rollSpellAttackForTracker apply as a flat bonus
+// to the next Spell Check on this same Action Die and then clear.
+async function spellburnModalMinusClick(ability) {
+  const ctx = spellburnModalCtx;
+  if (!ctx) return;
+  if (ctx.kind === "sheet") {
+    if (!applySpellburnLive(ability, 1)) return;
+    let pending = {};
+    try { pending = JSON.parse(ctx.row.dataset.spellburnPending || "{}"); } catch (e) { pending = {}; }
+    pending[ctx.slotKey] = (pending[ctx.slotKey] || 0) + 1;
+    ctx.row.dataset.spellburnPending = JSON.stringify(pending);
+    refreshSpellAttackRows();
+    scheduleSave();
+  } else {
+    await applySpellburnPointForStats(ctx.itemId, ctx.attackId, ctx.slotKey, ability);
+  }
+  await refreshSpellburnModal();
+}
+
+document.getElementById("spellburn-modal-close").addEventListener("click", closeSpellburnModal);
+document.getElementById("spellburn-modal-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "spellburn-modal-backdrop") closeSpellburnModal();
+});
+document.querySelectorAll(".spellburn-modal-minus").forEach(btn => {
+  btn.addEventListener("click", () => spellburnModalMinusClick(btn.dataset.ability));
 });
 
 // Maps each derived field to the ability field that feeds it, and (for
@@ -6852,7 +7003,14 @@ function spellAttackRowHtml(atk) {
   const actDieSelectHtml = actDieOptions.length ? `<select class="attack-action-die" title="Which of this character's Action Dice this spell cast uses (Table 1-5/1-7/1-10/1-12/1-14/1-16/1-18) - shares the same one-action-per-die pool as this character's weapon attacks (see the Combat Tracker).">${actDieOptions.map(o =>
     `<option value="${o.value}"${o.value === effectiveActionDieIndex ? " selected" : ""}>${escapeHtml(o.label)}</option>`
   ).join("")}</select>` : "";
-  const check = pcSpellCheckModifierBreakdown({ ...atk, actionDieIndex: effectiveActionDieIndex });
+  // Spellburn points already committed toward this row's next Spell Check
+  // on THIS Action Die (see the Spellburn modal's own comment near
+  // openSpellburnModal) - folded into the bonus preview here exactly like
+  // Mercurial Magic's own bonus is, so a page reload mid-declaration still
+  // shows the correct boosted total rather than resetting to 0.
+  const spellburnPending = atk.spellburnPending || {};
+  const pendingPoints = spellburnPending[effectiveActionDieIndex] || 0;
+  const check = pcSpellCheckModifierBreakdown({ ...atk, actionDieIndex: effectiveActionDieIndex }, pendingPoints);
   const bonusText = check ? formatSignedNumber(check.modifier) : "";
   const bonusTitle = check ? check.breakdown : "Only Cleric/Wizard/Elf have a Spell Check - pick a caster Class above.";
   // Same die badge weapon rows show (attackRowHtml's weapon-badge-die) -
@@ -6860,27 +7018,22 @@ function spellAttackRowHtml(atk) {
   // pcSpellCheckModifierBreakdown), so there's nothing left to compute.
   const dieBadgeHtml = check ? `<div class="attack-row-badges"><span class="weapon-badge weapon-badge-die" title="Spell Check die this row rolls">d${check.sides}</span></div>` : "";
   const spellBySlotAttr = escapeHtml(JSON.stringify(atk.spellBySlot || {}));
+  const spellburnPendingAttr = escapeHtml(JSON.stringify(spellburnPending));
   // Spellburn (DCC RPG core rulebook) - Wizard/Elf only (check.abilityId
   // === "int"; Clerics pray to their deity, no spellburn in DCC RAW), and
   // only once a spell's actually picked, same gating Mercurial Magic's own
-  // button uses. Declared right here and consumed by rollSpellAttackRow -
-  // it's a one-shot "before rolling" declaration, not persisted state, so
-  // these two controls carry no data-* attribute of their own and just
-  // reset after each roll.
+  // button uses. Opens the shared Spellburn popup (openSpellburnModal) -
+  // each "-" click there immediately lowers that ability (applySpellburnLive)
+  // and adds 1 to this row's own pending total (data-spellburn-pending,
+  // keyed by Action Die slot exactly like data-spell-by-slot), which
+  // rollSpellAttackRow then applies as this roll's bonus and clears.
   const spellburnHtml = (check && check.abilityId === "int" && atk.name && atk.name.trim())
     ? `<div class="spellburn-row">
-        <span class="spellburn-label" title="Spellburn (DCC RPG core rulebook) - before rolling, spend points from Str, Agi, or Sta for a +1 bonus per point to this Spell Check. The ability score is reduced by the amount spent (see the New Day button near Abilities to recover it over time). Spending 20 points in one go automatically treats the roll as a natural 20.">🩸</span>
-        <select class="spell-attack-burn-ability" title="Which ability to spend for Spellburn">
-          <option value="">No Spellburn</option>
-          <option value="str">Str</option>
-          <option value="agi">Agi</option>
-          <option value="sta">Sta</option>
-        </select>
-        <input type="number" class="spell-attack-burn-points" min="0" step="1" placeholder="0" title="Points to spend" />
+        <button type="button" class="hp-btn spell-attack-burn-btn" title="Spellburn (DCC RPG core rulebook) - spend Str/Agi/Sta points for a +1 bonus per point to this Spell Check. See the New Day button near Abilities to recover spent points over time. Spending 20 points in one go automatically treats the roll as a natural 20.">🩸 Spellburn${pendingPoints > 0 ? ` (${pendingPoints})` : ""}</button>
       </div>`
     : "";
   return `
-    <div class="attack-row pc-attack-row spell-attack-row" data-id="${atk.id}" data-line-deeds="{}" data-spell-by-slot="${spellBySlotAttr}">
+    <div class="attack-row pc-attack-row spell-attack-row" data-id="${atk.id}" data-line-deeds="{}" data-spell-by-slot="${spellBySlotAttr}" data-spellburn-pending="${spellburnPendingAttr}">
       <div class="attack-weapon-line">
         <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
         ${actDieSelectHtml}
@@ -6900,7 +7053,7 @@ function spellAttackRowHtml(atk) {
 }
 
 function emptySpellAttack() {
-  return { ...emptyAttack(), weapon: SPELL_ATTACK_KEY, spellBySlot: {} };
+  return { ...emptyAttack(), weapon: SPELL_ATTACK_KEY, spellBySlot: {}, spellburnPending: {} };
 }
 
 // Casters get exactly one "Cast a Spell" Attacks row, added automatically
@@ -6951,9 +7104,15 @@ function refreshSpellAttackRows() {
     if (!bonusInput) return;
     const actDieEl = row.querySelector(".attack-action-die");
     const nameEl2 = row.querySelector(".attack-name");
-    const check = pcSpellCheckModifierBreakdown({ actionDieIndex: actDieEl ? actDieEl.value : "", name: nameEl2 ? nameEl2.value : "" });
+    const slotKeyForBurn = actDieEl ? actDieEl.value : "0";
+    let pending = {};
+    try { pending = JSON.parse(row.dataset.spellburnPending || "{}"); } catch (e) { pending = {}; }
+    const pendingPoints = pending[slotKeyForBurn] || 0;
+    const check = pcSpellCheckModifierBreakdown({ actionDieIndex: actDieEl ? actDieEl.value : "", name: nameEl2 ? nameEl2.value : "" }, pendingPoints);
     bonusInput.value = check ? formatSignedNumber(check.modifier) : "";
     bonusInput.title = check ? check.breakdown : "Only Cleric/Wizard/Elf have a Spell Check - pick a caster Class above.";
+    const burnBtn = row.querySelector(".spell-attack-burn-btn");
+    if (burnBtn) burnBtn.textContent = `🩸 Spellburn${pendingPoints > 0 ? ` (${pendingPoints})` : ""}`;
     // Die badge (see spellAttackRowHtml) can go stale between full row
     // rebuilds on its own - a class/level change can shift an EXTRA
     // Action Die's size (Table 1-12's 2nd attack: d14 at level 5, d16 at
@@ -7015,10 +7174,15 @@ function spellCheckNaturalResultText(rolled, sides, level) {
 function rollSpellAttackRow(row) {
   const selectEl = row.querySelector(".spell-attack-select");
   const actDieEl = row.querySelector(".attack-action-die");
-  const burnAbilityEl = row.querySelector(".spell-attack-burn-ability");
-  const burnPointsEl = row.querySelector(".spell-attack-burn-points");
-  const burnAbility = burnAbilityEl ? burnAbilityEl.value : "";
-  const burnPoints = burnAbility ? (parseInt(burnPointsEl.value, 10) || 0) : 0;
+  const slotKeyForBurn = actDieEl ? actDieEl.value : "0";
+  // Spellburn points already committed toward THIS Action Die's next roll
+  // (see openSpellburnModal/spellburnModalMinusClick) - the ability score
+  // itself was already reduced live, point by point, when each "-" was
+  // clicked, so all that's left here is applying the accumulated total as
+  // this roll's bonus and clearing it afterward.
+  let pending = {};
+  try { pending = JSON.parse(row.dataset.spellburnPending || "{}"); } catch (e) { pending = {}; }
+  const burnPoints = pending[slotKeyForBurn] || 0;
   const check = pcSpellCheckModifierBreakdown({ actionDieIndex: actDieEl ? actDieEl.value : "", name: selectEl ? selectEl.value : "" }, burnPoints);
   if (!check) {
     showStatus("Only Cleric/Wizard/Elf roll a Spell Check.", true, 4000);
@@ -7039,9 +7203,12 @@ function rollSpellAttackRow(row) {
   showStatus(text, false, note ? 8000 : 4000);
   appendChatLog({ kind: "spell", tokenName: rollerName, text, gmOnly: false });
   broadcastDiceRoll({ rollerName, dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier + critBonus, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
-  if (burnAbility && burnPoints > 0) applySpellburnLive(burnAbility, burnPoints);
-  if (burnAbilityEl) burnAbilityEl.value = "";
-  if (burnPointsEl) burnPointsEl.value = "";
+  if (burnPoints > 0) {
+    delete pending[slotKeyForBurn];
+    row.dataset.spellburnPending = JSON.stringify(pending);
+    refreshSpellAttackRows();
+    scheduleSave();
+  }
 }
 
 // AC is fully deterministic in DCC (10 + Agi mod + equipped Armor +
@@ -9472,7 +9639,13 @@ function trackerLineHtml(item, stats, line) {
 // to a Spell Check.
 function spellTrackerLineHtml(item, stats, line) {
   const atk = line.atk;
-  const check = pcSpellCheckModifierBreakdownForStats(stats, { ...atk, actionDieIndex: line.slotKey });
+  // Spellburn points already committed toward THIS line's next roll (see
+  // openSpellburnModal's own comment) - folded into the bonus preview
+  // exactly like the Sheet's own row does, so it stays correct across a
+  // repaint mid-declaration (every "-" click writes to metadata and rides
+  // the normal onChange repaint, same as any other Tracker write here).
+  const pendingPoints = (atk.spellburnPending && atk.spellburnPending[line.slotKey]) || 0;
+  const check = pcSpellCheckModifierBreakdownForStats(stats, { ...atk, actionDieIndex: line.slotKey }, pendingPoints);
   const bonusText = check ? formatSignedNumber(check.modifier) : "+0";
   const bonusTooltip = check ? check.breakdown : "Only Cleric/Wizard/Elf have a Spell Check.";
   // Reminder badge (same 🧠 icon as the Spells section's own checkbox -
@@ -9482,16 +9655,13 @@ function spellTrackerLineHtml(item, stats, line) {
   const badges = [];
   if (line.dieSides) badges.push(`<span class="weapon-badge weapon-badge-die" title="Spell Check die this line rolls">d${line.dieSides}</span>`);
   if (isConcentrationSpellStats(stats, atk.name)) badges.push(`<span class="weapon-badge weapon-badge-concentration" title="Requires Concentration (DCC RPG core rulebook) - while concentrating, this caster can take no action beyond walking at half speed; combat damage, a fall, or another significant interruption forces a Will save (DC 11) or the caster loses concentration.">🧠 Concentration</span>`);
-  // Spellburn (DCC RPG core rulebook) - Wizard/Elf only, same gate/
-  // one-shot-declaration contract as the Sheet's own spellburn-row (see
-  // spellAttackRowHtml) - read fresh at roll time by attachTrackerRowListeners,
-  // applied by rollSpellAttackForTracker/applySpellburnForStats, not
-  // persisted here.
+  // Spellburn (DCC RPG core rulebook) - Wizard/Elf only, same gate as the
+  // Sheet's own spellburn-row (spellAttackRowHtml) - opens the shared
+  // popup (attachTrackerRowListeners wires the click, since parentId/
+  // attackId/line.slotKey are already in scope there).
   const burnHtml = (check && check.abilityId === "int")
     ? `<div class="attack-detail-burn-row">
-        <span class="spellburn-label" title="Spellburn - spend Str/Agi/Sta points for +1 each to this roll; 20 in one go auto-succeeds as a natural 20. See the Sheet's New Day button to recover spent points.">🩸</span>
-        <select class="tracker-burn-ability" title="Which ability to spend for Spellburn"><option value="">No Spellburn</option><option value="str">Str</option><option value="agi">Agi</option><option value="sta">Sta</option></select>
-        <input type="number" class="tracker-burn-points" min="0" step="1" placeholder="0" title="Points to spend" />
+        <button class="hp-btn tracker-burn-btn" title="Spellburn (DCC RPG core rulebook) - spend Str/Agi/Sta points for a +1 bonus per point to this roll; 20 in one go auto-succeeds as a natural 20. See the Sheet's New Day button to recover spent points over time.">🩸 Spellburn${pendingPoints > 0 ? ` (${pendingPoints})` : ""}</button>
       </div>`
     : "";
   return `
@@ -10267,7 +10437,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
 // attack roll would - clamped to this line's own die size (check.sides,
 // per actionDieProfileForAttack), same as rollAttackFor's own clamp,
 // since a Spell Check on an extra Action Die isn't always a d20.
-async function rollSpellAttackForTracker(itemId, attackId, slotKey, burnAbility = "", burnPoints = 0) {
+async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   const [item] = await OBR.scene.items.getItems([itemId]);
   if (!item) return;
   const stats = getStatsForItem(item);
@@ -10278,6 +10448,12 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey, burnAbility 
   // Action-Die lines - falls back to the row's own default pick otherwise,
   // same resolution deriveTrackerLines already applies for display.
   const effectiveName = (atk.spellBySlot && atk.spellBySlot[slotKey]) || atk.name;
+  // Spellburn points already committed toward THIS Action Die via the
+  // popup (openSpellburnModal/applySpellburnPointForStats) - the ability
+  // score itself was already reduced live, point by point, when each "-"
+  // was clicked, so all that's left here is applying the accumulated
+  // total as this roll's bonus and clearing it afterward.
+  const burnPoints = (atk.spellburnPending && atk.spellburnPending[slotKey]) || 0;
   const check = pcSpellCheckModifierBreakdownForStats(stats, { ...atk, name: effectiveName, actionDieIndex: slotKey }, burnPoints);
   if (!check) {
     const msg = `${item.name || "Token"}: Only Cleric/Wizard/Elf roll a Spell Check.`;
@@ -10309,7 +10485,7 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey, burnAbility 
   // or a weapon attack) sharing this same Action Die too, for the rest of
   // the round.
   await markActionSlotsUsed(itemId, [actionSlotKey(stats.mode, attackId, slotKey)]);
-  if (burnAbility && burnPoints > 0) await applySpellburnForStats(itemId, burnAbility, burnPoints);
+  if (burnPoints > 0) await clearSpellburnPendingForStats(itemId, attackId, slotKey);
 
   const rollDuration = note ? 9000 : 6500;
   showTrackerStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
@@ -10318,12 +10494,16 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey, burnAbility 
   broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier + critBonus, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
 }
 
-// Tracker-side sibling of applySpellburnLive - same score-reduction +
-// true-max-snapshot logic, but written straight into item.metadata (like
-// applyTrackerSpellSelection) since the Tracker can be rolling for any
-// token, not just whatever's open on the Sheet tab. PC-only, same no-op-
-// for-monsters guard as every other per-attack Tracker write.
-async function applySpellburnForStats(itemId, ability, points) {
+// Tracker-side sibling of applySpellburnLive's single-point spend - same
+// score-reduction + true-max-snapshot logic, but written straight into
+// item.metadata (like applyTrackerSpellSelection) since the Tracker can be
+// rolling for any token, not just whatever's open on the Sheet tab. Also
+// adds 1 to this line's own pending total (attacks[].spellburnPending,
+// keyed by Action Die slot exactly like spellBySlot) in the SAME write, so
+// a "-" click is one atomic metadata update rather than two separate ones
+// that could race. PC-only, same no-op-for-monsters guard as every other
+// per-attack Tracker write.
+async function applySpellburnPointForStats(itemId, attackId, slotKey, ability) {
   await OBR.scene.items.updateItems([itemId], items => {
     items.forEach(item => {
       const mode = item.metadata[MODE_METADATA_KEY] || "monster";
@@ -10335,8 +10515,34 @@ async function applySpellburnForStats(itemId, ability, points) {
       try { maxMap = JSON.parse(data.spellburnMax || "{}"); } catch (e) { maxMap = {}; }
       if (maxMap[ability] === undefined) maxMap[ability] = current;
       data.spellburnMax = JSON.stringify(maxMap);
-      const newScore = current - points;
-      data[ability] = `${newScore} (${formatSignedNumber(dccAbilityModifier(newScore))})`;
+      data[ability] = `${current - 1} (${formatSignedNumber(dccAbilityModifier(current - 1))})`;
+      data.attacks = (data.attacks || []).map(a => {
+        if (a.id !== attackId) return a;
+        const pending = { ...(a.spellburnPending || {}) };
+        pending[slotKey] = (pending[slotKey] || 0) + 1;
+        return { ...a, spellburnPending: pending };
+      });
+      item.metadata[PC_METADATA_KEY] = data;
+    });
+  });
+}
+
+// Clears a line's pending Spellburn total once rollSpellAttackForTracker
+// has applied it to a roll - mirrors the Sheet's own post-roll cleanup in
+// rollSpellAttackRow, just written through metadata instead of a DOM
+// data-* attribute.
+async function clearSpellburnPendingForStats(itemId, attackId, slotKey) {
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      if (mode !== "pc") return;
+      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+      data.attacks = (data.attacks || []).map(a => {
+        if (a.id !== attackId || !a.spellburnPending || !(slotKey in a.spellburnPending)) return a;
+        const pending = { ...a.spellburnPending };
+        delete pending[slotKey];
+        return { ...a, spellburnPending: pending };
+      });
       item.metadata[PC_METADATA_KEY] = data;
     });
   });
@@ -10438,24 +10644,18 @@ function attachTrackerRowListeners() {
       const row = wrap.querySelector(".attack-detail-row");
       const attackId = row.dataset.attackId;
       const slotKey = row.dataset.slotKey || null;
-      // Spellburn only exists for spell lines (see spellTrackerLineHtml's
-      // .tracker-burn-ability, only rendered for Wizard/Elf casters) - a
-      // spell line's roll button reads its own burn controls fresh at
-      // click time and calls rollSpellAttackForTracker directly instead of
-      // the generic dispatcher, since only that function knows what to do
-      // with a spellburn declaration. Every other line (weapon, two-
-      // weapon, or a spell line with no caster ability to burn from) falls
-      // through to the unchanged generic path.
-      const burnAbilityEl = wrap.querySelector(".tracker-burn-ability");
-      const burnPointsEl = wrap.querySelector(".tracker-burn-points");
-      if (burnAbilityEl) {
-        row.querySelector(".attack-roll-btn").addEventListener("click", () => {
-          const burnAbility = burnAbilityEl.value;
-          const burnPoints = burnAbility ? (parseInt(burnPointsEl.value, 10) || 0) : 0;
-          rollSpellAttackForTracker(parentId, attackId, slotKey, burnAbility, burnPoints);
+      row.querySelector(".attack-roll-btn").addEventListener("click", () => rollAttackForTrackerRow(parentId, attackId, slotKey));
+
+      // Opens the shared Spellburn popup (openSpellburnModal) targeting
+      // this specific line - only rendered for a Wizard/Elf spell line
+      // (see spellTrackerLineHtml). rollSpellAttackForTracker reads
+      // whatever ends up pending for this attackId+slotKey directly off
+      // the token's own saved data, so nothing needs to be read here.
+      const burnBtn = wrap.querySelector(".tracker-burn-btn");
+      if (burnBtn) {
+        burnBtn.addEventListener("click", () => {
+          openSpellburnModal({ kind: "tracker", itemId: parentId, attackId, slotKey });
         });
-      } else {
-        row.querySelector(".attack-roll-btn").addEventListener("click", () => rollAttackForTrackerRow(parentId, attackId, slotKey));
       }
 
       // Picking a spell here persists it via applyTrackerSpellSelection,
