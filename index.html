@@ -91,6 +91,13 @@
     cursor: pointer;
     font-size: 14px;
     line-height: 1;
+    /* An instant background swap on :hover, combined with an emoji glyph
+       (🎲, 🔄, etc) inside the button, makes some browsers re-rasterize
+       the glyph on every repaint and visibly flicker while the cursor
+       sits still over the button - annoying on its own, and the repeated
+       repaints can also eat a click. Animating the color change instead
+       of snapping it avoids that repaint churn. */
+    transition: background-color 0.12s ease;
   }
   .hp-btn:hover { background: var(--accent); }
   .hp-sep { color: var(--muted); }
@@ -6096,19 +6103,16 @@ function pcCasterAbilityId(cls) {
 }
 
 // Shared "what's the number, and how is it built" for a Spell Check -
-// used by both the standalone roll in the Spells section (rollPcSpell)
-// and a "Cast a Spell" Attacks row (spellAttackRowHtml/
-// rollSpellAttackRow), so the two can never quietly drift apart. Returns
-// null for a non-caster Class, same "nothing to compute" signal
-// recalcPcSpellSection's own visibility check already uses. `atk` is
-// optional and only matters for an Attacks-list "Cast a Spell" row - a
-// Spell Check uses this character's own class/level Action Dice table
-// exactly like a weapon attack does (Table 1-5/1-12/1-16), so casting on
-// an extra Action Die (2nd attack, etc) rolls that die's smaller size, not
-// always a d20 (see actionDieProfileForAttackLive). Omitting `atk`
-// (rollPcSpell's standalone Spells-section roll, which has no Action Die
-// concept of its own) resolves to this character's first/main die - a
-// plain d20 for every class at every level.
+// used everywhere a "Cast a Spell" Attacks row computes or rolls its
+// check (spellAttackRowHtml/refreshSpellAttackRows/rollSpellAttackRow), so
+// none of them can quietly drift apart. Returns null for a non-caster
+// Class, same "nothing to compute" signal recalcPcSpellSection's own
+// visibility check already uses. `atk` carries the row's declared Action
+// Die (`actionDieIndex`) - a Spell Check uses this character's own
+// class/level Action Dice table exactly like a weapon attack does (Table
+// 1-5/1-12/1-16), so casting on an extra Action Die (2nd attack, etc)
+// rolls that die's smaller size, not always a d20 (see
+// actionDieProfileForAttackLive).
 function pcSpellCheckModifierBreakdown(atk) {
   const classEl = document.getElementById("pc-class");
   const cls = classEl ? classEl.value : "";
@@ -6120,7 +6124,7 @@ function pcSpellCheckModifierBreakdown(atk) {
   const hinderedByArmor = classSpellcastingHinderedByArmor(cls);
   const penalty = hinderedByArmor ? computePcCheckPenaltyTotal() : 0;
   const modifier = level + abilityMod + penalty;
-  const sides = actionDieProfileForAttackLive(atk || {}).sides;
+  const sides = actionDieProfileForAttackLive(atk).sides;
   const abilityLabel = abilityId === "per" ? "Personality" : "Intelligence";
   const parts = [`Level ${formatSignedNumber(level)}`, `${abilityLabel} ${formatSignedNumber(abilityMod)}`];
   if (hinderedByArmor && penalty) parts.push(`Armor Check Penalty ${formatSignedNumber(penalty)}`);
@@ -6158,6 +6162,11 @@ function emptySpellItem() {
   return { id: "g" + Math.random().toString(36).slice(2, 9), name: "" };
 }
 
+// This roster is a known-spells list, not an action - rolling a Spell
+// Check happens from a "Cast a Spell" Attacks row instead (spellAttackRowHtml/
+// rollSpellAttackRow), which is also where the Action Die that determines
+// the actual check die/bonus lives; a roll button here would have had
+// nothing to key that off of.
 function spellRowHtml(item) {
   const classEl = document.getElementById("pc-class");
   const cls = classEl ? classEl.value : "";
@@ -6168,7 +6177,6 @@ function spellRowHtml(item) {
     return `
       <div class="attack-row" data-id="${item.id}">
         <input type="text" class="attack-name spell-row-name" placeholder="Spell name" value="${escapeHtml(item.name || "")}" />
-        <button type="button" class="hp-btn attack-roll-btn spell-row-roll-btn" title="Roll Spell Check">🎲</button>
         <button type="button" class="attack-remove-btn spell-row-remove-btn" title="Remove">×</button>
       </div>`;
   }
@@ -6180,7 +6188,6 @@ function spellRowHtml(item) {
       <select class="attack-name spell-row-select"${isCustom ? ' style="display:none"' : ""}>${dccWizardSpellOptionsHtml(selectValue)}</select>
       <input type="text" class="attack-name spell-row-custom-name" placeholder="Custom/patron spell name"${isCustom ? "" : ' style="display:none"'} value="${escapeHtml(isCustom ? item.name : "")}" />
       <button type="button" class="hp-btn spell-row-custom-back"${isCustom ? "" : ' style="display:none"'} title="Back to spell list">↩</button>
-      <button type="button" class="hp-btn attack-roll-btn spell-row-roll-btn" title="Roll Spell Check">🎲</button>
       <button type="button" class="attack-remove-btn spell-row-remove-btn" title="Remove">×</button>
     </div>`;
 }
@@ -6264,7 +6271,6 @@ function attachSpellRowListeners() {
         scheduleSave();
       });
     }
-    row.querySelector(".spell-row-roll-btn").addEventListener("click", () => rollPcSpell(row.dataset.id));
     row.querySelector(".spell-row-remove-btn").addEventListener("click", () => {
       row.remove();
       scheduleSave();
@@ -6304,43 +6310,6 @@ function recalcPcSpellSection() {
       : " Not hindered by armor (Cleric).";
     noteEl.textContent = `Spell Check: d20 + Level + ${abilityLabel} modifier.${armorNote}`;
   }
-}
-
-// Rolls a Spell Check for one row: 1d20 + this character's Level + the
-// casting ability's modifier (Personality for Cleric, Intelligence for
-// Wizard/Elf) + equipped armor's Check Penalty (Wizard/Elf only - see
-// classSpellcastingHinderedByArmor). A blank/0-level character still
-// rolls (just with a +0 Level term) rather than being blocked outright -
-// this app doesn't otherwise gate rolling on "should this character be
-// able to do this yet."
-function rollPcSpell(id) {
-  const row = document.querySelector(`#pc-spells-list .attack-row[data-id="${id}"]`);
-  if (!row) return;
-  // Same "read whichever field this row actually has" logic as
-  // readSpellItems - a plain text field for Cleric, or the Table 5-8
-  // dropdown/custom-name pair for Wizard/Elf.
-  const selectEl = row.querySelector(".spell-row-select");
-  let nameValue;
-  if (selectEl) {
-    const customEl = row.querySelector(".spell-row-custom-name");
-    nameValue = selectEl.value === SPELL_CUSTOM_KEY ? (customEl ? customEl.value : "") : selectEl.value;
-  } else {
-    const textEl = row.querySelector(".spell-row-name");
-    nameValue = textEl ? textEl.value : "";
-  }
-  const check = pcSpellCheckModifierBreakdown();
-  if (!check) {
-    showStatus("Only Cleric/Wizard/Elf roll a Spell Check.", true, 4000);
-    return;
-  }
-  const rolled = Math.floor(Math.random() * 20) + 1;
-  const total = rolled + check.modifier;
-  const label = nameValue.trim() || "Spell";
-  const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
-  const text = `${label} - Spell Check: d20 (${rolled}) ${formatSignedNumber(check.modifier)} = ${markRollTotal(total)}`;
-  showStatus(text, false, 4000);
-  appendChatLog({ kind: "spell", tokenName: rollerName, text, gmOnly: false });
-  broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: check.modifier, notation: "d20", total, label: `${label} — Spell Check` });
 }
 
 // ---- "Cast a Spell" Attacks row ----
@@ -6487,12 +6456,13 @@ function refreshSpellAttackRows() {
   });
 }
 
-// Rolls the Spell Check for one "Cast a Spell" Attacks row - same
-// modifier math as the standalone rollPcSpell (shared via
-// pcSpellCheckModifierBreakdown), just reading its label from this row's
-// spell dropdown, and its Action Die (and therefore die size - see
-// pcSpellCheckModifierBreakdown) from this row's own .attack-action-die,
-// instead of the Spells section's own name field/always-d20 roll.
+// Rolls the Spell Check for one "Cast a Spell" Attacks row (shared math
+// via pcSpellCheckModifierBreakdown) - the only place a Spell Check is
+// actually rolled from the Sheet; the Spells section below is just the
+// known-spells roster these rows pick from (see pcKnownSpellNames), with
+// no roll of its own. Reads its label from this row's spell dropdown, and
+// its Action Die (and therefore die size - see pcSpellCheckModifierBreakdown)
+// from this row's own .attack-action-die.
 function rollSpellAttackRow(row) {
   const selectEl = row.querySelector(".spell-attack-select");
   const actDieEl = row.querySelector(".attack-action-die");
