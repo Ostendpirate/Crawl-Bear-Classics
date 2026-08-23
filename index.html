@@ -4816,7 +4816,25 @@ function attachAttackRowListeners(mode) {
     if (mode === "pc") {
       const weaponSel = row.querySelector(".attack-weapon");
       if (weaponSel) {
+        // Only one "Cast a Spell" row is ever allowed (see
+        // ensureCasterHasSpellAttackRow's own comment for why a second one
+        // was a real Combat Tracker bug, not just an edge case) - captured
+        // here rather than read fresh in the handler below, since by the
+        // time "change" fires the <select>'s own value has already moved
+        // to the new (rejected) selection, so there's nothing left to
+        // revert TO otherwise. Re-captured on every renderAttacks rebuild,
+        // so it always starts as this row's own current persisted value.
+        let priorWeaponValue = weaponSel.value;
         weaponSel.addEventListener("change", () => {
+          if (weaponSel.value === SPELL_ATTACK_KEY) {
+            const alreadyHasSpellRow = readAttacks(mode).some(a => a.id !== row.dataset.id && a.weapon === SPELL_ATTACK_KEY);
+            if (alreadyHasSpellRow) {
+              weaponSel.value = priorWeaponValue;
+              showStatus("This character already has a Cast a Spell row - only one is allowed.", true, 4000);
+              return;
+            }
+          }
+          priorWeaponValue = weaponSel.value;
           applyWeaponSelection(row);
           scheduleSave();
           renderAttacks(mode, readAttacks(mode));
@@ -5160,6 +5178,12 @@ function renderPcStatline(d) {
   // already-manually-overridden row is left alone; see the
   // Class/Level/Alignment change handlers below for the force=true calls.
   recalcPcSkillsSection(false);
+  // Casters get exactly one "Cast a Spell" Attacks row automatically -
+  // see ensureCasterHasSpellAttackRow's own comment for why more than one
+  // was a real bug, not just a rare misconfiguration. Runs before
+  // refreshSpellAttackRows below so a freshly-added row's Bonus gets
+  // computed on this same pass instead of waiting for the next one.
+  ensureCasterHasSpellAttackRow();
   // Keeps the Spell Check list's visibility (Cleric/Wizard/Elf only) and
   // mechanic-reminder note matching the current Class on every render,
   // same passive contract as the Skills section just above.
@@ -6768,6 +6792,34 @@ function spellAttackRowHtml(atk) {
 
 function emptySpellAttack() {
   return { ...emptyAttack(), weapon: SPELL_ATTACK_KEY };
+}
+
+// Casters get exactly one "Cast a Spell" Attacks row, added automatically
+// the moment their Class can cast (pcCasterAbilityId) rather than the
+// player having to add one by hand via "+ Add Attack" + picking it from
+// the weapon dropdown. Two or more Cast-a-Spell rows used to be possible
+// that way, and deriveTrackerLines only expands a SINGLE such row across
+// every one of a caster's Action Dice - two or more instead each pin to
+// their own individually-declared Action Die (same as two different
+// equipped weapons), which is easy to leave misconfigured (every row
+// still defaulting to the 1st die) and reads in the Combat Tracker as
+// "my 2nd/3rd spell attack just isn't there." Blocking a second one from
+// ever being created (see attachAttackRowListeners' .attack-weapon change
+// handler) avoids that whole class of misconfiguration outright. Only
+// ever ADDS - never removes an existing row even if Class changes away
+// from a caster, so switching Class and back doesn't silently drop
+// whatever was configured on it. Checking "does one already exist" via
+// the live DOM makes this idempotent, safe to call on every passive
+// render pass.
+function ensureCasterHasSpellAttackRow() {
+  const classEl = document.getElementById("pc-class");
+  const cls = classEl ? classEl.value : "";
+  if (!pcCasterAbilityId(cls)) return;
+  const attacks = readAttacks("pc");
+  if (attacks.some(a => a.weapon === SPELL_ATTACK_KEY)) return;
+  attackListEl("pc").insertAdjacentHTML("beforeend", attackRowHtml(emptySpellAttack(), "pc"));
+  attachAttackRowListeners("pc");
+  scheduleSave();
 }
 
 // Recomputes the Bonus field + its hover breakdown for every currently-
