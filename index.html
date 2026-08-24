@@ -643,6 +643,7 @@
   .weapon-badge-ammo { background: var(--border); color: var(--text); font-weight: 700; }
   .weapon-badge-ammo-out { background: #e0665a; color: #1e1b18; }
   .weapon-badge-concentration { background: #2f6a8a; color: #fff; font-weight: 700; }
+  .weapon-badge-lost { background: #e0665a; color: #1e1b18; cursor: pointer; }
   .hp-btn.disabled, .hp-btn[disabled] {
     opacity: 0.4;
     cursor: not-allowed;
@@ -5123,6 +5124,11 @@ function attachAttackRowListeners(mode) {
           const nameInput = row.querySelector(".attack-name");
           if (nameInput) nameInput.value = spellSelectEl.value;
           scheduleSave();
+          // Switching to a different known spell can also switch this
+          // row's Lost state (see isSpellLost/refreshSpellAttackRows) -
+          // resync immediately rather than waiting for the next unrelated
+          // render pass.
+          refreshSpellAttackRows();
         });
       }
       const spellRollBtn = row.querySelector(".spell-attack-roll-btn");
@@ -5947,6 +5953,20 @@ function recoverSpellburnAbility(ability) {
   showStatus(`New Day: recovered 1 point of ${spellburnAbilityLabel(ability)} (now ${next}).`, false, 5000);
 }
 
+// Resting also clears every known spell's Lost flag (see
+// lostCheckboxHtml/setSpellLost) - piggybacked onto New Day rather than a
+// second button, since both represent the same in-game event. Returns how
+// many were actually cleared so openNewDayModal can report/gate on it
+// correctly even on a day with no Spellburn to recover.
+function clearAllLostSpells() {
+  const items = readSpellItems();
+  const clearedCount = items.filter(item => item.lost).length;
+  if (!clearedCount) return 0;
+  renderSpellItems(items.map(item => item.lost ? { ...item, lost: false } : item));
+  refreshSpellAttackRows();
+  return clearedCount;
+}
+
 // A day of rest only recovers ONE point total, so if more than one
 // ability is burned the player has to choose which one heals today - a
 // small popup listing just the eligible abilities (same tables-modal
@@ -5955,9 +5975,18 @@ function recoverSpellburnAbility(ability) {
 // ability there's nothing to choose, so this recovers it directly instead
 // of asking.
 function openNewDayModal() {
+  // Runs unconditionally, before the Spellburn-only early return below -
+  // a Wizard/Elf with a Lost spell but nothing currently burned would
+  // otherwise see "nothing to recover" and never get it back.
+  const lostCleared = clearAllLostSpells();
   const recoverable = spellburnRecoverableAbilities();
   if (!recoverable.length) {
-    showStatus("New Day: nothing to recover.", false, 4000);
+    if (lostCleared > 0) {
+      scheduleSave();
+      showStatus(`New Day: ${lostCleared} lost spell${lostCleared === 1 ? "" : "s"} recovered. Nothing else to recover.`, false, 5000);
+    } else {
+      showStatus("New Day: nothing to recover.", false, 4000);
+    }
     return;
   }
   if (recoverable.length === 1) {
@@ -7266,6 +7295,38 @@ function mercurialAdjustmentForSpellStats(stats, name) {
   return { bonus, dieSteps };
 }
 
+// Whether ONE specific known spell (by name) is currently flagged Lost
+// (see lostCheckboxHtml) - looked up by name for the same reason
+// mercurialAdjustmentForSpell is: that flag lives on the Spells section's
+// roster item, not on whichever Cast-a-Spell Attacks row/Tracker line
+// happens to be casting it right now. Read straight off the live Spells
+// list DOM (readSpellItems), so it always reflects whatever the roster
+// checkbox or the last roll most recently set.
+function isSpellLost(name) {
+  const trimmed = (name || "").trim();
+  if (!trimmed) return false;
+  const item = readSpellItems().find(s => (s.name || "").trim() === trimmed);
+  return !!(item && item.lost);
+}
+
+// Sets ONE known spell's Lost flag by name, straight in the live Spells
+// list DOM - the single source of truth isSpellLost/mercurialAdjustmentForSpell
+// both already read from. Called both by a Spell Check auto-flagging a bad
+// roll (rollSpellAttackRow) and by the Cast-a-Spell row's own 🔒 badge
+// click (a quick "this shouldn't have lost it" correction, see
+// refreshSpellAttackRows) - re-renders the Spells list so its persistent
+// checkbox (lostCheckboxHtml) stays in sync either way, and re-syncs every
+// Cast-a-Spell row so the change is reflected immediately everywhere that
+// spell appears.
+function setSpellLost(name, lost) {
+  const trimmed = (name || "").trim();
+  if (!trimmed) return;
+  const items = readSpellItems().map(item => (item.name || "").trim() === trimmed ? { ...item, lost } : item);
+  renderSpellItems(items);
+  refreshSpellAttackRows();
+  scheduleSave();
+}
+
 // Shared "what's the number, and how is it built" for a Spell Check -
 // used everywhere a "Cast a Spell" Attacks row computes or rolls its
 // check (spellAttackRowHtml/refreshSpellAttackRows/rollSpellAttackRow), so
@@ -7338,7 +7399,7 @@ function pcSpellCheckModifierBreakdownForStats(stats, atk, spellburnPoints = 0) 
 }
 
 function emptySpellItem() {
-  return { id: "g" + Math.random().toString(36).slice(2, 9), name: "", mercurial: null, mercurialNote: "", mercurialBonus: "", mercurialDieSteps: "", manifestation: "", concentration: false };
+  return { id: "g" + Math.random().toString(36).slice(2, 9), name: "", mercurial: null, mercurialNote: "", mercurialBonus: "", mercurialDieSteps: "", manifestation: "", concentration: false, lost: false };
 }
 
 // This roster is a known-spells list, not an action - rolling a Spell
@@ -7381,6 +7442,9 @@ function spellRowHtml(item) {
   const mercurialBtnHtml = isWizardOrElf && hasSpell
     ? `<button type="button" class="hp-btn spell-row-mercurial-btn" title="${item.mercurial ? "Reroll" : "Roll"} this spell's Mercurial Magic (d%, Table 5-2) - a permanent quirk unique to how this caster casts this spell, normally rolled once when it's learned.">✨</button>`
     : "";
+  // Lost (see lostCheckboxHtml) - Wizard/Elf only, same gate as Mercurial
+  // Magic/Spellburn above; Clerics get Disapproval instead.
+  const lostCheckboxHtmlValue = isWizardOrElf && hasSpell ? lostCheckboxHtml(item) : "";
   // Auto-fills note/bonus/die-step from the table for a roll that doesn't
   // have them saved yet (e.g. one rolled before this feature existed, or
   // the roll number was just edited elsewhere) - but never overwrites
@@ -7403,6 +7467,7 @@ function spellRowHtml(item) {
         <button type="button" class="hp-btn spell-row-custom-back"${isCustom ? "" : ' style="display:none"'} title="Back to spell list">↩</button>
         ${mercurialBtnHtml}
         ${concentrationCheckboxHtml(item)}
+        ${lostCheckboxHtmlValue}
         <button type="button" class="attack-remove-btn spell-row-remove-btn" title="Remove">×</button>
       </div>
       ${manifestationFieldHtml(item)}
@@ -7424,6 +7489,24 @@ function spellRowHtml(item) {
 function concentrationCheckboxHtml(item) {
   return `<label class="spell-concentration-wrap" title="Requires Concentration (DCC RPG core rulebook) - while concentrating, this caster can take no action beyond walking at half speed; combat damage, a fall, or another significant interruption forces a Will save (DC 11) or the caster loses concentration.">
     <input type="checkbox" class="spell-concentration" ${item.concentration ? "checked" : ""} />🧠
+  </label>`;
+}
+
+// Lost (DCC RPG core rulebook) - a Spell Check that fails badly enough
+// loses the spell until the caster's next rest (see openNewDayModal). This
+// app has no per-spell casting tables to check the ACTUAL threshold
+// against (same reason Manifestation is a free-text field - see
+// manifestationFieldHtml), so rollSpellAttackRow/rollSpellAttackForTracker
+// only ever auto-flag this using the generic failure band most spells
+// share (a total of 11 or under); this checkbox is the manual override for
+// whichever spell's own table disagrees, and doubles as the persistent
+// "review status" surface the on-row 🔒 badge's quick click-to-un-mark
+// (setSpellLost/spellAttackRowHtml) doesn't replace. Wizard/Elf only, same
+// gate as Corruption (openCorruptionModal) - Clerics get Disapproval
+// instead (openDisapprovalModal).
+function lostCheckboxHtml(item) {
+  return `<label class="spell-lost-wrap" title="Lost (DCC RPG core rulebook) - a failed Spell Check loses this spell until you rest. This app defaults to flagging any total of 11 or under (see the Cast-a-Spell row's own 🔒 badge) - check this spell's own casting table for exceptions and correct it here if needed.">
+    <input type="checkbox" class="spell-lost" ${item.lost ? "checked" : ""} />🔒
   </label>`;
 }
 
@@ -7500,7 +7583,11 @@ function readSpellItems() {
     // there, no appear-later gap" contract as Manifestation.
     const concentrationEl = row.querySelector(".spell-concentration");
     const concentration = concentrationEl ? concentrationEl.checked : false;
-    return { id: row.dataset.id, name, mercurial, mercurialNote, mercurialBonus, mercurialDieSteps, manifestation, concentration };
+    // Lost (see lostCheckboxHtml) - same "always there, no appear-later
+    // gap" contract as Concentration, just Wizard/Elf-gated at render time.
+    const lostEl = row.querySelector(".spell-lost");
+    const lost = lostEl ? lostEl.checked : false;
+    return { id: row.dataset.id, name, mercurial, mercurialNote, mercurialBonus, mercurialDieSteps, manifestation, concentration, lost };
   });
 }
 
@@ -7525,6 +7612,17 @@ function attachSpellRowListeners() {
     // Present on every row regardless of class (see concentrationCheckboxHtml).
     const concentrationEl = row.querySelector(".spell-concentration");
     if (concentrationEl) concentrationEl.addEventListener("change", scheduleSave);
+    // Wizard/Elf only, once a spell's named (see lostCheckboxHtml) - also
+    // refreshes the Cast-a-Spell row(s) so a manual correction here
+    // immediately un-blocks (or blocks) their roll button too, same as the
+    // on-row 🔒 badge's own click (setSpellLost).
+    const lostEl = row.querySelector(".spell-lost");
+    if (lostEl) {
+      lostEl.addEventListener("change", () => {
+        scheduleSave();
+        refreshSpellAttackRows();
+      });
+    }
     const selectEl = row.querySelector(".spell-row-select");
     const customEl = row.querySelector(".spell-row-custom-name");
     const backBtn = row.querySelector(".spell-row-custom-back");
@@ -7875,7 +7973,16 @@ function spellAttackRowHtml(atk) {
   // Same die badge weapon rows show (attackRowHtml's weapon-badge-die) -
   // check.sides already IS this row's Action Die size (see
   // pcSpellCheckModifierBreakdown), so there's nothing left to compute.
-  const dieBadgeHtml = check ? `<div class="attack-row-badges"><span class="weapon-badge weapon-badge-die" title="Spell Check die this row rolls">d${check.sides}</span></div>` : "";
+  // Lost (see lostCheckboxHtml/setSpellLost) - Wizard/Elf only, same class
+  // gate as Spellburn/Mercurial above (Clerics get Disapproval instead) -
+  // looked up by this row's currently-picked spell name, same "always
+  // resolve fresh, never trust a stale saved field" contract check itself
+  // already follows above.
+  const isLost = check && check.abilityId === "int" && isSpellLost(atk.name);
+  const lostBadgeHtml = isLost
+    ? `<span class="weapon-badge weapon-badge-lost spell-lost-badge" title="Lost (DCC RPG core rulebook) - this spell failed its last Spell Check badly enough to lose it until you rest. Click to un-mark if this spell's own casting table says this roll shouldn't have lost it.">🔒 Lost</span>`
+    : "";
+  const dieBadgeHtml = (check || isLost) ? `<div class="attack-row-badges">${check ? `<span class="weapon-badge weapon-badge-die" title="Spell Check die this row rolls">d${check.sides}</span>` : ""}${lostBadgeHtml}</div>` : "";
   const spellBySlotAttr = escapeHtml(JSON.stringify(atk.spellBySlot || {}));
   const spellburnPendingAttr = escapeHtml(JSON.stringify(spellburnPending));
   // Spellburn (DCC RPG core rulebook) - Wizard/Elf only (check.abilityId
@@ -7903,7 +8010,7 @@ function spellAttackRowHtml(atk) {
         <select class="spell-attack-select" title="Which known spell this row casts - add more in the Spells section below.">${spellSelectOptionsHtml(atk.name)}</select>
         <input type="text" class="attack-bonus spell-attack-bonus" readonly value="${escapeHtml(bonusText)}" title="${escapeHtml(bonusTitle)}" />
         <input type="hidden" class="attack-damage" value="" />
-        <button type="button" class="hp-btn spell-attack-roll-btn" title="Roll Spell Check">🎲</button>
+        <button type="button" class="hp-btn spell-attack-roll-btn${isLost ? " disabled" : ""}"${isLost ? " disabled" : ""} title="${isLost ? "This spell is Lost until you rest - see the 🔒 badge above (click it to un-mark), or New Day near Abilities." : "Roll Spell Check"}">🎲</button>
         <button type="button" class="attack-remove-btn" title="Remove">×</button>
       </div>
       ${spellburnHtml}
@@ -7977,16 +8084,37 @@ function refreshSpellAttackRows() {
     // Action Die's size (Table 1-12's 2nd attack: d14 at level 5, d16 at
     // 6, d20 at 7+) without this row ever being removed/re-added, so it
     // needs the same "recompute every passive pass" treatment as Bonus.
+    // Lost (see isSpellLost/setSpellLost) - resynced on every passive pass,
+    // not just after a roll, so switching this row to a different known
+    // spell (or a manual correction via the Spells popup's checkbox)
+    // immediately picks up that spell's own current Lost state.
+    const isLost = check && check.abilityId === "int" && isSpellLost(nameEl2 ? nameEl2.value : "");
     let badgeWrap = row.querySelector(".attack-row-badges");
-    if (check) {
+    const badgesHtml = [
+      check ? `<span class="weapon-badge weapon-badge-die" title="Spell Check die this row rolls">d${check.sides}</span>` : "",
+      isLost ? `<span class="weapon-badge weapon-badge-lost spell-lost-badge" title="Lost (DCC RPG core rulebook) - this spell failed its last Spell Check badly enough to lose it until you rest. Click to un-mark if this spell's own casting table says this roll shouldn't have lost it.">🔒 Lost</span>` : "",
+    ].filter(Boolean).join("");
+    if (badgesHtml) {
       if (!badgeWrap) {
         badgeWrap = document.createElement("div");
         badgeWrap.className = "attack-row-badges";
         row.querySelector(".attack-weapon-line").insertAdjacentElement("afterend", badgeWrap);
       }
-      badgeWrap.innerHTML = `<span class="weapon-badge weapon-badge-die" title="Spell Check die this row rolls">d${check.sides}</span>`;
+      badgeWrap.innerHTML = badgesHtml;
+      const lostBadgeEl = badgeWrap.querySelector(".spell-lost-badge");
+      if (lostBadgeEl) {
+        lostBadgeEl.addEventListener("click", () => setSpellLost(nameEl2 ? nameEl2.value : "", false));
+      }
     } else if (badgeWrap) {
       badgeWrap.remove();
+    }
+    const rollBtn = row.querySelector(".spell-attack-roll-btn");
+    if (rollBtn) {
+      rollBtn.classList.toggle("disabled", isLost);
+      rollBtn.disabled = isLost;
+      rollBtn.title = isLost
+        ? "This spell is Lost until you rest - see the 🔒 badge above (click it to un-mark), or New Day near Abilities."
+        : "Roll Spell Check";
     }
   });
 }
@@ -8047,7 +8175,8 @@ function rollSpellAttackRow(row) {
     showStatus("Only Cleric/Wizard/Elf roll a Spell Check.", true, 4000);
     return;
   }
-  const label = (selectEl && selectEl.value.trim()) || "Spell";
+  const spellName = selectEl ? selectEl.value.trim() : "";
+  const label = spellName || "Spell";
   // Spellburn: spending a full 20 points in one declaration automatically
   // treats this check as a natural max, no die actually rolled - reuses
   // spellCheckNaturalResultText's own crit handling below rather than a
@@ -8055,8 +8184,17 @@ function rollSpellAttackRow(row) {
   const autoNat = burnPoints >= 20;
   const rolled = autoNat ? check.sides : (Math.floor(Math.random() * check.sides) + 1);
   const { critBonus, note: baseNote } = spellCheckNaturalResultText(rolled, check.sides, check.level);
-  const note = autoNat ? `${baseNote} (forced by Spellburn - ${burnPoints} points spent)` : baseNote;
+  let note = autoNat ? `${baseNote} (forced by Spellburn - ${burnPoints} points spent)` : baseNote;
   const total = rolled + check.modifier + critBonus;
+  // Lost (see isSpellLost/setSpellLost's own comment) - this app has no
+  // per-spell casting tables to check the actual threshold against, so it
+  // defaults to the generic failure band most spells share (a total of 11
+  // or under, natural 1 included) and leaves correcting the "exceptions"
+  // to the player via the 🔒 badge/Spells popup checkbox this sets.
+  if (spellName && check.abilityId === "int" && total <= 11) {
+    setSpellLost(spellName, true);
+    if (rolled !== 1) note += ` ${markFumbleAlert("🔒 LOST")} - this spell can't be cast again until you rest (check this spell's own casting table for exceptions).`;
+  }
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
   const text = `${label} - Spell Check: d${check.sides} (${rolled}) ${formatSignedNumber(check.modifier)}${critBonus ? ` ${formatSignedNumber(critBonus)}(level)` : ""} = ${markRollTotal(total)}${note}`;
   showStatus(text, false, note ? 8000 : 4000);
@@ -10490,6 +10628,18 @@ function isConcentrationSpellStats(stats, name) {
   return !!(spellItem && spellItem.concentration);
 }
 
+// Stats-based sibling of isSpellLost, sourced from a token's saved
+// stats.data.pcSpells instead of the live Sheet DOM - same "ForStats"
+// pattern as isConcentrationSpellStats just above, used by
+// spellTrackerLineHtml to badge+block a lost spell's roll button in the
+// Combat Tracker.
+function isSpellLostForStats(stats, name) {
+  const trimmed = (name || "").trim();
+  if (!trimmed) return false;
+  const spellItem = (stats.data.pcSpells || []).find(s => (s.name || "").trim() === trimmed);
+  return !!(spellItem && spellItem.lost);
+}
+
 function trackerRowHtml(item, stats, isActive) {
   const lines = deriveTrackerLines(item, stats);
   const showsConcentration = hasConcentrationSpellStats(stats);
@@ -10726,6 +10876,11 @@ function spellTrackerLineHtml(item, stats, line) {
   const badges = [];
   if (line.dieSides) badges.push(`<span class="weapon-badge weapon-badge-die" title="Spell Check die this line rolls">d${line.dieSides}</span>`);
   if (isConcentrationSpellStats(stats, atk.name)) badges.push(`<span class="weapon-badge weapon-badge-concentration" title="Requires Concentration (DCC RPG core rulebook) - while concentrating, this caster can take no action beyond walking at half speed; combat damage, a fall, or another significant interruption forces a Will save (DC 11) or the caster loses concentration.">🧠 Concentration</span>`);
+  // Lost (see isSpellLostForStats/setSpellLostForStats) - Wizard/Elf only,
+  // same class gate as Spellburn just below (Clerics get Disapproval
+  // instead - see openDisapprovalModal).
+  const isLost = check && check.abilityId === "int" && isSpellLostForStats(stats, atk.name);
+  if (isLost) badges.push(`<span class="weapon-badge weapon-badge-lost spell-lost-badge" data-spell-name="${escapeHtml(atk.name || "")}" title="Lost (DCC RPG core rulebook) - this spell failed its last Spell Check badly enough to lose it until you rest. Click to un-mark if this spell's own casting table says this roll shouldn't have lost it.">🔒 Lost</span>`);
   // Spellburn (DCC RPG core rulebook) - Wizard/Elf only, same gate as the
   // Sheet's own spellburn-row (spellAttackRowHtml) - opens the shared
   // popup (attachTrackerRowListeners wires the click, since parentId/
@@ -10742,7 +10897,7 @@ function spellTrackerLineHtml(item, stats, line) {
         <span class="attack-detail-meta">
           <span class="attack-detail-meta-part" title="${escapeHtml(bonusTooltip)}">${escapeHtml(line.label)} <b>${escapeHtml(bonusText)}</b></span>
         </span>
-        <button class="hp-btn attack-roll-btn" title="Roll Spell Check">🎲</button>
+        <button class="hp-btn attack-roll-btn${isLost ? " disabled" : ""}"${isLost ? " disabled" : ""} title="${isLost ? "This spell is Lost until you rest - see the 🔒 badge below (click it to un-mark), or New Day on the Sheet." : "Roll Spell Check"}">🎲</button>
       </div>
       ${burnHtml}
       ${badges.length ? `<div class="attack-detail-badges">${badges.join(" ")}</div>` : ""}
@@ -11546,8 +11701,15 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   // same "a forced roll still triggers the natural-result text" contract
   // rollAttackFor's own crit/fumble handling already follows.
   const { critBonus, note: baseNote } = spellCheckNaturalResultText(rolled, check.sides, check.level);
-  const note = autoNat ? `${baseNote} (forced by Spellburn - ${burnPoints} points spent)` : baseNote;
+  let note = autoNat ? `${baseNote} (forced by Spellburn - ${burnPoints} points spent)` : baseNote;
   const total = rolled + check.modifier + critBonus;
+  // Lost (see isSpellLostForStats/setSpellLostForStats's own comment) -
+  // same generic-failure-band default and Wizard/Elf-only gate as the
+  // Sheet's own rollSpellAttackRow.
+  if (effectiveName && check.abilityId === "int" && total <= 11) {
+    await setSpellLostForStats(itemId, effectiveName, true);
+    if (rolled !== 1) note += ` ${markFumbleAlert("🔒 LOST")} - this spell can't be cast again until it rests (check this spell's own casting table for exceptions).`;
+  }
   const text = `${label} - Spell Check: d${check.sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(check.modifier)}${critBonus ? ` ${formatSignedNumber(critBonus)}(level)` : ""} = ${markRollTotal(total)}${note}`;
 
   // This casting spends the same one Action Die a weapon attack at this
@@ -11614,6 +11776,28 @@ async function clearSpellburnPendingForStats(itemId, attackId, slotKey) {
         delete pending[slotKey];
         return { ...a, spellburnPending: pending };
       });
+      item.metadata[PC_METADATA_KEY] = data;
+    });
+  });
+}
+
+// Tracker-side sibling of setSpellLost - sets ONE known spell's Lost flag
+// (by name) straight in item.metadata, since the Tracker can be rolling
+// for/correcting any token, not just whatever's open on the Sheet tab.
+// Called both by a Spell Check auto-flagging a bad roll
+// (rollSpellAttackForTracker) and by a line's own 🔒 badge click
+// (attachTrackerRowListeners) - the write itself rides the normal
+// items.onChange repaint every other Tracker write here already does, so
+// nothing further needs to re-render explicitly.
+async function setSpellLostForStats(itemId, name, lost) {
+  const trimmed = (name || "").trim();
+  if (!trimmed) return;
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      if (mode !== "pc") return;
+      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+      data.pcSpells = (data.pcSpells || []).map(s => (s.name || "").trim() === trimmed ? { ...s, lost } : s);
       item.metadata[PC_METADATA_KEY] = data;
     });
   });
@@ -11742,6 +11926,16 @@ function attachTrackerRowListeners() {
       if (spellSelect) {
         spellSelect.addEventListener("change", () => {
           applyTrackerSpellSelection(parentId, attackId, slotKey, spellSelect.value);
+        });
+      }
+
+      // Lost (see setSpellLostForStats) - quick "this shouldn't have lost
+      // it" correction right where the badge is seen, same as the Sheet's
+      // own spell-lost-badge click (setSpellLost).
+      const lostBadge = wrap.querySelector(".spell-lost-badge");
+      if (lostBadge) {
+        lostBadge.addEventListener("click", () => {
+          setSpellLostForStats(parentId, lostBadge.dataset.spellName, false);
         });
       }
 
