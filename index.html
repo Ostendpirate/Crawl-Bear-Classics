@@ -7922,7 +7922,7 @@ function rollSpellAttackRow(row) {
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
   const text = `${label} - Spell Check: d${check.sides} (${rolled}) ${formatSignedNumber(check.modifier)}${critBonus ? ` ${formatSignedNumber(critBonus)}(level)` : ""} = ${markRollTotal(total)}${note}`;
   showStatus(text, false, note ? 8000 : 4000);
-  appendChatLog({ kind: "spell", tokenName: rollerName, text, gmOnly: false });
+  appendChatLog({ kind: "spell", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId)) });
   broadcastDiceRoll({ rollerName, dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier + critBonus, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
   if (burnPoints > 0) {
     delete pending[slotKeyForBurn];
@@ -8959,9 +8959,10 @@ function recalcPcSkillsSection(force) {
 // Cast Spell from Scroll (data-is-die) rolls 1d(sides) + the live ability
 // modifier (and, since armor hinders spellcasting for every class except
 // Cleric, the live armor Check Penalty) instead, since its Table 1-9 entry
-// is a die, not a bonus. Logged to the shared Chat Log (never gmOnly -
-// unlike a monster's rolls, a PC's own skill checks are always meant for
-// the whole table to see), same as every other roll type except
+// is a die, not a bonus. Logged to the shared Chat Log, gmOnly per
+// isGmOnlyRoll - a PC's own skill checks are meant for the whole table to
+// see UNLESS this token isn't actually assigned to anyone (a GM-run NPC
+// on a PC-mode sheet), same as every other roll type except
 // rollPcHpLevelUp, which stays sheet-only on purpose (a level-up HP roll
 // isn't really "table" information the way a skill check is).
 function rollPcSkill(key) {
@@ -8970,6 +8971,7 @@ function rollPcSkill(key) {
   if (!row || !input) return;
   const label = row.dataset.label || key;
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
+  const gmOnly = isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId));
   if (row.dataset.isDie === "1") {
     const sidesMatch = /d(\d+)/i.exec(input.value || "");
     const sides = sidesMatch ? parseInt(sidesMatch[1], 10) : 20;
@@ -8981,7 +8983,7 @@ function rollPcSkill(key) {
     const total = rolled + modifier;
     const text = `${label}: d${sides} (${rolled}) ${formatSignedNumber(modifier)} = ${markRollTotal(total)}`;
     showStatus(text, false, 4000);
-    appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly: false });
+    appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly });
     broadcastDiceRoll({ rollerName, dice: [{ sides, value: rolled }], modifier, notation: `d${sides}`, total, label });
     return;
   }
@@ -8997,7 +8999,7 @@ function rollPcSkill(key) {
   const trapTriggerNote = (key === "disableTrap" && rolled === 1) ? " ⚠️ Natural 1 - the trap triggers!" : "";
   const text = `${label}: d20 (${rolled}) ${formatSignedNumber(bonus)} = ${markRollTotal(total)}${trapTriggerNote}`;
   showStatus(text, rolled === 1 && key === "disableTrap", trapTriggerNote ? 6000 : 4000);
-  appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly: false });
+  appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly });
   broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: bonus, notation: "d20", total, label });
 }
 
@@ -9437,6 +9439,24 @@ function isOwnToken(item) {
   const mapped = roomOwnerMap[rosterKeyFor(item)];
   if (mapped) return mapped.id === currentPlayerId;
   return item.createdUserId === currentPlayerId;
+}
+
+// Whether a roll should be flagged GM-only in the shared Chat Log (see
+// appendChatLog/renderChatLog's own gmOnly filter): always true for a
+// monster/NPC sheet (never meant for the table), and ALSO true for an
+// unassigned PC-mode token - functionally a GM-controlled NPC even though
+// its sheet reads "PC", so its rolls shouldn't broadcast as if a player
+// made them. `item` is whichever token actually rolled; Sheet-side
+// callers that don't already have one on hand look it up from
+// lastRosterItems (populated whenever the Sheet tab's own roster has
+// loaded, same cache the Token Roster panel reads from) - if that lookup
+// comes up empty, falls back to mode-only rather than guessing at
+// ownership.
+function isGmOnlyRoll(mode, item) {
+  if (mode === "monster") return true;
+  if (!item) return false;
+  const mapped = roomOwnerMap[rosterKeyFor(item)];
+  return !(mapped && mapped.id);
 }
 
 function tokenRosterItemHtml(item, showOwner) {
@@ -11022,7 +11042,7 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     tokenName: item.name || "Token",
     mode: stats.mode,
     text,
-    gmOnly: stats.mode === "monster",
+    gmOnly: isGmOnlyRoll(stats.mode, item),
   });
 
   broadcastDiceRoll({
@@ -11295,7 +11315,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     tokenName: item.name || "Token",
     mode: stats.mode,
     text,
-    gmOnly: stats.mode === "monster",
+    gmOnly: isGmOnlyRoll(stats.mode, item),
   });
 
   broadcastDiceRoll({
@@ -11369,7 +11389,7 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   const rollDuration = note ? 9000 : 6500;
   showTrackerStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
   showStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
-  await appendChatLog({ kind: "spell", tokenName: item.name || "Token", text, gmOnly: false });
+  await appendChatLog({ kind: "spell", tokenName: item.name || "Token", text, gmOnly: isGmOnlyRoll(stats.mode, item) });
   broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier + critBonus, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
 }
 
@@ -11502,7 +11522,7 @@ async function rollConcentrationSaveForTracker(itemId) {
   const text = `Concentration Save: d20 (${rolled}) ${formatSignedNumber(willMod)} = ${markRollTotal(total)} vs DC ${DC} - ${resultText}`;
   showTrackerStatus(`${item.name || "Token"} — ${text}`, false, 6500);
   showStatus(`${item.name || "Token"} — ${text}`, false, 6500);
-  await appendChatLog({ kind: "save", tokenName: item.name || "Token", text, gmOnly: false });
+  await appendChatLog({ kind: "save", tokenName: item.name || "Token", text, gmOnly: isGmOnlyRoll(stats.mode, item) });
   broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: 20, value: rolled }], modifier: willMod, notation: "d20", total, label: "Concentration Save (DC 11 Will)" });
 }
 
@@ -12257,7 +12277,7 @@ async function rollInitiativeFor(id) {
     tokenName: item.name || "Token",
     mode: stats.mode,
     text: `Initiative: ${markRollTotal(String(roll))}${mod ? ` (d${initDie} ${mod >= 0 ? "+" : ""}${mod})` : ` (d${initDie})`}`,
-    gmOnly: stats.mode === "monster",
+    gmOnly: isGmOnlyRoll(stats.mode, item),
   });
   broadcastDiceRoll({
     rollerName: item.name || "Token",
