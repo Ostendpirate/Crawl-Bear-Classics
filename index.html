@@ -677,6 +677,20 @@
   .spellburn-modal-total-row { display: flex; align-items: center; gap: 8px; padding: 8px 0 2px; margin-top: 4px; border-top: 1px solid var(--border); font-weight: 700; }
   .spellburn-modal-total-row .spellburn-modal-label { color: var(--text); }
   .spellburn-modal-total { flex: none; color: var(--accent); font-size: 15px; font-variant-numeric: tabular-nums; }
+  .spellburn-modal-confirm-btn {
+    display: block;
+    width: 100%;
+    margin-top: 10px;
+    padding: 8px;
+    background: var(--accent);
+    color: #1e1b18;
+    border: none;
+    border-radius: 5px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .spellburn-modal-confirm-btn:hover { filter: brightness(1.1); }
   .attack-ammo-line {
     display: flex;
     align-items: center;
@@ -1841,6 +1855,7 @@
           <span class="spellburn-modal-label">Points spent this cast</span>
           <span class="spellburn-modal-total" id="spellburn-modal-total">0</span>
         </div>
+        <button type="button" class="spellburn-modal-confirm-btn" id="spellburn-modal-confirm">Confirm</button>
       </div>
     </div>
   </div>
@@ -5858,6 +5873,7 @@ async function spellburnModalMinusClick(ability) {
 }
 
 document.getElementById("spellburn-modal-close").addEventListener("click", closeSpellburnModal);
+document.getElementById("spellburn-modal-confirm").addEventListener("click", closeSpellburnModal);
 document.getElementById("spellburn-modal-backdrop").addEventListener("click", (e) => {
   if (e.target.id === "spellburn-modal-backdrop") closeSpellburnModal();
 });
