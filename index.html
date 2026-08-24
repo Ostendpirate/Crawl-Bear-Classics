@@ -422,7 +422,8 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .place-token-btn { flex: none; width: 22px; height: 22px; font-size: 12px; }
+  .token-roster-save-btn { flex: none; width: 22px; height: 22px; font-size: 13px; }
+  .token-roster-save-btn.on { color: var(--accent); }
   .token-roster-empty {
     text-align: center;
     color: var(--muted);
@@ -1305,18 +1306,6 @@
         <div class="token-roster" id="token-roster-list"></div>
         <div class="token-roster-empty" id="token-roster-empty" style="display:none;"></div>
       </div>
-    </div>
-    <div class="token-roster-wrap" id="saved-tokens-wrap" style="display:none;">
-      <button type="button" class="token-roster-toggle" id="saved-tokens-toggle">
-        <span>Saved Characters</span>
-        <span class="token-roster-count" id="saved-tokens-count"></span>
-        <span class="token-roster-chevron" id="saved-tokens-chevron">▸</span>
-      </button>
-      <div class="token-roster-content" id="saved-tokens-content" style="display:none;">
-        <div class="token-roster" id="saved-tokens-list"></div>
-        <div class="token-roster-empty" id="saved-tokens-empty" style="display:none;"></div>
-      </div>
-      <div class="status" id="saved-tokens-status"></div>
     </div>
     <div class="empty" id="empty-state">
       Select a token on the map to view or edit its DCC character sheet.<br/><br/>
@@ -9499,7 +9488,8 @@ function isGmOnlyRoll(mode, item) {
 function tokenRosterItemHtml(item, showOwner) {
   const mode = item.metadata[MODE_METADATA_KEY] || "monster";
   const isActive = item.id === currentItemId;
-  const owner = roomOwnerMap[rosterKeyFor(item)];
+  const key = rosterKeyFor(item);
+  const owner = roomOwnerMap[key];
   // owner.name is a snapshot taken at assignment time (see the Owner
   // dropdown handler), so it - and this label - stays visible even after
   // that player disconnects; "(offline)" here is purely a live indicator,
@@ -9508,11 +9498,20 @@ function tokenRosterItemHtml(item, showOwner) {
   const ownerLabel = showOwner && owner && owner.name
     ? `<span class="token-roster-owner" title="Assigned to ${escapeHtml(owner.name)}${isOffline ? " (offline)" : ""}">${escapeHtml(owner.name)}${isOffline ? " (offline)" : ""}</span>`
     : "";
+  // GM-only "saved" toggle (see toggleTokenSaved) - independent of
+  // ownership, since a saved character doesn't need a player assigned
+  // (a recurring NPC/monster the GM controls can still follow the party
+  // into new scenes) and an assigned character doesn't have to be saved.
+  const isSaved = !!roomTokenTemplates[key];
+  const saveBtnHtml = showOwner
+    ? `<button type="button" class="hp-btn token-roster-save-btn${isSaved ? " on" : ""}" title="${isSaved ? "Saved - follows the party into new scenes. Click to un-save." : "Not saved - click to save so this token follows the party into new scenes."}">${isSaved ? "★" : "☆"}</button>`
+    : "";
   return `
     <div class="token-roster-item${isActive ? " active" : ""}" data-id="${item.id}">
       <span class="token-roster-badge${mode === "pc" ? " pc" : ""}">${mode === "pc" ? "PC" : "NPC"}</span>
       <span class="token-roster-name">${escapeHtml(item.name || "Unnamed")}</span>
       ${ownerLabel}
+      ${saveBtnHtml}
     </div>`;
 }
 
@@ -9540,16 +9539,15 @@ function renderTokenRoster() {
     listEl.innerHTML = sorted.map(item => tokenRosterItemHtml(item, isGm)).join("");
     listEl.querySelectorAll(".token-roster-item").forEach(row => {
       row.addEventListener("click", () => OBR.player.select([row.dataset.id], true));
+      const saveBtn = row.querySelector(".token-roster-save-btn");
+      if (saveBtn) {
+        saveBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          toggleTokenSaved(row.dataset.id);
+        });
+      }
     });
   }
-
-  // Was previously unreachable whenever the "All Tokens" list above was
-  // empty (an early return skipped straight past this call) - meaning on
-  // any scene with zero existing tokens, the Saved Characters buttons
-  // either never got their click listeners attached or kept stale ones,
-  // so clicking "Add to this scene" silently did nothing. That's exactly
-  // the scene state this feature matters most for.
-  renderSavedTokens();
 }
 
 let tokenRosterCollapsed = true;
@@ -9566,162 +9564,90 @@ document.getElementById("token-roster-toggle").addEventListener("click", () => {
   applyTokenRosterCollapsedState();
 });
 
-// ---- Saved Characters (GM-only: place/replace a managed token on the
-// current scene) ----
-//
-// True drag-and-drop from this popover onto Owlbear's own map canvas isn't
-// possible through the extension SDK - the popover is a separate iframe,
-// and there's no documented API for a drag gesture to cross that boundary
-// onto the canvas Owlbear itself renders. This is the closest practical
-// equivalent: a button per saved (ever-assigned) character that drops a
-// copy of it at the current viewport center - either as a brand new item,
-// or by overwriting an existing same-named token's data AND position if
-// one's already on this scene, which is "replace the old one" without the
-// GM having to hunt down and manually delete anything first.
-let savedTokensCollapsed = true;
-
-function applySavedTokensCollapsedState() {
-  const contentEl = document.getElementById("saved-tokens-content");
-  const chevronEl = document.getElementById("saved-tokens-chevron");
-  if (contentEl) contentEl.style.display = savedTokensCollapsed ? "none" : "block";
-  if (chevronEl) chevronEl.textContent = savedTokensCollapsed ? "▸" : "▾";
-}
-
-document.getElementById("saved-tokens-toggle").addEventListener("click", () => {
-  savedTokensCollapsed = !savedTokensCollapsed;
-  applySavedTokensCollapsedState();
-});
-
-function refreshSavedTokensRowVisibility() {
-  const wrap = document.getElementById("saved-tokens-wrap");
-  if (wrap) wrap.style.display = currentPlayerRole === "GM" ? "block" : "none";
-}
-
-function savedTokenRowHtml(key, name, owner) {
-  return `
-    <div class="token-roster-item" data-key="${escapeHtml(key)}">
-      <span class="token-roster-badge pc">PC</span>
-      <span class="token-roster-name">${escapeHtml(name)}</span>
-      <span class="token-roster-owner">${escapeHtml(owner.name || "")}</span>
-      <button type="button" class="hp-btn place-token-btn" title="Add to this scene, or replace the existing one">⤓</button>
-    </div>`;
-}
-
-function renderSavedTokens() {
-  const listEl = document.getElementById("saved-tokens-list");
-  const emptyEl = document.getElementById("saved-tokens-empty");
-  const countEl = document.getElementById("saved-tokens-count");
-  if (!listEl || !emptyEl) return;
+// Toggles whether a token is "saved" - i.e. has a roomTokenTemplates
+// entry, which is what cloneMissingAssignedTokens uses to decide a token
+// should follow the party into a scene that doesn't have it yet.
+// Deliberately independent of ownership (roomOwnerMap): a saved character
+// doesn't need a player assigned - a recurring NPC/monster the GM
+// controls can still be saved - and an assigned character doesn't have
+// to be saved. Un-saving only removes the template; it never touches
+// this token's current ownership or deletes it from any scene.
+async function toggleTokenSaved(itemId) {
   if (currentPlayerRole !== "GM") return;
-
-  // roomOwnerMap/roomTokenTemplates are keyed by rosterId, not the
-  // character's name (see rosterKeyFor) - the display name comes from the
-  // template's own snapshotted .name instead.
-  const entries = Object.entries(roomOwnerMap)
-    .filter(([key, owner]) => owner && owner.id && roomTokenTemplates[key])
-    .map(([key, owner]) => [key, owner, roomTokenTemplates[key].name || "Unnamed"])
-    .sort((a, b) => a[2].localeCompare(b[2]));
-  if (countEl) countEl.textContent = entries.length ? `(${entries.length})` : "";
-
-  if (!entries.length) {
-    listEl.innerHTML = "";
-    emptyEl.style.display = "block";
-    emptyEl.textContent = "No saved characters yet. Assign a token to a player to save it here.";
-    return;
-  }
-  emptyEl.style.display = "none";
-  listEl.innerHTML = entries.map(([key, owner, name]) => savedTokenRowHtml(key, name, owner)).join("");
-  listEl.querySelectorAll(".place-token-btn").forEach(btn => {
-    const key = btn.closest(".token-roster-item").dataset.key;
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      placeOrReplaceTokenOnScene(key);
-    });
-  });
-}
-
-// showTrackerStatus writes to #tracker-status, which only exists inside
-// the Tracker tab - using it from here (the Sheet tab) meant every
-// confirmation and error message was being written into a hidden part of
-// the DOM. Also can't fall back to the sheet's own #status: that element
-// lives inside #sheet, which is itself hidden whenever no token is
-// currently selected - exactly the common case when using "Add to this
-// scene" to bring in a token that isn't selected (or doesn't exist) yet.
-function showSavedTokensStatus(text, isError, duration) {
-  const el = document.getElementById("saved-tokens-status");
-  if (!el) return;
-  el.textContent = text;
-  el.style.color = isError ? "#c97b7b" : "var(--good)";
-  clearTimeout(showSavedTokensStatus._t);
-  showSavedTokensStatus._t = setTimeout(() => { el.textContent = ""; }, duration ?? (isError ? 6000 : 3000));
-}
-
-async function placeOrReplaceTokenOnScene(key) {
-  if (currentPlayerRole !== "GM") return;
-  const template = roomTokenTemplates[key];
-  if (!template) {
-    showSavedTokensStatus(`No saved template found.`, true, 4000);
-    return;
-  }
-  const owner = roomOwnerMap[key];
-  const name = template.name || "token";
-  showSavedTokensStatus(`Placing "${name}"…`, false, 10000);
-
-  let targetPosition;
-  let viewportError = false;
+  let item;
   try {
-    targetPosition = await OBR.viewport.getPosition();
-    if (!targetPosition || typeof targetPosition.x !== "number" || typeof targetPosition.y !== "number") {
-      throw new Error(`unexpected viewport.getPosition() result: ${JSON.stringify(targetPosition)}`);
-    }
+    [item] = await OBR.scene.items.getItems([itemId]);
   } catch (err) {
-    console.error("DCC sheet: viewport.getPosition failed", err);
-    viewportError = true;
-    targetPosition = { x: 0, y: 0 };
+    console.error("DCC sheet: failed to fetch item for save toggle", err);
   }
-  const posLabel = `(${Math.round(targetPosition.x)}, ${Math.round(targetPosition.y)})`;
+  if (!item) {
+    showStatus("Couldn't save - try reselecting the token", true);
+    return;
+  }
 
-  try {
-    const existing = await OBR.scene.items.getItems(item => isCombatItem(item) && rosterKeyFor(item) === key);
-    if (existing.length) {
-      // Overwrite in place, including position - so "replace" actually
-      // brings the token to wherever the GM is currently looking, the
-      // same as adding it fresh, rather than leaving it wherever it
-      // happened to be sitting before.
-      await OBR.scene.items.updateItems(existing.map(item => item.id), draftItems => {
-        draftItems.forEach(draft => {
-          const clone = cloneItemForTemplate(template);
-          delete clone.position;
-          Object.assign(draft, clone);
-          draft.position = targetPosition;
-          if (owner && owner.id) draft.createdUserId = owner.id;
-        });
+  // Mint/stamp the roster id first, and confirmed, before room metadata
+  // is touched - same ordering reasoning as the Owner dropdown's own
+  // handler (see its comment): a partial failure here must never leave a
+  // room-metadata entry naming a roster id this item doesn't actually
+  // carry, or the token becomes permanently invisible to rosterKeyFor and
+  // permanently "missing" to cloneMissingAssignedTokens.
+  const existingRosterId = item.metadata && item.metadata[ROSTER_ID_METADATA_KEY];
+  const rosterId = existingRosterId || ((window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  if (!existingRosterId) {
+    try {
+      await OBR.scene.items.updateItems([itemId], items => {
+        items.forEach(it => { it.metadata[ROSTER_ID_METADATA_KEY] = rosterId; });
       });
-      showSavedTokensStatus(
-        viewportError
-          ? `Replaced "${name}" - couldn't read your view, used ${posLabel}`
-          : `Replaced "${name}" at ${posLabel}`,
-        viewportError,
-        viewportError ? 6000 : 4000
-      );
-    } else {
-      const clone = cloneItemForTemplate(template);
-      clone.id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      if (owner && owner.id) clone.createdUserId = owner.id;
-      clone.position = targetPosition;
-      await OBR.scene.items.addItems([clone]);
-      showSavedTokensStatus(
-        viewportError
-          ? `Added "${name}" - couldn't read your view, used ${posLabel}`
-          : `Added "${name}" at ${posLabel}`,
-        viewportError,
-        viewportError ? 6000 : 4000
-      );
+    } catch (err) {
+      console.error("DCC sheet: failed to stamp roster id for save toggle", err);
+      showStatus("Couldn't save - try again", true);
+      return;
     }
-    await refreshTokenRoster();
+    item.metadata[ROSTER_ID_METADATA_KEY] = rosterId;
+  }
+
+  let latestOwnerMap = roomOwnerMap;
+  let latestTemplates = roomTokenTemplates;
+  try {
+    const latestRoomMeta = await OBR.room.getMetadata();
+    const map = latestRoomMeta[ROOM_OWNER_MAP_KEY];
+    latestOwnerMap = (map && typeof map === "object") ? map : {};
+    const templates = latestRoomMeta[ROOM_TOKEN_TEMPLATE_KEY];
+    latestTemplates = (templates && typeof templates === "object") ? templates : {};
   } catch (err) {
-    console.error("DCC sheet: failed to place/replace token on scene", err);
-    showSavedTokensStatus(`Couldn't place "${name}" - see console`, true, 5000);
+    console.error("DCC sheet: failed to read latest room metadata before save toggle", err);
+  }
+
+  const nextMap = { ...latestOwnerMap };
+  const nextTemplates = { ...latestTemplates };
+  if (!existingRosterId) {
+    delete nextMap[item.name];
+    delete nextTemplates[item.name];
+  }
+  const wasSaved = !!nextTemplates[rosterId];
+  if (wasSaved) {
+    delete nextTemplates[rosterId];
+  } else {
+    nextTemplates[rosterId] = cloneItemForTemplate(item);
+  }
+  roomOwnerMap = nextMap;
+  roomTokenTemplates = nextTemplates;
+
+  const rosterIdx = lastRosterItems.findIndex(i => i.id === itemId);
+  if (rosterIdx !== -1) lastRosterItems[rosterIdx] = item;
+  renderTokenRoster();
+
+  try {
+    await OBR.room.setMetadata({
+      [ROOM_OWNER_MAP_KEY]: roomOwnerMap,
+      [ROOM_TOKEN_TEMPLATE_KEY]: roomTokenTemplates,
+    });
+    showStatus(wasSaved
+      ? `${item.name || "Token"} un-saved - won't follow the party into new scenes anymore.`
+      : `${item.name || "Token"} saved - will follow the party into new scenes.`, false, 4000);
+  } catch (err) {
+    console.error("DCC sheet: failed to persist save toggle", err);
+    showStatus("Saved locally, but sync failed - try again", true);
   }
 }
 
@@ -9849,16 +9775,17 @@ function desiredOwnerIdFor(item) {
 // scene, first time this key has appeared, etc.), re-apply it. This is
 // what makes assignments carry over between scenes instead of needing to
 // be redone by hand every time. Also opportunistically refreshes
-// roomTokenTemplates for assigned tokens so the cloned copy used in
-// cloneMissingAssignedTokens stays reasonably current.
+// roomTokenTemplates for saved tokens (see toggleTokenSaved) so the
+// cloned copy used in cloneMissingAssignedTokens stays reasonably
+// current - independent of ownership, since a saved token doesn't need
+// to be assigned to anyone.
 async function applyPersistentOwnership(items) {
   if (currentPlayerRole !== "GM") return;
 
   let templatesChanged = false;
   let latestTemplates = roomTokenTemplates;
   items.forEach(item => {
-    const mapped = roomOwnerMap[rosterKeyFor(item)];
-    if (mapped && mapped.id && templateNeedsRefresh(item)) {
+    if (roomTokenTemplates[rosterKeyFor(item)] && templateNeedsRefresh(item)) {
       templatesChanged = true;
     }
   });
@@ -9872,8 +9799,7 @@ async function applyPersistentOwnership(items) {
     }
     const nextTemplates = { ...latestTemplates };
     items.forEach(item => {
-      const mapped = roomOwnerMap[rosterKeyFor(item)];
-      if (mapped && mapped.id && templateNeedsRefresh(item)) {
+      if (nextTemplates[rosterKeyFor(item)] && templateNeedsRefresh(item)) {
         nextTemplates[rosterKeyFor(item)] = cloneItemForTemplate(item);
       }
     });
@@ -9910,12 +9836,15 @@ async function applyPersistentOwnership(items) {
   }
 }
 
-// GM-only: for any assigned token that has a saved template but isn't
-// present in the current scene at all (by roster key), add a clone of it -
-// full image, character sheet metadata, everything - so the party's tokens
-// actually show up in a new scene instead of just having their ownership
-// pre-applied once someone manually places them. New clones are lined up
-// near the scene origin since a saved position from a different map's
+// GM-only: for any saved token (roomTokenTemplates - see toggleTokenSaved)
+// that isn't present in the current scene at all (by roster key), add a
+// clone of it - full image, character sheet metadata, everything - so
+// the party's saved characters actually show up in a new scene instead
+// of just having their ownership pre-applied once someone manually
+// places them. Ownership (if any) is applied to the clone too, but
+// saving and owning are independent - a saved token with no assigned
+// player still gets cloned in, just left GM-owned. New clones are lined
+// up near the scene origin since a saved position from a different map's
 // layout wouldn't mean anything here; drag them into place afterward.
 // An Owlbear reload fires OBR.onReady's own boot call to refreshTokenRoster
 // AND OBR.scene.onReadyChange's "scene's already ready" callback close
@@ -9930,13 +9859,15 @@ async function cloneMissingAssignedTokens(existingItems) {
   if (currentPlayerRole !== "GM") return;
   if (cloneMissingAssignedTokensInFlight) return cloneMissingAssignedTokensInFlight;
   cloneMissingAssignedTokensInFlight = (async () => {
+    // Driven by roomTokenTemplates (the "saved" set - see
+    // toggleTokenSaved), not roomOwnerMap - a saved character follows the
+    // party into a new scene whether or not it's actually assigned to a
+    // player; ownership (if any) is applied separately below.
     const existingKeys = new Set(existingItems.map(item => rosterKeyFor(item)));
-    const missing = Object.entries(roomOwnerMap).filter(([key, owner]) => {
-      return owner && owner.id && roomTokenTemplates[key] && !existingKeys.has(key);
-    });
+    const missing = Object.keys(roomTokenTemplates).filter(key => !existingKeys.has(key));
     if (!missing.length) return;
 
-    const newItems = missing.map(([key, owner], index) => {
+    const newItems = missing.map((key, index) => {
       const clone = cloneItemForTemplate(roomTokenTemplates[key]);
       // Deterministic id (the roster key itself, already a UUID once
       // migrated - see ensureRosterIds) rather than a freshly-random one.
@@ -9951,7 +9882,8 @@ async function cloneMissingAssignedTokens(existingItems) {
       // treats it as an overwrite of the first - so either way there's
       // never a second, visibly duplicate token.
       clone.id = key;
-      clone.createdUserId = owner.id;
+      const owner = roomOwnerMap[key];
+      clone.createdUserId = (owner && owner.id) || currentPlayerId;
       clone.position = { x: index * 70, y: 0 };
       return clone;
     });
@@ -12516,7 +12448,6 @@ OBR.onReady(async () => {
   // later in this callback throws/rejects, these still get attached, so
   // clicking a token on the map always keeps working.
   applyTokenRosterCollapsedState();
-  applySavedTokensCollapsedState();
 
   OBR.player.onChange(async (player) => {
     let rosterNeedsRerender = false;
@@ -12526,7 +12457,6 @@ OBR.onReady(async () => {
       refreshDiceGmRowVisibility();
       refreshOwnerRowVisibility();
       refreshClearLogVisibility();
-      refreshSavedTokensRowVisibility();
       rosterNeedsRerender = true;
     }
     if (typeof player.id === "string" && player.id !== currentPlayerId) {
@@ -12736,7 +12666,6 @@ OBR.onReady(async () => {
     refreshDiceGmRowVisibility();
     refreshOwnerRowVisibility();
     refreshClearLogVisibility();
-    refreshSavedTokensRowVisibility();
   } catch (err) {
     console.error("DCC sheet: initial getRole failed", err);
   }
