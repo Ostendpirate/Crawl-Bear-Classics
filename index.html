@@ -9956,7 +9956,10 @@ async function refreshTokenRoster() {
       await ensureRosterIds(lastRosterItems);
       await applyPersistentOwnership(lastRosterItems);
       const beforeCount = lastRosterItems.length;
-      await cloneMissingAssignedTokens(lastRosterItems);
+      // No longer passed lastRosterItems - cloneMissingAssignedTokens now
+      // fetches its own fresh snapshot right when its turn in the lock
+      // queue comes up (see its own comment on why that matters here).
+      await cloneMissingAssignedTokens();
       lastRosterItems = await fetchCombatItemsWithRetry();
       if (lastRosterItems.length !== beforeCount) renderTokenRoster();
     }
@@ -10141,18 +10144,26 @@ async function applyPersistentOwnershipImpl(items) {
 // layout wouldn't mean anything here; drag them into place afterward.
 // An Owlbear reload fires OBR.onReady's own boot call to refreshTokenRoster
 // AND OBR.scene.onReadyChange's "scene's already ready" callback close
-// together (sometimes the same tick) - without serializing this against
-// every other room-metadata reader/writer (withRoomMetadataLock - see its
-// own comment), two overlapping calls here could each see the same saved
-// character as "missing" (neither has added it yet) and both clone it,
-// duplicating it in the roster; or one could run against a
-// roomTokenTemplates that ensureRosterIds/applyPersistentOwnership/
-// toggleTokenSaved was still mid-update on.
-function cloneMissingAssignedTokens(existingItems) {
-  return withRoomMetadataLock(() => cloneMissingAssignedTokensImpl(existingItems));
+// together (sometimes the same tick) - each independently fetching its own
+// "current scene items" snapshot BEFORE either reaches this function's own
+// place in the withRoomMetadataLock queue. That lock only serializes this
+// function's own execution against itself/the other room-metadata
+// reader-writers - it says nothing about how stale a snapshot taken before
+// even entering the queue is. If the second call's snapshot was taken
+// before the first call's clone had actually landed in the scene, the
+// second call still sees that character as "missing" (its own, already-
+// stale snapshot never had it) and clones a second copy once its turn
+// comes up - a duplicate the deterministic id below doesn't prevent,
+// since the two calls raced on WHICH items exist, not on writing room
+// metadata. Fetching fresh here instead, at the moment this call actually
+// runs, closes that gap: by the time a second, queued call gets its turn,
+// a fresh fetch is guaranteed to see whatever the first call just added.
+function cloneMissingAssignedTokens() {
+  return withRoomMetadataLock(() => cloneMissingAssignedTokensImpl());
 }
-async function cloneMissingAssignedTokensImpl(existingItems) {
+async function cloneMissingAssignedTokensImpl() {
   if (currentPlayerRole !== "GM") return;
+  const existingItems = await fetchCombatItemsWithRetry();
   // Driven by roomTokenTemplates (the "saved" set - see
   // toggleTokenSaved), not roomOwnerMap - a saved character follows the
   // party into a new scene whether or not it's actually assigned to a
