@@ -7879,7 +7879,7 @@ function spellCheckNaturalResultText(rolled, sides, level) {
   if (rolled === 1) {
     return {
       critBonus: 0,
-      note: ` ${markFumbleAlert("💀 FAILURE")} Natural 1 always fails, regardless of total - check this spell's own write-up for corruption or patron disapproval.`,
+      note: ` ${markFumbleAlert("💀 FAILURE")} Natural 1 always fails, regardless of total - check this spell's own write-up for whether it also triggers Corruption/Disapproval (☣/😇 buttons near Spells).`,
     };
   }
   return { critBonus: 0, note: "" };
