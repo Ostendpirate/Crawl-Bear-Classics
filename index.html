@@ -9712,6 +9712,22 @@ async function refreshTokenRoster() {
 // since its last sync briefly looks unmanaged (name key gone) and, worse,
 // still looks "missing" under its OLD name to cloneMissingAssignedTokens,
 // which would then spawn a duplicate clone under that stale name.
+//
+// Stamps the item's OWN metadata FIRST, and only rekeys room metadata for
+// whichever items that write actually confirmed for - deliberately NOT
+// run in parallel (a previous version awaited both at once via
+// Promise.all). If the item write fails partway (one bad item id, a
+// dropped connection mid-round-trip, etc.) while the room-metadata rekey
+// still went through, that item is left with the legacy name-keyed entry
+// already deleted from room metadata AND no roster id ever stamped onto
+// it - the "needs migration" filter above no longer matches it (no
+// legacy entry left to detect), so it would never be retried, forever
+// showing no owner (rosterKeyFor falls back to a name roomOwnerMap no
+// longer has) and forever looking "missing" to cloneMissingAssignedTokens
+// (which would then clone a duplicate of a token that's already right
+// there on the map). Sequencing item-write-first-and-confirmed makes a
+// partial failure fully retryable instead: nothing in room metadata
+// changes until the item side has already succeeded.
 async function ensureRosterIds(items) {
   if (currentPlayerRole !== "GM") return;
   const needsId = items.filter(item =>
@@ -9720,6 +9736,23 @@ async function ensureRosterIds(items) {
     (roomOwnerMap[item.name] || roomTokenTemplates[item.name])
   );
   if (!needsId.length) return;
+
+  const idByItem = new Map();
+  needsId.forEach(item => {
+    idByItem.set(item.id, (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  });
+
+  try {
+    await OBR.scene.items.updateItems(needsId.map(item => item.id), draftItems => {
+      draftItems.forEach(item => {
+        const rosterId = idByItem.get(item.id);
+        if (rosterId) item.metadata[ROSTER_ID_METADATA_KEY] = rosterId;
+      });
+    });
+  } catch (err) {
+    console.error("DCC sheet: failed to stamp roster ids onto items - will retry next pass", err);
+    return;
+  }
 
   let latestOwnerMap = roomOwnerMap;
   let latestTemplates = roomTokenTemplates;
@@ -9735,10 +9768,8 @@ async function ensureRosterIds(items) {
 
   const nextMap = { ...latestOwnerMap };
   const nextTemplates = { ...latestTemplates };
-  const idByItem = new Map();
   needsId.forEach(item => {
-    const rosterId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    idByItem.set(item.id, rosterId);
+    const rosterId = idByItem.get(item.id);
     if (nextMap[item.name]) {
       nextMap[rosterId] = nextMap[item.name];
       delete nextMap[item.name];
@@ -9752,20 +9783,12 @@ async function ensureRosterIds(items) {
   roomTokenTemplates = nextTemplates;
 
   try {
-    await Promise.all([
-      OBR.room.setMetadata({
-        [ROOM_OWNER_MAP_KEY]: roomOwnerMap,
-        [ROOM_TOKEN_TEMPLATE_KEY]: roomTokenTemplates,
-      }),
-      OBR.scene.items.updateItems(needsId.map(item => item.id), draftItems => {
-        draftItems.forEach(item => {
-          const rosterId = idByItem.get(item.id);
-          if (rosterId) item.metadata[ROSTER_ID_METADATA_KEY] = rosterId;
-        });
-      }),
-    ]);
+    await OBR.room.setMetadata({
+      [ROOM_OWNER_MAP_KEY]: roomOwnerMap,
+      [ROOM_TOKEN_TEMPLATE_KEY]: roomTokenTemplates,
+    });
   } catch (err) {
-    console.error("DCC sheet: failed to migrate roster ids", err);
+    console.error("DCC sheet: failed to persist roster-id migration", err);
   }
 }
 
@@ -9878,7 +9901,19 @@ async function cloneMissingAssignedTokens(existingItems) {
 
     const newItems = missing.map(([key, owner], index) => {
       const clone = cloneItemForTemplate(roomTokenTemplates[key]);
-      clone.id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`;
+      // Deterministic id (the roster key itself, already a UUID once
+      // migrated - see ensureRosterIds) rather than a freshly-random one.
+      // cloneMissingAssignedTokensInFlight above only dedupes overlapping
+      // calls WITHIN this one client; it can't stop two separate clients
+      // (e.g. an Owlbear reload firing OBR.onReady's own boot call and
+      // OBR.scene.onReadyChange's "already ready" callback in two
+      // different tabs/sessions at once) from each concluding this same
+      // character is missing and each adding their own copy. Giving both
+      // clones the SAME id means at most one add can actually stick -
+      // OBR either rejects the second (caught below, harmless) or
+      // treats it as an overwrite of the first - so either way there's
+      // never a second, visibly duplicate token.
+      clone.id = key;
       clone.createdUserId = owner.id;
       clone.position = { x: index * 70, y: 0 };
       return clone;
@@ -9959,14 +9994,6 @@ document.getElementById("owner-select").addEventListener("change", async () => {
   const id = sel.value;
   const itemId = currentItemId;
 
-  // The previous version awaited three separate round trips back-to-back
-  // (owner map, then templates, then the item update) with no feedback
-  // until all three finished. On a slow connection that reads as "nothing
-  // happened," which is exactly what prompts someone to re-pick the same
-  // option - so now: disable + show "Saving" immediately, do the two
-  // independent writes in parallel instead of in sequence, and give a
-  // real error message instead of silently no-oping if the item can't be
-  // found (which is itself a plausible cause of "it just didn't work").
   sel.disabled = true;
   showStatus("Saving owner…");
 
@@ -9986,7 +10013,35 @@ document.getElementById("owner-select").addEventListener("change", async () => {
   // whatever name it happens to have right now (see rosterKeyFor).
   const existingRosterId = item.metadata && item.metadata[ROSTER_ID_METADATA_KEY];
   const rosterId = existingRosterId || ((window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  if (!existingRosterId) item.metadata[ROSTER_ID_METADATA_KEY] = rosterId;
+
+  // Stamp the item's OWN createdUserId/roster id first, and confirmed,
+  // before room metadata is ever touched - deliberately sequenced rather
+  // than run in parallel (a previous version used Promise.allSettled for
+  // both writes at once). If this write fails while a later room-metadata
+  // write still went through, room metadata would end up naming a roster
+  // id this item never actually carries: permanently invisible to
+  // rosterKeyFor (which falls back to matching by name - exactly what the
+  // room-metadata write below also stops doing) and permanently "missing"
+  // to cloneMissingAssignedTokens (which would then clone a duplicate of
+  // a token that's sitting right there on the map). Sequencing this first
+  // makes a failure here fully safe instead: nothing in room metadata
+  // changes, so the assignment simply never took effect and can be
+  // retried, rather than leaving an orphaned, never-visible entry behind.
+  try {
+    await OBR.scene.items.updateItems([itemId], items => {
+      items.forEach(it => {
+        it.createdUserId = id || currentPlayerId;
+        it.metadata[ROSTER_ID_METADATA_KEY] = rosterId;
+      });
+    });
+  } catch (err) {
+    console.error("DCC sheet: owner assignment item write failed", err);
+    sel.disabled = false;
+    showStatus("Couldn't save - try again", true);
+    return;
+  }
+  item.metadata[ROSTER_ID_METADATA_KEY] = rosterId;
+  item.createdUserId = id || currentPlayerId;
 
   // Merge into a FRESH read of room metadata, not the possibly-stale local
   // roomOwnerMap/roomTokenTemplates cache. Without this, a write that
@@ -10033,45 +10088,29 @@ document.getElementById("owner-select").addEventListener("change", async () => {
 
   // Also patch the LOCAL lastRosterItems snapshot the render below reads
   // from - without this, tokenRosterItemHtml's rosterKeyFor(item) still
-  // sees this item's stale, pre-write metadata (no roster id yet, on a
-  // first-ever assignment) and falls back to matching by name, which was
-  // just deleted from roomOwnerMap above - so the roster would show NO
-  // owner at all until the write below round-trips back through
+  // sees this item's stale, pre-write metadata and falls back to matching
+  // by name, which was just deleted from roomOwnerMap above - so the
+  // roster would show NO owner at all until this echoes back through
   // items.onChange, instead of the new assignment appearing right away.
-  item.createdUserId = id || currentPlayerId;
   const rosterIdx = lastRosterItems.findIndex(i => i.id === itemId);
   if (rosterIdx !== -1) lastRosterItems[rosterIdx] = item;
 
   // Optimistic local update - the roster reflects the new owner right
-  // away instead of waiting on the writes below to round-trip and echo
-  // back through onMetadataChange/items.onChange.
+  // away instead of waiting on the room-metadata write below to
+  // round-trip and echo back through onMetadataChange.
   renderTokenRoster();
 
-  const results = await Promise.allSettled([
-    OBR.room.setMetadata({
+  try {
+    await OBR.room.setMetadata({
       [ROOM_OWNER_MAP_KEY]: roomOwnerMap,
       [ROOM_TOKEN_TEMPLATE_KEY]: roomTokenTemplates,
-    }),
-    // Also apply straight to this item's native createdUserId so the actual
-    // Owlbear "Owner Only" movement permission (if enabled) takes effect
-    // immediately in the current scene, not just on next sync. Unassigning
-    // hands createdUserId back to the GM, since the GM is exempt from Owner
-    // Only anyway and there's no real "nobody" value to set it to.
-    OBR.scene.items.updateItems([itemId], items => {
-      items.forEach(it => {
-        it.createdUserId = id || currentPlayerId;
-        it.metadata[ROSTER_ID_METADATA_KEY] = rosterId;
-      });
-    }),
-  ]);
-
-  sel.disabled = false;
-  const failed = results.some(r => r.status === "rejected");
-  if (failed) {
-    results.forEach(r => { if (r.status === "rejected") console.error("DCC sheet: owner assignment write failed", r.reason); });
-    showStatus("Owner saved locally, but sync failed - try again", true);
-  } else {
+    });
+    sel.disabled = false;
     showStatus("Owner updated");
+  } catch (err) {
+    console.error("DCC sheet: owner assignment room-metadata write failed", err);
+    sel.disabled = false;
+    showStatus("Owner saved locally, but sync failed - try again", true);
   }
 });
 
