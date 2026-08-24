@@ -8746,15 +8746,19 @@ async function fetchCombatItemsWithRetry(maxAttempts = 5, delayMs = 300) {
 // createdUserId is scene-local: it lives on one item in one scene, and a
 // same-named token in a different scene is a different item that starts
 // out unassigned. To make assignments "persistent in all scenes", the
-// source of truth is actually ROOM metadata (roomOwnerMap, keyed by token
-// name, synced via OBR.room.getMetadata/setMetadata - room metadata isn't
-// tied to any one scene). Whenever the GM's client sees a token whose name
-// matches a roomOwnerMap entry but whose createdUserId hasn't caught up
-// yet (e.g. it's a fresh token in a scene that's never seen this name
-// before), it silently re-applies the assignment. This does mean: (a) the
-// GM needs to have this extension open at least once in a new scene for
-// existing assignments to catch up, and (b) renaming a token breaks its
-// link to the map, since matching is by name.
+// source of truth is actually ROOM metadata (roomOwnerMap, synced via
+// OBR.room.getMetadata/setMetadata - room metadata isn't tied to any one
+// scene). Entries are keyed by rosterKeyFor(item), NOT item.name - a UUID
+// stamped into the item's own metadata (ROSTER_ID_METADATA_KEY, minted by
+// ensureRosterIds/the Owner dropdown handler below) so a player renaming
+// their token doesn't detach it from its assignment/template, or - worse -
+// make cloneMissingAssignedTokens think the (renamed-away-from) old name
+// is "missing" and spawn a duplicate under it. Whenever the GM's client
+// sees a token whose roster key matches a roomOwnerMap entry but whose
+// createdUserId hasn't caught up yet (e.g. it's a fresh token in a scene
+// that's never seen this roster key before), it silently re-applies the
+// assignment. This does mean the GM needs to have this extension open at
+// least once in a new scene for existing assignments to catch up.
 const ROOM_OWNER_MAP_KEY = "com.claude.monster-sheet/owner-map";
 let roomOwnerMap = {};
 
@@ -8768,6 +8772,19 @@ let roomOwnerMap = {};
 const ROOM_TOKEN_TEMPLATE_KEY = "com.claude.monster-sheet/token-templates";
 let roomTokenTemplates = {};
 
+// roomOwnerMap/roomTokenTemplates are keyed by this, not item.name - a
+// UUID stamped into item.metadata the first time a token is managed
+// (ensureRosterIds/the Owner dropdown handler below), so the mapping
+// survives a player renaming their token afterward (item.metadata is
+// untouched by a name edit; item.name itself isn't a stable key). Falls
+// back to item.name for a token that hasn't been stamped yet, so
+// pre-existing, name-keyed room metadata keeps resolving until
+// ensureRosterIds migrates it.
+const ROSTER_ID_METADATA_KEY = "com.claude.monster-sheet/roster-id";
+function rosterKeyFor(item) {
+  return (item.metadata && item.metadata[ROSTER_ID_METADATA_KEY]) || item.name;
+}
+
 function cloneItemForTemplate(item) {
   const clone = JSON.parse(JSON.stringify(item));
   delete clone.id;
@@ -8776,27 +8793,27 @@ function cloneItemForTemplate(item) {
 }
 
 function templateNeedsRefresh(item) {
-  const existing = roomTokenTemplates[item.name];
+  const existing = roomTokenTemplates[rosterKeyFor(item)];
   if (!existing) return true;
   if (!item.lastModified) return false;
   const existingModified = existing.lastModified ? new Date(existing.lastModified).getTime() : 0;
   return new Date(item.lastModified).getTime() > existingModified;
 }
 
-// A roomOwnerMap entry means "this token name has been managed through the
+// A roomOwnerMap entry means "this token has been managed through the
 // Owner dropdown at least once." Once managed, mapped.id is the sole
 // source of truth for ownership - INCLUDING when mapped.id is null
 // (explicitly unassigned) - and createdUserId is never consulted again for
-// that name. This matters because unassigning only resets createdUserId on
-// the item open in the CURRENT scene; any other scene that already has a
+// that roster key. This matters because unassigning only resets createdUserId
+// on the item open in the CURRENT scene; any other scene that already has a
 // cloned copy of that token keeps its old createdUserId until the GM's
 // client happens to visit it. Falling back to createdUserId for a managed-
-// but-unassigned name would read that stale value as real ownership. Names
+// but-unassigned key would read that stale value as real ownership. Tokens
 // that have never been touched by the Owner dropdown at all (mapped is
 // undefined) still fall back to createdUserId, preserving the native
 // "player dragged their own token onto the map" behavior.
 function isOwnToken(item) {
-  const mapped = roomOwnerMap[item.name];
+  const mapped = roomOwnerMap[rosterKeyFor(item)];
   if (mapped) return mapped.id === currentPlayerId;
   return item.createdUserId === currentPlayerId;
 }
@@ -8804,7 +8821,7 @@ function isOwnToken(item) {
 function tokenRosterItemHtml(item, showOwner) {
   const mode = item.metadata[MODE_METADATA_KEY] || "monster";
   const isActive = item.id === currentItemId;
-  const owner = roomOwnerMap[item.name];
+  const owner = roomOwnerMap[rosterKeyFor(item)];
   const ownerLabel = showOwner && owner && owner.name
     ? `<span class="token-roster-owner" title="Assigned to ${escapeHtml(owner.name)}">${escapeHtml(owner.name)}</span>`
     : "";
@@ -8897,9 +8914,9 @@ function refreshSavedTokensRowVisibility() {
   if (wrap) wrap.style.display = currentPlayerRole === "GM" ? "block" : "none";
 }
 
-function savedTokenRowHtml(name, owner) {
+function savedTokenRowHtml(key, name, owner) {
   return `
-    <div class="token-roster-item" data-name="${escapeHtml(name)}">
+    <div class="token-roster-item" data-key="${escapeHtml(key)}">
       <span class="token-roster-badge pc">PC</span>
       <span class="token-roster-name">${escapeHtml(name)}</span>
       <span class="token-roster-owner">${escapeHtml(owner.name || "")}</span>
@@ -8914,9 +8931,13 @@ function renderSavedTokens() {
   if (!listEl || !emptyEl) return;
   if (currentPlayerRole !== "GM") return;
 
+  // roomOwnerMap/roomTokenTemplates are keyed by rosterId, not the
+  // character's name (see rosterKeyFor) - the display name comes from the
+  // template's own snapshotted .name instead.
   const entries = Object.entries(roomOwnerMap)
-    .filter(([name, owner]) => owner && owner.id && roomTokenTemplates[name])
-    .sort((a, b) => a[0].localeCompare(b[0]));
+    .filter(([key, owner]) => owner && owner.id && roomTokenTemplates[key])
+    .map(([key, owner]) => [key, owner, roomTokenTemplates[key].name || "Unnamed"])
+    .sort((a, b) => a[2].localeCompare(b[2]));
   if (countEl) countEl.textContent = entries.length ? `(${entries.length})` : "";
 
   if (!entries.length) {
@@ -8926,12 +8947,12 @@ function renderSavedTokens() {
     return;
   }
   emptyEl.style.display = "none";
-  listEl.innerHTML = entries.map(([name, owner]) => savedTokenRowHtml(name, owner)).join("");
+  listEl.innerHTML = entries.map(([key, owner, name]) => savedTokenRowHtml(key, name, owner)).join("");
   listEl.querySelectorAll(".place-token-btn").forEach(btn => {
-    const name = btn.closest(".token-roster-item").dataset.name;
+    const key = btn.closest(".token-roster-item").dataset.key;
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      placeOrReplaceTokenOnScene(name);
+      placeOrReplaceTokenOnScene(key);
     });
   });
 }
@@ -8952,14 +8973,15 @@ function showSavedTokensStatus(text, isError, duration) {
   showSavedTokensStatus._t = setTimeout(() => { el.textContent = ""; }, duration ?? (isError ? 6000 : 3000));
 }
 
-async function placeOrReplaceTokenOnScene(name) {
+async function placeOrReplaceTokenOnScene(key) {
   if (currentPlayerRole !== "GM") return;
-  const template = roomTokenTemplates[name];
+  const template = roomTokenTemplates[key];
   if (!template) {
-    showSavedTokensStatus(`No saved template for "${name}" yet.`, true, 4000);
+    showSavedTokensStatus(`No saved template found.`, true, 4000);
     return;
   }
-  const owner = roomOwnerMap[name];
+  const owner = roomOwnerMap[key];
+  const name = template.name || "token";
   showSavedTokensStatus(`Placing "${name}"…`, false, 10000);
 
   let targetPosition;
@@ -8977,7 +8999,7 @@ async function placeOrReplaceTokenOnScene(name) {
   const posLabel = `(${Math.round(targetPosition.x)}, ${Math.round(targetPosition.y)})`;
 
   try {
-    const existing = await OBR.scene.items.getItems(item => isCombatItem(item) && item.name === name);
+    const existing = await OBR.scene.items.getItems(item => isCombatItem(item) && rosterKeyFor(item) === key);
     if (existing.length) {
       // Overwrite in place, including position - so "replace" actually
       // brings the token to wherever the GM is currently looking, the
@@ -9025,6 +9047,7 @@ async function refreshTokenRoster() {
     lastRosterItems = await fetchCombatItemsWithRetry();
     renderTokenRoster();
     if (currentPlayerRole === "GM") {
+      await ensureRosterIds(lastRosterItems);
       await applyPersistentOwnership(lastRosterItems);
       const beforeCount = lastRosterItems.length;
       await cloneMissingAssignedTokens(lastRosterItems);
@@ -9036,9 +9059,73 @@ async function refreshTokenRoster() {
   }
 }
 
-// GM-only: for any character token whose name matches a persisted
+// GM-only: gives every token with a legacy, name-keyed roomOwnerMap/
+// roomTokenTemplates entry a roster id (see rosterKeyFor), migrating that
+// entry over to it. Must run before applyPersistentOwnership/
+// cloneMissingAssignedTokens on the same pass - otherwise a token renamed
+// since its last sync briefly looks unmanaged (name key gone) and, worse,
+// still looks "missing" under its OLD name to cloneMissingAssignedTokens,
+// which would then spawn a duplicate clone under that stale name.
+async function ensureRosterIds(items) {
+  if (currentPlayerRole !== "GM") return;
+  const needsId = items.filter(item =>
+    isCombatItem(item) &&
+    !(item.metadata && item.metadata[ROSTER_ID_METADATA_KEY]) &&
+    (roomOwnerMap[item.name] || roomTokenTemplates[item.name])
+  );
+  if (!needsId.length) return;
+
+  let latestOwnerMap = roomOwnerMap;
+  let latestTemplates = roomTokenTemplates;
+  try {
+    const latestRoomMeta = await OBR.room.getMetadata();
+    const map = latestRoomMeta[ROOM_OWNER_MAP_KEY];
+    latestOwnerMap = (map && typeof map === "object") ? map : {};
+    const templates = latestRoomMeta[ROOM_TOKEN_TEMPLATE_KEY];
+    latestTemplates = (templates && typeof templates === "object") ? templates : {};
+  } catch (err) {
+    console.error("DCC sheet: failed to read latest room metadata before roster-id migration", err);
+  }
+
+  const nextMap = { ...latestOwnerMap };
+  const nextTemplates = { ...latestTemplates };
+  const idByItem = new Map();
+  needsId.forEach(item => {
+    const rosterId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    idByItem.set(item.id, rosterId);
+    if (nextMap[item.name]) {
+      nextMap[rosterId] = nextMap[item.name];
+      delete nextMap[item.name];
+    }
+    if (nextTemplates[item.name]) {
+      nextTemplates[rosterId] = nextTemplates[item.name];
+      delete nextTemplates[item.name];
+    }
+  });
+  roomOwnerMap = nextMap;
+  roomTokenTemplates = nextTemplates;
+
+  try {
+    await Promise.all([
+      OBR.room.setMetadata({
+        [ROOM_OWNER_MAP_KEY]: roomOwnerMap,
+        [ROOM_TOKEN_TEMPLATE_KEY]: roomTokenTemplates,
+      }),
+      OBR.scene.items.updateItems(needsId.map(item => item.id), draftItems => {
+        draftItems.forEach(item => {
+          const rosterId = idByItem.get(item.id);
+          if (rosterId) item.metadata[ROSTER_ID_METADATA_KEY] = rosterId;
+        });
+      }),
+    ]);
+  } catch (err) {
+    console.error("DCC sheet: failed to migrate roster ids", err);
+  }
+}
+
+// GM-only: for any character token whose roster key matches a persisted
 // assignment but whose native createdUserId hasn't caught up yet (new
-// scene, first time this name has appeared, etc.), re-apply it. This is
+// scene, first time this key has appeared, etc.), re-apply it. This is
 // what makes assignments carry over between scenes instead of needing to
 // be redone by hand every time. Also opportunistically refreshes
 // roomTokenTemplates for assigned tokens so the cloned copy used in
@@ -9049,7 +9136,7 @@ async function applyPersistentOwnership(items) {
   let templatesChanged = false;
   let latestTemplates = roomTokenTemplates;
   items.forEach(item => {
-    const mapped = roomOwnerMap[item.name];
+    const mapped = roomOwnerMap[rosterKeyFor(item)];
     if (mapped && mapped.id && templateNeedsRefresh(item)) {
       templatesChanged = true;
     }
@@ -9064,9 +9151,9 @@ async function applyPersistentOwnership(items) {
     }
     const nextTemplates = { ...latestTemplates };
     items.forEach(item => {
-      const mapped = roomOwnerMap[item.name];
+      const mapped = roomOwnerMap[rosterKeyFor(item)];
       if (mapped && mapped.id && templateNeedsRefresh(item)) {
-        nextTemplates[item.name] = cloneItemForTemplate(item);
+        nextTemplates[rosterKeyFor(item)] = cloneItemForTemplate(item);
       }
     });
     roomTokenTemplates = nextTemplates;
@@ -9080,11 +9167,11 @@ async function applyPersistentOwnership(items) {
   // Covers both directions: apply a positive assignment (mapped.id set),
   // and clean up a stale owner left over from before an explicit
   // unassignment (mapped exists with id: null, hands createdUserId back
-  // to the GM). Names never touched by the Owner dropdown (mapped
+  // to the GM). Tokens never touched by the Owner dropdown (mapped
   // undefined) are left alone entirely - their createdUserId is native
   // Owlbear data, not ours to touch.
   const toFix = items.filter(item => {
-    const mapped = roomOwnerMap[item.name];
+    const mapped = roomOwnerMap[rosterKeyFor(item)];
     if (!mapped) return false;
     const desired = mapped.id || currentPlayerId;
     return item.createdUserId !== desired;
@@ -9093,7 +9180,7 @@ async function applyPersistentOwnership(items) {
   try {
     await OBR.scene.items.updateItems(toFix.map(item => item.id), draftItems => {
       draftItems.forEach(item => {
-        const mapped = roomOwnerMap[item.name];
+        const mapped = roomOwnerMap[rosterKeyFor(item)];
         if (mapped) item.createdUserId = mapped.id || currentPlayerId;
       });
     });
@@ -9103,22 +9190,22 @@ async function applyPersistentOwnership(items) {
 }
 
 // GM-only: for any assigned token that has a saved template but isn't
-// present in the current scene at all (by name), add a clone of it - full
-// image, character sheet metadata, everything - so the party's tokens
+// present in the current scene at all (by roster key), add a clone of it -
+// full image, character sheet metadata, everything - so the party's tokens
 // actually show up in a new scene instead of just having their ownership
 // pre-applied once someone manually places them. New clones are lined up
 // near the scene origin since a saved position from a different map's
 // layout wouldn't mean anything here; drag them into place afterward.
 async function cloneMissingAssignedTokens(existingItems) {
   if (currentPlayerRole !== "GM") return;
-  const existingNames = new Set(existingItems.map(item => item.name));
-  const missing = Object.entries(roomOwnerMap).filter(([name, owner]) => {
-    return owner && owner.id && roomTokenTemplates[name] && !existingNames.has(name);
+  const existingKeys = new Set(existingItems.map(item => rosterKeyFor(item)));
+  const missing = Object.entries(roomOwnerMap).filter(([key, owner]) => {
+    return owner && owner.id && roomTokenTemplates[key] && !existingKeys.has(key);
   });
   if (!missing.length) return;
 
-  const newItems = missing.map(([name, owner], index) => {
-    const clone = cloneItemForTemplate(roomTokenTemplates[name]);
+  const newItems = missing.map(([key, owner], index) => {
+    const clone = cloneItemForTemplate(roomTokenTemplates[key]);
     clone.id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`;
     clone.createdUserId = owner.id;
     clone.position = { x: index * 70, y: 0 };
@@ -9164,7 +9251,7 @@ function ownerSelectOptionsHtml(assignedId, assignedName) {
 function refreshOwnerSelectForItem(item) {
   const sel = document.getElementById("owner-select");
   if (!sel) return;
-  const owner = roomOwnerMap[item.name] || null;
+  const owner = roomOwnerMap[rosterKeyFor(item)] || null;
   sel.innerHTML = ownerSelectOptionsHtml(owner ? owner.id : null, owner ? owner.name : null);
   sel.value = (owner && owner.id) ? owner.id : "";
 }
@@ -9209,7 +9296,12 @@ document.getElementById("owner-select").addEventListener("change", async () => {
     showStatus("Couldn't save - try reselecting the token", true);
     return;
   }
-  const tokenName = item.name;
+  // Mint a roster id now if this token doesn't have one yet, so its
+  // assignment survives a future rename instead of staying keyed by
+  // whatever name it happens to have right now (see rosterKeyFor).
+  const existingRosterId = item.metadata && item.metadata[ROSTER_ID_METADATA_KEY];
+  const rosterId = existingRosterId || ((window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  if (!existingRosterId) item.metadata[ROSTER_ID_METADATA_KEY] = rosterId;
 
   // Merge into a FRESH read of room metadata, not the possibly-stale local
   // roomOwnerMap/roomTokenTemplates cache. Without this, a write that
@@ -9230,22 +9322,29 @@ document.getElementById("owner-select").addEventListener("change", async () => {
   }
 
   const nextMap = { ...latestOwnerMap };
+  const nextTemplates = { ...latestTemplates };
+  // Clean up any leftover legacy entry keyed by this token's current name
+  // (from before roster ids existed) now that it's moving to rosterId.
+  if (!existingRosterId) {
+    delete nextMap[item.name];
+    delete nextTemplates[item.name];
+  }
   if (id) {
     const player = currentPartyPlayers.find(p => p.id === id);
-    nextMap[tokenName] = { id, name: player ? (player.name || "Unnamed player") : "Unknown player" };
+    nextMap[rosterId] = { id, name: player ? (player.name || "Unnamed player") : "Unknown player" };
   } else {
     // Explicitly unassigning still leaves an entry behind (id: null)
-    // rather than deleting the key. This name is now "managed" - isOwnToken
-    // and applyPersistentOwnership both treat a managed-but-unassigned
-    // entry as authoritative and will never fall back to (or leave stale)
-    // a copy's createdUserId from before this unassignment, in this scene
-    // or any other the GM later revisits.
-    nextMap[tokenName] = { id: null, name: null };
+    // rather than deleting the key. This roster id is now "managed" -
+    // isOwnToken and applyPersistentOwnership both treat a managed-but-
+    // unassigned entry as authoritative and will never fall back to (or
+    // leave stale) a copy's createdUserId from before this unassignment,
+    // in this scene or any other the GM later revisits.
+    nextMap[rosterId] = { id: null, name: null };
   }
   roomOwnerMap = nextMap;
   roomTokenTemplates = id
-    ? { ...latestTemplates, [tokenName]: cloneItemForTemplate(item) }
-    : latestTemplates;
+    ? { ...nextTemplates, [rosterId]: cloneItemForTemplate(item) }
+    : nextTemplates;
 
   // Optimistic local update - the roster reflects the new owner right
   // away instead of waiting on the writes below to round-trip and echo
@@ -9263,7 +9362,10 @@ document.getElementById("owner-select").addEventListener("change", async () => {
     // hands createdUserId back to the GM, since the GM is exempt from Owner
     // Only anyway and there's no real "nobody" value to set it to.
     OBR.scene.items.updateItems([itemId], items => {
-      items.forEach(it => { it.createdUserId = id || currentPlayerId; });
+      items.forEach(it => {
+        it.createdUserId = id || currentPlayerId;
+        it.metadata[ROSTER_ID_METADATA_KEY] = rosterId;
+      });
     }),
   ]);
 
@@ -11745,7 +11847,10 @@ OBR.onReady(async () => {
 
     lastRosterItems = items.filter(isCombatItem);
     if (viewSheetEl.style.display !== "none") renderTokenRoster();
-    if (currentPlayerRole === "GM") await applyPersistentOwnership(lastRosterItems);
+    if (currentPlayerRole === "GM") {
+      await ensureRosterIds(lastRosterItems);
+      await applyPersistentOwnership(lastRosterItems);
+    }
   });
 
   // OBR.scene.items.onChange only fires for changes WITHIN the scene this
