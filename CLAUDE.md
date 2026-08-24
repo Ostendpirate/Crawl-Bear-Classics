@@ -11,8 +11,8 @@ No build, test, or lint tooling — plain static HTML/CSS/JS files served as-is.
 ## Workflow
 
 - All project files live in this local folder: `/Users/guydelanoye/Documents/GitHub/Crawl-Bear-Classics`. Always read from and save changes here.
-- This is a local Git repo, remote `origin` on GitHub. After committing, run `git push` automatically (plain push to the current branch's tracked upstream — no force, no `--no-verify`) so GitHub Pages redeploys without the user needing to sync manually via GitHub Desktop.
-- After making a meaningful change, commit it to git with a clear, descriptive message so every version is tracked automatically, then push. Small logical changes = small separate commits, not one giant commit at the end.
+- This is a local Git repo, remote `origin` on GitHub — the command-line `git` in Claude's session has no push credentials configured (no PAT/SSH key set up for it), so the user pushes/syncs manually; never run `git push`.
+- After making a meaningful change, commit it to git with a clear, descriptive message so every version is tracked automatically. Small logical changes = small separate commits, not one giant commit at the end.
 - Do not create commits for exploratory reads or failed attempts — only for changes actually saved to the project.
 
 ## Architecture
@@ -37,7 +37,7 @@ No build, test, or lint tooling — plain static HTML/CSS/JS files served as-is.
 <!-- Branching, committing, versioning habits — since you copy new versions into this folder. -->
 - Branch naming: work happens directly on `main`; no branching convention observed.
 - Commit style: version bump commits are titled with just the version number (e.g. `1.31.0`), matching `manifest.json`'s `version` field bumped in the same commit. Feature/fix commits use short imperative or descriptive titles (e.g. `Spells`, `feat: add styles for poison status and weapons`).
-- Push after every commit (see Workflow above) — GitHub Desktop is no longer the sync path.
+- Do not: run `git push` (see Workflow above — no push credentials configured for this session; user pushes manually).
 
 ## Notes
 
