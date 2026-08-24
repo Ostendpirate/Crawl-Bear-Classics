@@ -9528,6 +9528,31 @@ let roomOwnerMap = {};
 const ROOM_TOKEN_TEMPLATE_KEY = "com.claude.monster-sheet/token-templates";
 let roomTokenTemplates = {};
 
+// Serializes every "read the latest ROOM_OWNER_MAP_KEY/
+// ROOM_TOKEN_TEMPLATE_KEY, compute the next state, write it back" cycle
+// in this file (ensureRosterIds, applyPersistentOwnership's template
+// refresh, cloneMissingAssignedTokens, toggleTokenSaved, and the Owner
+// dropdown's assignment handler all do this independently). Without a
+// shared lock, two of these running concurrently - trivially easy to
+// trigger, since items.onChange fires constantly during play and
+// clicking two different roster ★ toggles in quick succession does it
+// too - race: whichever's own read lands first doesn't see the other's
+// not-yet-committed write, so its own write later silently overwrites
+// (loses) that change. This was the actual mechanism behind both "only
+// one save toggle sticks when I click several" and an NPC quietly losing
+// its roomTokenTemplates entry mid-play, which cloneMissingAssignedTokens
+// then (correctly, given what it can see) treats as legitimately missing
+// and clones a duplicate of. Every function that touches either key
+// wraps its whole body in withRoomMetadataLock so at most one such cycle
+// is ever in flight at a time, regardless of which of the several call
+// paths triggered it.
+let roomMetadataQueue = Promise.resolve();
+function withRoomMetadataLock(fn) {
+  const run = roomMetadataQueue.then(fn, fn);
+  roomMetadataQueue = run.then(() => {}, () => {});
+  return run;
+}
+
 // roomOwnerMap/roomTokenTemplates are keyed by this, not item.name - a
 // UUID stamped into item.metadata the first time a token is managed
 // (ensureRosterIds/the Owner dropdown handler below), so the mapping
@@ -9679,7 +9704,13 @@ document.getElementById("token-roster-toggle").addEventListener("click", () => {
 // controls can still be saved - and an assigned character doesn't have
 // to be saved. Un-saving only removes the template; it never touches
 // this token's current ownership or deletes it from any scene.
-async function toggleTokenSaved(itemId) {
+// Queued through withRoomMetadataLock (see its own comment) - clicking
+// the ★ on several different roster rows in a row is exactly the
+// concurrent-toggle race that lock exists for.
+function toggleTokenSaved(itemId) {
+  return withRoomMetadataLock(() => toggleTokenSavedImpl(itemId));
+}
+async function toggleTokenSavedImpl(itemId) {
   if (currentPlayerRole !== "GM") return;
   let item;
   try {
@@ -9798,7 +9829,13 @@ async function refreshTokenRoster() {
 // there on the map). Sequencing item-write-first-and-confirmed makes a
 // partial failure fully retryable instead: nothing in room metadata
 // changes until the item side has already succeeded.
-async function ensureRosterIds(items) {
+// Queued through withRoomMetadataLock (see its own comment) - runs on
+// every items.onChange, so without this it's constantly racing every
+// other room-metadata read-modify-write cycle in this file.
+function ensureRosterIds(items) {
+  return withRoomMetadataLock(() => ensureRosterIdsImpl(items));
+}
+async function ensureRosterIdsImpl(items) {
   if (currentPlayerRole !== "GM") return;
   const needsId = items.filter(item =>
     isCombatItem(item) &&
@@ -9886,7 +9923,13 @@ function desiredOwnerIdFor(item) {
 // cloned copy used in cloneMissingAssignedTokens stays reasonably
 // current - independent of ownership, since a saved token doesn't need
 // to be assigned to anyone.
-async function applyPersistentOwnership(items) {
+// Queued through withRoomMetadataLock (see its own comment) - runs on
+// every items.onChange, so without this it's constantly racing every
+// other room-metadata read-modify-write cycle in this file.
+function applyPersistentOwnership(items) {
+  return withRoomMetadataLock(() => applyPersistentOwnershipImpl(items));
+}
+async function applyPersistentOwnershipImpl(items) {
   if (currentPlayerRole !== "GM") return;
 
   let templatesChanged = false;
@@ -9955,61 +9998,56 @@ async function applyPersistentOwnership(items) {
 // layout wouldn't mean anything here; drag them into place afterward.
 // An Owlbear reload fires OBR.onReady's own boot call to refreshTokenRoster
 // AND OBR.scene.onReadyChange's "scene's already ready" callback close
-// together (sometimes the same tick) - without this guard, two overlapping
-// calls here would each see the same assigned character as "missing"
-// (neither has added it yet) and both clone it, duplicating it in the
-// roster. A call that arrives while one's still running just waits on the
-// in-flight one's result instead of independently re-running the same
-// missing-token check.
-let cloneMissingAssignedTokensInFlight = null;
-async function cloneMissingAssignedTokens(existingItems) {
+// together (sometimes the same tick) - without serializing this against
+// every other room-metadata reader/writer (withRoomMetadataLock - see its
+// own comment), two overlapping calls here could each see the same saved
+// character as "missing" (neither has added it yet) and both clone it,
+// duplicating it in the roster; or one could run against a
+// roomTokenTemplates that ensureRosterIds/applyPersistentOwnership/
+// toggleTokenSaved was still mid-update on.
+function cloneMissingAssignedTokens(existingItems) {
+  return withRoomMetadataLock(() => cloneMissingAssignedTokensImpl(existingItems));
+}
+async function cloneMissingAssignedTokensImpl(existingItems) {
   if (currentPlayerRole !== "GM") return;
-  if (cloneMissingAssignedTokensInFlight) return cloneMissingAssignedTokensInFlight;
-  cloneMissingAssignedTokensInFlight = (async () => {
-    // Driven by roomTokenTemplates (the "saved" set - see
-    // toggleTokenSaved), not roomOwnerMap - a saved character follows the
-    // party into a new scene whether or not it's actually assigned to a
-    // player; ownership (if any) is applied separately below.
-    const existingKeys = new Set(existingItems.map(item => rosterKeyFor(item)));
-    const missing = Object.keys(roomTokenTemplates).filter(key => !existingKeys.has(key));
-    if (!missing.length) return;
+  // Driven by roomTokenTemplates (the "saved" set - see
+  // toggleTokenSaved), not roomOwnerMap - a saved character follows the
+  // party into a new scene whether or not it's actually assigned to a
+  // player; ownership (if any) is applied separately below.
+  const existingKeys = new Set(existingItems.map(item => rosterKeyFor(item)));
+  const missing = Object.keys(roomTokenTemplates).filter(key => !existingKeys.has(key));
+  if (!missing.length) return;
 
-    const newItems = missing.map((key, index) => {
-      const clone = cloneItemForTemplate(roomTokenTemplates[key]);
-      // Deterministic id (the roster key itself, already a UUID once
-      // migrated - see ensureRosterIds) rather than a freshly-random one.
-      // cloneMissingAssignedTokensInFlight above only dedupes overlapping
-      // calls WITHIN this one client; it can't stop two separate clients
-      // (e.g. an Owlbear reload firing OBR.onReady's own boot call and
-      // OBR.scene.onReadyChange's "already ready" callback in two
-      // different tabs/sessions at once) from each concluding this same
-      // character is missing and each adding their own copy. Giving both
-      // clones the SAME id means at most one add can actually stick -
-      // OBR either rejects the second (caught below, harmless) or
-      // treats it as an overwrite of the first - so either way there's
-      // never a second, visibly duplicate token.
-      clone.id = key;
-      const owner = roomOwnerMap[key];
-      clone.createdUserId = (owner && owner.id) || currentPlayerId;
-      clone.position = { x: index * 70, y: 0 };
-      return clone;
-    });
+  const newItems = missing.map((key, index) => {
+    const clone = cloneItemForTemplate(roomTokenTemplates[key]);
+    // Deterministic id (the roster key itself, already a UUID once
+    // migrated - see ensureRosterIds) rather than a freshly-random one.
+    // withRoomMetadataLock above only dedupes overlapping calls WITHIN
+    // this one client; it can't stop two separate clients (e.g. an
+    // Owlbear reload firing OBR.onReady's own boot call and
+    // OBR.scene.onReadyChange's "already ready" callback in two
+    // different tabs/sessions at once) from each concluding this same
+    // character is missing and each adding their own copy. Giving both
+    // clones the SAME id means at most one add can actually stick - OBR
+    // either rejects the second (caught below, harmless) or treats it as
+    // an overwrite of the first - so either way there's never a second,
+    // visibly duplicate token.
+    clone.id = key;
+    const owner = roomOwnerMap[key];
+    clone.createdUserId = (owner && owner.id) || currentPlayerId;
+    clone.position = { x: index * 70, y: 0 };
+    return clone;
+  });
 
-    try {
-      await OBR.scene.items.addItems(newItems);
-      showTrackerStatus(
-        `Added ${newItems.length} token${newItems.length > 1 ? "s" : ""} from your saved roster near the scene origin.`,
-        false,
-        5000
-      );
-    } catch (err) {
-      console.error("DCC sheet: failed to clone tokens into new scene", err);
-    }
-  })();
   try {
-    await cloneMissingAssignedTokensInFlight;
-  } finally {
-    cloneMissingAssignedTokensInFlight = null;
+    await OBR.scene.items.addItems(newItems);
+    showTrackerStatus(
+      `Added ${newItems.length} token${newItems.length > 1 ? "s" : ""} from your saved roster near the scene origin.`,
+      false,
+      5000
+    );
+  } catch (err) {
+    console.error("DCC sheet: failed to clone tokens into new scene", err);
   }
 }
 
@@ -10064,15 +10102,25 @@ function refreshOwnerSelectOptions() {
   sel.value = prevValue;
 }
 
-document.getElementById("owner-select").addEventListener("change", async () => {
+document.getElementById("owner-select").addEventListener("change", () => {
   const sel = document.getElementById("owner-select");
   if (!currentItemId) return;
   const id = sel.value;
   const itemId = currentItemId;
 
+  // Disabling + showing "Saving" happens immediately, outside the lock -
+  // the actual read-modify-write work below is queued through
+  // withRoomMetadataLock (see its own comment) so it can't race a
+  // concurrent roster ★ toggle or an items.onChange-triggered
+  // ensureRosterIds/applyPersistentOwnership pass, but there's no reason
+  // to delay the "something is happening" feedback on this click for
+  // however long this client's turn in that queue takes.
   sel.disabled = true;
   showStatus("Saving owner…");
+  withRoomMetadataLock(() => handleOwnerSelectChange(id, itemId, sel));
+});
 
+async function handleOwnerSelectChange(id, itemId, sel) {
   let item;
   try {
     [item] = await OBR.scene.items.getItems([itemId]);
@@ -10188,7 +10236,7 @@ document.getElementById("owner-select").addEventListener("change", async () => {
     sel.disabled = false;
     showStatus("Owner saved locally, but sync failed - try again", true);
   }
-});
+}
 
 function computeOrder(items) {
   return items.slice().sort((a, b) => {
