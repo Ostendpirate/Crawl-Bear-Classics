@@ -9371,31 +9371,48 @@ async function applyPersistentOwnership(items) {
 // pre-applied once someone manually places them. New clones are lined up
 // near the scene origin since a saved position from a different map's
 // layout wouldn't mean anything here; drag them into place afterward.
+// An Owlbear reload fires OBR.onReady's own boot call to refreshTokenRoster
+// AND OBR.scene.onReadyChange's "scene's already ready" callback close
+// together (sometimes the same tick) - without this guard, two overlapping
+// calls here would each see the same assigned character as "missing"
+// (neither has added it yet) and both clone it, duplicating it in the
+// roster. A call that arrives while one's still running just waits on the
+// in-flight one's result instead of independently re-running the same
+// missing-token check.
+let cloneMissingAssignedTokensInFlight = null;
 async function cloneMissingAssignedTokens(existingItems) {
   if (currentPlayerRole !== "GM") return;
-  const existingKeys = new Set(existingItems.map(item => rosterKeyFor(item)));
-  const missing = Object.entries(roomOwnerMap).filter(([key, owner]) => {
-    return owner && owner.id && roomTokenTemplates[key] && !existingKeys.has(key);
-  });
-  if (!missing.length) return;
+  if (cloneMissingAssignedTokensInFlight) return cloneMissingAssignedTokensInFlight;
+  cloneMissingAssignedTokensInFlight = (async () => {
+    const existingKeys = new Set(existingItems.map(item => rosterKeyFor(item)));
+    const missing = Object.entries(roomOwnerMap).filter(([key, owner]) => {
+      return owner && owner.id && roomTokenTemplates[key] && !existingKeys.has(key);
+    });
+    if (!missing.length) return;
 
-  const newItems = missing.map(([key, owner], index) => {
-    const clone = cloneItemForTemplate(roomTokenTemplates[key]);
-    clone.id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`;
-    clone.createdUserId = owner.id;
-    clone.position = { x: index * 70, y: 0 };
-    return clone;
-  });
+    const newItems = missing.map(([key, owner], index) => {
+      const clone = cloneItemForTemplate(roomTokenTemplates[key]);
+      clone.id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`;
+      clone.createdUserId = owner.id;
+      clone.position = { x: index * 70, y: 0 };
+      return clone;
+    });
 
+    try {
+      await OBR.scene.items.addItems(newItems);
+      showTrackerStatus(
+        `Added ${newItems.length} token${newItems.length > 1 ? "s" : ""} from your saved roster near the scene origin.`,
+        false,
+        5000
+      );
+    } catch (err) {
+      console.error("DCC sheet: failed to clone tokens into new scene", err);
+    }
+  })();
   try {
-    await OBR.scene.items.addItems(newItems);
-    showTrackerStatus(
-      `Added ${newItems.length} token${newItems.length > 1 ? "s" : ""} from your saved roster near the scene origin.`,
-      false,
-      5000
-    );
-  } catch (err) {
-    console.error("DCC sheet: failed to clone tokens into new scene", err);
+    await cloneMissingAssignedTokensInFlight;
+  } finally {
+    cloneMissingAssignedTokensInFlight = null;
   }
 }
 
