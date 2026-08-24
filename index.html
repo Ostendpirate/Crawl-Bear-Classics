@@ -665,14 +665,35 @@
     color: var(--muted);
     line-height: 1.3;
   }
+  /* A small bordered-top, uppercase label that introduces one editable
+     sub-section of a Spells-list row (Manifestation, Mercurial Magic) -
+     shared so every such section reads consistently instead of each
+     field only being identifiable by its own placeholder text (which
+     disappears the moment something's typed into it). */
+  .spell-section-header {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    font-weight: 700;
+    color: var(--muted);
+    margin-bottom: 4px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(69, 57, 46, 0.5);
+  }
+  .spell-section-header .spell-section-icon { font-size: 11px; }
+  .spell-section-hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
   .mercurial-row { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
-  .mercurial-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .mercurial-row > .spell-section-header { margin-top: 0; }
+  .mercurial-controls { display: flex; align-items: flex-end; gap: 6px; flex-wrap: wrap; }
   .mercurial-roll { flex: none; width: 40px; font-size: 11px; font-weight: 700; color: var(--accent); padding: 4px 2px; background: var(--border); border: none; border-radius: 5px; text-align: center; }
-  .mercurial-field { display: flex; align-items: center; gap: 4px; flex: none; }
+  .mercurial-field { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; flex: none; }
   .mercurial-field-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--muted); white-space: nowrap; }
   .mercurial-controls input[type=text] { flex: none; width: 46px; text-align: center; font-size: 11px; padding: 4px 2px; }
   .mercurial-row .mercurial-note { flex: 1; min-width: 0; font-size: 11px; padding: 4px 6px; min-height: 32px; resize: none; overflow-y: hidden; }
-  .manifestation-note { font-size: 11px; padding: 4px 6px; min-height: 32px; margin-top: 4px; }
+  .manifestation-note { font-size: 11px; padding: 4px 6px; min-height: 32px; margin-top: 0; resize: none; overflow-y: hidden; }
   .spellburn-row, .attack-detail-burn-row { margin-top: 4px; }
   /* .hp-btn's base size (22x22px, meant for one icon glyph) squeezes any
      button that also carries a text label - both this row's own
@@ -7063,8 +7084,12 @@ function mercurialMagicRowForRoll(roll) {
 // looked up from the table by the caller - this function only renders).
 function mercurialRowMarkup(roll, note, bonus, dieSteps) {
   return `<div class="mercurial-row">
+      <div class="spell-section-header"><span class="spell-section-icon">✨</span> Mercurial Magic <span class="spell-section-hint">Table 5-2</span></div>
       <div class="mercurial-controls">
-        <input type="number" class="mercurial-roll" min="1" max="100" value="${escapeHtml(String(roll))}" title="This spell's Mercurial Magic roll (Table 5-2, d%) - edit it directly (e.g. to match dice you rolled at the table) and the note/bonus/die-step fields below update to match." />
+        <label class="mercurial-field">
+          <span class="mercurial-field-label">Roll</span>
+          <input type="number" class="mercurial-roll" min="1" max="100" value="${escapeHtml(String(roll))}" title="This spell's Mercurial Magic roll (Table 5-2, d%) - edit it directly (e.g. to match dice you rolled at the table) and the note/bonus/die-step fields below update to match." />
+        </label>
         <label class="mercurial-field">
           <span class="mercurial-field-label">Check Bonus</span>
           <input type="text" class="mercurial-bonus" placeholder="+0" title="Flat bonus/penalty this spell's Mercurial Magic applies to its Spell Check - auto-filled where Table 5-2 specifies one for this roll, editable for anything the table leaves to the judge. Added automatically to every roll of this spell." value="${escapeHtml(bonus || "")}" />
@@ -7379,7 +7404,8 @@ function concentrationCheckboxHtml(item) {
 // get wrong (see the Mercurial Magic button's own history of exactly that
 // bug) - an unused field on a still-blank row is harmless.
 function manifestationFieldHtml(item) {
-  return `<textarea class="manifestation-note" placeholder="Manifestation (roll per this spell's own entry in your rulebook) - optional" rows="2">${escapeHtml(item.manifestation || "")}</textarea>`;
+  return `<div class="spell-section-header">Manifestation <span class="spell-section-hint">optional</span></div>
+    <textarea class="manifestation-note" placeholder="Roll per this spell's own entry in your rulebook" rows="2">${escapeHtml(item.manifestation || "")}</textarea>`;
 }
 
 function spellsListEl() {
@@ -7447,8 +7473,17 @@ function attachSpellRowListeners() {
     const textEl = row.querySelector(".spell-row-name");
     if (textEl) textEl.addEventListener("input", scheduleSave);
     // Present on every row regardless of class (see manifestationFieldHtml).
+    // Auto-resized like .mercurial-note (see autoResizeTextarea) so a
+    // longer manifestation description doesn't get stuck scrolling inside
+    // a fixed 2-line box.
     const manifestationEl = row.querySelector(".manifestation-note");
-    if (manifestationEl) manifestationEl.addEventListener("input", scheduleSave);
+    if (manifestationEl) {
+      autoResizeTextarea(manifestationEl);
+      manifestationEl.addEventListener("input", () => {
+        autoResizeTextarea(manifestationEl);
+        scheduleSave();
+      });
+    }
     // Present on every row regardless of class (see concentrationCheckboxHtml).
     const concentrationEl = row.querySelector(".spell-concentration");
     if (concentrationEl) concentrationEl.addEventListener("change", scheduleSave);
