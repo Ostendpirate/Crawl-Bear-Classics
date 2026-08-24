@@ -666,7 +666,7 @@
   }
   .mercurial-row { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
   .mercurial-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .mercurial-roll-label { flex: none; font-size: 10px; font-weight: 700; color: var(--accent); padding: 4px 6px; background: var(--border); border-radius: 5px; white-space: nowrap; }
+  .mercurial-roll { flex: none; width: 40px; font-size: 11px; font-weight: 700; color: var(--accent); padding: 4px 2px; background: var(--border); border: none; border-radius: 5px; text-align: center; }
   .mercurial-field { display: flex; align-items: center; gap: 4px; flex: none; }
   .mercurial-field-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--muted); white-space: nowrap; }
   .mercurial-controls input[type=text] { flex: none; width: 46px; text-align: center; font-size: 11px; padding: 4px 2px; }
@@ -6508,6 +6508,182 @@ function dccWizardSpellOptionsHtml(selectedValue) {
   return `${placeholder}${staleOption}${groups}<optgroup label="Other">${customOption}</optgroup>`;
 }
 
+// Table 5-2: Mercurial Magic - a Wizard/Elf's permanent, once-per-known-
+// spell quirk (DCC RPG Reference Sheets, the free booklet this app's
+// other tables already source from - see CRIT_TABLES/FUMBLE_TABLE above).
+// Most results are pure narrative/conditional flavor with no clean
+// numeric shape; a handful reduce to a flat die-chain shift on this
+// spell's OWN Spell Check (see the `dieSteps`/`bonus` fields below,
+// consumed by mercurialAdjustmentForSpell) - conditional or variable
+// effects (e.g. "+1 per assisting wizard," "-4 unless a creature is
+// sacrificed") are deliberately left unset so a GM's judgment call isn't
+// silently baked in as a flat number.
+const MERCURIAL_MAGIC_TABLE = {
+  label: "Mercurial Magic — Table 5-2",
+  rows: [
+    { min: 1, max: 1, text: "At great cost. Every time the wizard casts the spell, someone he knows dies (judge's choice)." },
+    { min: 2, max: 2, text: "Extremely difficult to cast. Instead of rolling as normal on a spell check, the wizard rolls a die type reduced by two steps on the dice chain (e.g., if he normally rolls 1d20, he now rolls 1d14).", dieSteps: -2 },
+    { min: 3, max: 3, text: "Soul dedication. In order to cast the spell, the wizard must either dedicate the soul of the target to his patron or the soul of a creature with hit dice equal to that of the target. If the caster fails to claim the soul for his patron, the spell cannot be recast until the patron is appeased." },
+    { min: 4, max: 4, text: "Health bane. Casting this spell always temporarily reduces the wizard's Stamina by 1d3 points. This ability loss is in addition to any spellburn and is deducted before spellburn occurs." },
+    { min: 5, max: 5, text: "Difficult to cast. Instead of rolling as normal on a spell check, the wizard rolls a reduced die (based on the dice chain; i.e., d20 becomes d16).", dieSteps: -1 },
+    { min: 6, max: 6, text: "Counter-magic bubble. In the round following the casting of this spell, all other spells (including the wizard's own) cast within 100' suffer a -4 penalty to spell checks." },
+    { min: 7, max: 7, text: "Luck distortion. For 1d4 rounds following the spell, the wizard suffers a -2 penalty to all rolls." },
+    { min: 8, max: 8, text: "Count of ten. Each time the wizard casts this spell, one of his fingers (or toes at the judge's discretion) melts away. For every two digits lost, he suffers a permanent -1 penalty to Agility. The digits can be replaced by magic, but if the wizard ever runs out of them, he cannot cast this spell." },
+    { min: 9, max: 9, text: "Anima drain. The wizard suffers corruption every time he casts the spell, regardless of spell check, unless he spellburns." },
+    { min: 10, max: 10, text: "Blood magic. The power of this spell is partially drawn from spilled blood, a sacrifice to the unknowable lords of Magic. A living creature with hit points equal to or greater than the spell's level must be offered up before the spell is cast; otherwise, the spell check suffers a -4 penalty or patron taint (judge's choice). The creature need not be sentient; chickens, goats, and other simple animals with the proper amount of hit points will suffice." },
+    { min: 11, max: 11, text: "Planar rift. Casting the spell tears jagged hole in the warp and weft of the multiverse. There is a cumulative 1% chance that a horror from the outer dark steps through the rift. The fearsome creature has HD equal to the caster's level + 5. Roll 1d3: (1) the monster steals the spell from the PC's mind before vanishing forever; (2) the monster attacks the PC with the intent to slay the caster; (3) the monster seeks to strike a bargain with the caster, offering the PC forbidden knowledge (judge's choice) in exchange for the souls of the caster's party." },
+    { min: 12, max: 12, text: "Magical reverb. For 1d4 rounds after the spell is cast, a backwash of eldritch energy passes over the wizard. Any spell checks the wizard makes during that time suffer a -4 penalty." },
+    { min: 13, max: 13, text: "Slow cast. The spell requires twice the normal time to cast." },
+    { min: 14, max: 14, text: "Sleep of ages. After casting this spell, the wizard must make a Fort save (DC 5 + the spell's level) or fall into a deep sleep for 1 day for each level of the spell. He cannot be awakened by any mundane or magical means during this time." },
+    { min: 15, max: 15, text: "Material magic. The spell requires the caster to possess an uncommon substance or item to power its magic, beyond the normal components. This material component is determined by the judge and its rarity should be indicative of the spell's power. The object or item is consumed by a successful casting." },
+    { min: 16, max: 16, text: "Primordial channel. Memories from before the time of Man flood the caster's mind as he takes on a primitive demeanor. Every time he casts this spell, the wizard devolves to sub-human tendencies for 1d4 rounds thereafter. During this time, he cannot speak intelligently, cannot cast other spells, cannot use complex devices, cannot read or write, etc." },
+    { min: 17, max: 17, text: "Stolen knowledge. The formula for the spell was stolen from a powerful extraplanar being. Each time the spell is cast there is a 1% chance per spell level that the being emerges to take back its occult knowledge… the hard way. Roll 1d7: (1) Grand Sultan of the Efreet; (2) the great Cthulhu; (3) a Grand Prince of Hell; (4) an elephant-faced godling of the Outer Dark; (5) the spirit of a long dead archmage; (6) a mechanized brain from the distant future; (7) an elemental prince." },
+    { min: 18, max: 18, text: "Vermin attractor. The spell attracts a swarm of bothersome insects to the caster's location that arrive 1d4 rounds after the spell is completed. These insects mill about the caster, biting for 1 point of damage and causing the caster to suffer a -1 penalty to all saving throws, initiative rolls, and spell checks for 1d10 rounds or until he takes adequate measures to disperse or escape the swarm." },
+    { min: 19, max: 19, text: "Siphon magic. Casting this spell has a 50% chance of causing the caster or another nearby person to forget a spell of equal level for the day as if they had failed a spell check. If it is determined that a spell caster loses a spell, there is a 3 in 4 chance it is the wizard himself and a 1 in 4 chance it affects the next closest spell caster. If the affected spell caster does not have a spell of the appropriate level, he takes damage equal 1d6 + the spell's level." },
+    { min: 20, max: 20, text: "Rush of wind. A great rush of wind occurs every time the spell is cast, originating from the caster toward his target. Torches flicker and may go out (50% chance)." },
+    { min: 21, max: 21, text: "Corrosion touch. The casting of this spell causes a randomly determined item of steel or iron to corrode and pit in a 15' radius around the caster. The item corroded by the casting is always of dagger-size or larger and chosen at random. If the wizard voluntarily holds or touches a metal item of the appropriate size while casting, that object is destroyed and no other." },
+    { min: 22, max: 22, text: "Sympathetic magic. The spell requires that the caster have a personal belonging or a physical piece of its target in order to function normally. The spell can be cast without this sympathetic connection, but the wizard suffers a -4 penalty to his spell check." },
+    { min: 23, max: 23, text: "Cannibal magic. The caster suffers damage equal to 1d4+the spell's level each time he casts it, unless he is physically touching another individual willing to suffer the damage in his stead. Unwilling or unknowing individuals cannot be forced to suffer for the wizard." },
+    { min: 24, max: 24, text: "Prismatic distortion. Nearby light is distorted. Roll 1d6: (1) area within 20' darkens to shadow; (2) all light sources (torches, lanterns, etc.) within 20' are extinguished magically; (3) incandescent flash upon completion of spell; (4) all colors are drained from within 20' of wizard for 1d4 rounds; (5) light takes on a green/orange/blue/yellow hue for 1d4 rounds; (6) shadows multiply from different directions, as if there were additional, invisible light sources, for 1d4 rounds after completion." },
+    { min: 25, max: 25, text: "Terror-inducing. Casting the spell inspires terror in animals and creatures with an Intelligence score of 3 or less. All such creatures within 50' flee the caster as quickly as possible for 1d14 rounds. If restrained, the animals panic, insensate to all commands. The caster's familiar, if any, is immune." },
+    { min: 26, max: 26, text: "Auditory feedback. Spell is always associated with unusual sounds. Roll 1d6: (1) crack of thunder, (2) loud buzzing, (3) faint whispers; (4) rush of water; (5) roaring of animals; (6) wailing of bereavement." },
+    { min: 27, max: 27, text: "No range. The spell has no range, and can only be cast by touching the target. If the spell normally has a range of only touch, it can only be cast exactly 10 feet away from the target." },
+    { min: 28, max: 28, text: "Odd growths. Strange growths appear in immediate area whenever spell is cast. Roll 1d6: (1) toadstools; (2) pools of slime; (3) flowers; (4) black fungus; (5) crystals; (6) fields of wheat." },
+    { min: 29, max: 29, text: "Fear and loathing. The caster's forbidden knowledge inspires fearsome antipathy in intelligent beings. Friendly allies are immune, but all others are affected as follows: those of half the caster's HD or less must make a morale check or flee, those of greater HD focus all their attacks on the caster." },
+    { min: 30, max: 30, text: "Memories of a dying god. Casting the spell accesses the memories of a dying god. The caster must succeed on a DC 13 Will save or be overcome by hallucinations of a bloody god-war that last 1d3 rounds. If the caster ever succeeds on the Will save with a natural 20, he triumphs over the god and is never troubled by the hallucinations again. Once dispelled, all future spell checks for this spell are made with 1d24." },
+    { min: 31, max: 31, text: "Unwanted attention. Casting the spell draws the attention of a powerful supernatural being, who watches the wizard for 10 minutes. Roll 1d4: (1) a bloodshot eye opens on the wizard's forehead, seeing everything the wizard sees; (2) a small animal (crow, frog, cat, etc.) appears and follows the wizard around; (3) the wizard and his allies feel as if something huge and terrible is standing right behind them; (4) an agent of the supernatural being appears and interrogates the wizard on his use of the spell." },
+    { min: 32, max: 32, text: "Circumstantial magic. The wizard can only cast this spell under specific environmental or personal conditions. Roll 1d10 to determine the condition: (1) in the dark of night; (2) under the brightness of the sun; (3) while immersed in water; (4) while intoxicated; (5) after fasting for 24 hours; (6) underground; (7) during the cold of winter; (8) while naked; (9) from an elevated position; (10) when reduced to 50% or less of total hit points." },
+    { min: 33, max: 33, text: "Hairy magic. The wizard's head hair (hair, beard, eyebrows, ear hair, etc.) grows 1\" each time this spell is cast." },
+    { min: 34, max: 34, text: "Thunderstruck. A clap of thunder and flash of heat lightning accompanies the casting of this spell, revealing the wizard's position to all within sight of him. This likely draws both attention and arrows." },
+    { min: 35, max: 35, text: "Joe Average. Instead of a d20, the caster rolls 2d10 for spell checks on this spell. If his check die is another type, he rolls two \"half-dice\" instead (i.e., 2d7 instead of 1d14, 2d8 instead of 1d16, etc.)." },
+    { min: 36, max: 36, text: "Demonic voice. The words of the spell are in a demonic tongue unknown to mortals. A demon is compelled/allowed to speak the spell through the wizard's own throat. The strain of channeling the unnatural voice leaves the wizard unable to speak for 1d4 rounds after the spell has been cast." },
+    { min: 37, max: 37, text: "Aura of decay. The spell drains the physical form of all material of a certain type within 20 feet of the caster, causing it to age quickly. Roll 1d6: (1) metal tarnishes and spots of rust appear on it; (2) wood dries out, becoming brittle and cracked; (3) stone becomes smooth and worn, with small cracks appearing in it; (4) fabrics and leathers fray and tear; (5) food and drink spoils; (6) flesh ages and all creatures within the effect age one year." },
+    { min: 38, max: 38, text: "Whimsical patron. The spell draws upon the wizard's patron to succeed, but this entity's attentions are notoriously fickle. Whenever this spell is cast, roll 1d6 to determine what die is used whenever this spell is cast: (1-2) d16; (3-4) d20; (5) d24; (6) d30. This d6 roll supersedes the wizard's normal action die and the dice chain." },
+    { min: 39, max: 39, text: "Blood sweat. Casting the spell causes blood to ooze from the wizard's pores. No damage is inflicted, but the wizard looks a gory mess. At the judge's discretion, this may also attract predators." },
+    { min: 40, max: 40, text: "Ravenous. The wizard becomes ravenously hungry after casting the spell. Hungry people are often cranky, so the wizard suffers a -2 Personality until he is able to eat." },
+    { min: 41, max: 60, text: "No change. The spell manifests as standard.", bonus: 0, dieSteps: 0 },
+    { min: 61, max: 61, text: "Loud enough for you? Due to the ineffable demands of magic, this spell must be shouted when cast, effectively negating any chance of the caster remaining undetected before the casting is completed." },
+    { min: 62, max: 62, text: "Gender bender. Casting the spell causes the wizard to temporarily transform into the opposite gender. This sex change remains in effect for one hour per level of the spell. Recasting the spell shifts the caster back into his original sex, but a failure on the spell check causes the wizard to remain as the shifted gender until a full 24 hours have passed." },
+    { min: 63, max: 63, text: "Diurnal/nocturnal magic. The spell's power is tied to either night or day. During the ascendant period, the wizard rolls 1d24 for spell checks; during the descendent hours he rolls 1d16. If the wizard's spell check does not use a 1d20, roll an appropriately higher and lower die according to the dice chain." },
+    { min: 64, max: 64, text: "Wealful/woeful magic. Each time this spell is cast, there is a random 10%-60% chance that the wizard's Luck score is altered by its magic. If the wizard's Luck is affected, it is either raised 1d3 points (50% chance) or lowered 1d3 points (50% chance)." },
+    { min: 65, max: 65, text: "Casting circle. The spell's power can be amplified with the assistance of other wizards. For each wizard present and willing to assist the caster, the casting wizard gets a +1 modifier to his spell check. Assisting in spell casting does not require knowledge of the spell, but the assistant mages can perform no other action until the spell is cast." },
+    { min: 66, max: 66, text: "Accidental alchemist. Each time the spell is cast, one random item within 20 feet of the caster is turned to lead and another is turned to gold. Both objects probably weigh more than they previously did, and the gold object is worth twice its normal cost or 1 gp, whichever is more." },
+    { min: 67, max: 67, text: "St. Gygakk's fire. Casting this spell results in the wizard being limned by flickering chartreuse fire for 1d4 rounds, granting opponents a +2 bonus to attacks against the caster. It also negates any concealment and invisibility enjoyed by the caster, but does provide a faint illumination to the area immediately surrounding the wizard." },
+    { min: 68, max: 68, text: "Mirror magic. This spell causes an eldritch echo that duplicates the wizard's appearance as if he had cast a mirror image spell with a spell check of 16-19. However, each duplicate image created saps the caster of a single point of Personality until the image is dispersed." },
+    { min: 69, max: 69, text: "Skeletal caster. The wizard's skin and internal organs become transparent for 1d4 rounds after casting this spell, making him appear as a clothed skeleton. Although likely to be mistaken as an un-dead, the wizard also enjoys a +2 bonus to his AC against missile attacks." },
+    { min: 70, max: 70, text: "Temporal echo. Each time the wizard casts this spell, he predicts the numerical result of his spell check roll. If he rolls this number exactly, the spell automatically re-casts itself each round for 1d3 rounds. The predicted result must be a successful spell check; predicting a failed result has no effect." },
+    { min: 71, max: 71, text: "Worms of the earth. Pale white worms crawl forth from the earth whenever the wizard casts this spell, writhing in fiery agony (or unholy delight) before expiring on the open ground. Easily crushed underfoot, the worms disintegrate into greasy ash after 1d6 rounds." },
+    { min: 72, max: 72, text: "Chain casting. Each successive casting of the spell grants a +1 bonus to wizard's spell check, up to a total bonus equal to the caster's Int or Luck modifier (whichever is higher). If the wizard casts another spell, he breaks the chain, resetting the modifier back to +0." },
+    { min: 73, max: 73, text: "Karmic casting. Before making the spell check, the wizard can choose to add or subtract 1d5 from the roll. If the caster adds 1d5, the next time he casts the spell he must subtract 1d5, and vice versa. After two castings, the karma is reset, and the wizard again gets to choose what modifier to use, if any." },
+    { min: 74, max: 74, text: "Tide of ash. All living vegetative matter within 10' per spell level is reduced to ash. Vegetative creatures caught within this radius take 1d14 points of damage per spell level. Dead vegetative matter is unaffected." },
+    { min: 75, max: 75, text: "Spell by proxy. The wizard can choose another person or object to deliver this spell in his stead. He must first touch the proxy and then cast the spell, which does not take effect at that time. The proxy releases the spell a number of rounds later equal to 1d4+the spell's level. Non-intelligent proxies automatically release the spell at this time; intelligent proxies can release it at will at any point prior to the time indicated." },
+    { min: 76, max: 76, text: "Silenced. At his discretion, the wizard is able to cast the spell silently. He need not speak, and any auditory effects of the spell can be suppressed." },
+    { min: 77, max: 77, text: "Call of the Outer Dark. Strange chimes scream in the air and foreign stars waver above the wizard. All looking at the caster must make DC 10 Will saves or be entranced for 1d3 rounds. Attacking entranced characters instantly frees them from their enchantment." },
+    { min: 78, max: 78, text: "Mentalism. The wizard can cast the spell using ESP alone. He need not move, speak, breathe, or use any material ingredients to invoke the effects." },
+    { min: 79, max: 79, text: "Plague of rats. Thousands of rats, mice, moles and voles pour from the caster's sleeves, robes and pockets, scattering in every direction. Physical attacks against the caster are softened by 1d4 points of damage, the blow cushioned by the squealing tide of rodents." },
+    { min: 80, max: 80, text: "Dimensional schism. By casting the spell, the wizard hurls himself into the warp of multiple realities. 1d7+1 duplicates of the caster appear, identical in nearly every respect, but each drawn from its own parallel universe. Attacks against the caster are randomly assigned across the doppelgangers. The doppelgangers remain for 1 round per spell level. There is a 1% chance per spell level that the original caster vanishes into one of the alternate realities, replaced by a nearly identical incarnation of opposite alignment and patron." },
+    { min: 81, max: 81, text: "Terrible to behold. The wizard becomes fearsome when casting the spell. Roll 1d6: (1) he appears to grow in size; (2) he takes on a horrid expression; (3) he glows a fiery red; (4) his body is shadowed while his face is brightly lit; (5) the aspect of his patron towers above him; (6) the wind whirls around him." },
+    { min: 82, max: 82, text: "Spell killer. Casting the spell steals energy from a dying world, and any use of the spell causes the death of untold thousands. Every night following a casting of the spell, the wizard is haunted by dream-communications from an ancient sorcerer-king desperate to save his people." },
+    { min: 83, max: 83, text: "Blue star. A blue, seven-pointed star flares brightly on the wizard's forehead each time the spell is cast. The star casts a circle of glaring light 25' in diameter per spell level." },
+    { min: 84, max: 84, text: "Energy burst. When successfully casting this spell, the wizard is surrounded by a burst of energy. Roll 1d6: (1) wreathes of flame, which do not affect the wizard but ignite flammable objects within 5' and cause 1d6 damage to melee opponents; (2) crackles of electricity, which arc to the nearest enemy within 10' and cause 1d6 damage; (3) aura of frost, which causes 1d4 cold damage to everything within 10' and automatically snuff torches and lanterns in range; (4) cloud of ash, which the wizard can see through but obscures the sight of all others within 5'; (5-6) instead of determining effect at time of spell acquisition, roll 1d4 each time the spell is cast and compare to above results." },
+    { min: 85, max: 85, text: "Psychic shield. In the round immediately following the casting of this spell, the wizard gains a +2 bonus to his AC and any Will saves, as he is encased in a protective barrier of psychic energy. It disperses the following round." },
+    { min: 86, max: 86, text: "Mystic twin. Casting the spell causes a fully functioning twin face to appear in the caster's chest. The face remains for 1d3 rounds. During that time, this dual face has its own 1d20 action die under the control of the player, with which it can speak, cast spells as the caster, or spout cryptic wisdom." },
+    { min: 87, max: 87, text: "Planar blink. After casting the spell, the caster unpredictably blinks in and out of this plane of existence, granting a +4 bonus to the wizard's AC at cost of a -4 penalty to all the wizard's attacks. The effect lasts for 1 round per spell level. There is a 1% chance per spell level that the wizard does not return from his involuntary jaunt across the cosmos." },
+    { min: 88, max: 88, text: "Rain of frogs. Casting this spell sparks a tempest of amphibians that fall in a 30' diameter centered on the caster. All within that area must make a Ref and Fort save (DC 10+caster's Int modifier). Failing the Reflex save indicates the character slips on a frog and falls prone; failing the Fort save means the character has been hit by large batrachians for 1d3 points of damage." },
+    { min: 89, max: 89, text: "Phase out. After casting this spell, the wizard shifts out of phase with the world, making him invisible and invulnerable to attack but preventing him from interacting with his environment. This state lasts for 1d6 rounds +1 round per level of the spell." },
+    { min: 90, max: 90, text: "Weatherman. Casting the spell upsets local weather patterns. Roll 1d7: (1) drought: no rain or moisture falls on the land for 1d12 years; (2) bitter winter sweeps over the land for 1d3 years; (3) incessant rain douses the land for 1d20 weeks; (4) a freak lightning storm hammers the area for 1d100 hours; (5) hurricane-like wind scours the earth for 1d7 weeks; (6) a localized eclipse blots out the sun for 1d20 days; (7) no stars are seen in the sky for 1d100 years. The area of effect is up to the judge's determination." },
+    { min: 91, max: 91, text: "Breath of life. Casting this spell imbues the caster and those around him with beneficial energies. All within 15' of the caster (both friend and foe) are healed 1d6 points of damage for every level of the spell (i.e., a level 3 spell heals 3d6 damage)." },
+    { min: 92, max: 92, text: "Gibbering allies. Chittering, mephitic, rat-sized demons scurry forth from the wizard's pockets and sleeves, scattering around him in a scratching fury. They attack enemies within 10' (atk +2, 1d4 dmg) and aid the spell as appropriate before dissipating in a cloud of ash after 1 minute." },
+    { min: 93, max: 93, text: "Greater power. The caster is allowed to roll twice for any random element of the spell (duration, damage, number affected, etc.) and take whichever result he wishes." },
+    { min: 94, max: 94, text: "Fine control. The wizard is adept at reigning in the magical energies of the spell and can choose any result on the spell chart equal to or lower than the one rolled." },
+    { min: 95, max: 95, text: "Psychic focus. Casting this spell clears the caster's mind and prepares him to channel further energy. For 1d4 rounds after the spell is cast, the wizard receives a +4 bonus to other spell checks. This effect does not stack with itself." },
+    { min: 96, max: 96, text: "Powerful caster. Instead of rolling as normal on a spell check, the wizard rolls a die improved by one step on the dice chain (e.g., d20 becomes d24).", dieSteps: 1 },
+    { min: 97, max: 97, text: "Necrotic drain. The spell is powered by the energies of the living. The nearest creature (other than the caster) takes 1d6 hp of damage per spell level. For every 2 hp lost, the spell check result is increased by +1." },
+    { min: 98, max: 98, text: "Natural-born talent. Instead of rolling as normal on a spell check, the wizard rolls a die type improved by two steps on the dice chain (e.g., if he normally rolls 1d20, he now rolls 1d30).", dieSteps: 2 },
+    { min: 99, max: 99, text: "Roll again twice." },
+    { min: 100, max: 100, text: "Roll again twice, but instead of rolling d%, roll 4d20 modified by the wizard's Luck adjustment (in increments of 10%)." },
+  ],
+};
+
+// Range-bucketed lookup, same contract as lookupTableRow (Crit/Fumble)
+// but keyed by min/max instead of just max, since Table 5-2's rows aren't
+// evenly one-per-value (41-60 is a single "no change" band).
+function mercurialMagicRowForRoll(roll) {
+  const n = Number(roll);
+  if (!Number.isFinite(n)) return null;
+  return MERCURIAL_MAGIC_TABLE.rows.find(r => n >= r.min && n <= r.max) || null;
+}
+
+// The `.mercurial-row` block's markup - shared by spellRowHtml's initial
+// paint and attachMercurialRollHandler's first-roll insertion, so the two
+// can't drift apart. `roll` feeds the now-editable roll number input;
+// note/bonus/dieSteps are whatever's currently on file for it (already
+// looked up from the table by the caller - this function only renders).
+function mercurialRowMarkup(roll, note, bonus, dieSteps) {
+  return `<div class="mercurial-row">
+      <div class="mercurial-controls">
+        <input type="number" class="mercurial-roll" min="1" max="100" value="${escapeHtml(String(roll))}" title="This spell's Mercurial Magic roll (Table 5-2, d%) - edit it directly (e.g. to match dice you rolled at the table) and the note/bonus/die-step fields below update to match." />
+        <label class="mercurial-field">
+          <span class="mercurial-field-label">Check Bonus</span>
+          <input type="text" class="mercurial-bonus" placeholder="+0" title="Flat bonus/penalty this spell's Mercurial Magic applies to its Spell Check - auto-filled where Table 5-2 specifies one for this roll, editable for anything the table leaves to the judge. Added automatically to every roll of this spell." value="${escapeHtml(bonus || "")}" />
+        </label>
+        <label class="mercurial-field">
+          <span class="mercurial-field-label">Die Step</span>
+          <input type="text" class="mercurial-die-steps" placeholder="±0" title="Steps this spell's Mercurial Magic shifts its Spell Check die along the dice chain - auto-filled where Table 5-2 specifies one (e.g. 'die improved by one step', d20→d24). Applied automatically to every roll of this spell." value="${escapeHtml(dieSteps || "")}" />
+        </label>
+      </div>
+      <textarea class="mercurial-note" placeholder="What this roll means" rows="2">${escapeHtml(note || "")}</textarea>
+    </div>`;
+}
+
+// Repaints a `.mercurial-row`'s note/bonus/die-step from
+// MERCURIAL_MAGIC_TABLE for whatever roll it currently shows - the single
+// place both the initial ✨ roll and a manual edit of the roll number
+// funnel through, so "the number drives everything else" can't drift
+// between the two entry points. bonus/dieSteps are only overwritten when
+// Table 5-2 actually specifies a number for that roll (see
+// MERCURIAL_MAGIC_TABLE's own comment) - left blank otherwise, for the
+// judge to fill in by hand.
+function applyMercurialRollToRow(mercurialRowEl, roll) {
+  const tableRow = mercurialMagicRowForRoll(roll);
+  const noteEl = mercurialRowEl.querySelector(".mercurial-note");
+  const bonusEl = mercurialRowEl.querySelector(".mercurial-bonus");
+  const dieStepsEl = mercurialRowEl.querySelector(".mercurial-die-steps");
+  if (noteEl) noteEl.value = tableRow ? tableRow.text : "";
+  if (bonusEl) bonusEl.value = tableRow && tableRow.bonus !== undefined ? formatSignedNumber(tableRow.bonus) : "";
+  if (dieStepsEl) dieStepsEl.value = tableRow && tableRow.dieSteps !== undefined ? formatSignedNumber(tableRow.dieSteps) : "";
+}
+
+// Wires a `.mercurial-row`'s fields once, whether it came from
+// spellRowHtml's initial paint or attachMercurialRollHandler's on-the-fly
+// insertion. The roll input is the one live-computed field here (typing a
+// new 1-100 value re-derives note/bonus/die-step via
+// applyMercurialRollToRow); note/bonus/die-step are plain persisted text
+// fields like any other, just pre-filled.
+function attachMercurialRowListeners(row, mercurialRowEl) {
+  const rollEl = mercurialRowEl.querySelector(".mercurial-roll");
+  if (rollEl) {
+    const commitRoll = (clamp) => {
+      let n = parseInt(rollEl.value, 10);
+      if (!Number.isFinite(n)) {
+        if (!clamp) return; // still mid-typing (e.g. field briefly empty) - don't clobber anything yet
+        n = parseInt(row.dataset.mercurial, 10) || 1;
+      }
+      if (clamp) n = Math.max(1, Math.min(100, n));
+      else if (n < 1 || n > 100) return; // out of range mid-typing - wait for a valid value or blur
+      rollEl.value = String(n);
+      row.dataset.mercurial = String(n);
+      applyMercurialRollToRow(mercurialRowEl, n);
+      scheduleSave();
+    };
+    rollEl.addEventListener("input", () => commitRoll(false));
+    rollEl.addEventListener("change", () => commitRoll(true));
+  }
+  mercurialRowEl.querySelector(".mercurial-note").addEventListener("input", scheduleSave);
+  mercurialRowEl.querySelector(".mercurial-bonus").addEventListener("input", scheduleSave);
+  mercurialRowEl.querySelector(".mercurial-die-steps").addEventListener("input", scheduleSave);
+}
+
 // ---- Spell Check (Cleric/Wizard/Elf) ----
 //
 // Only these three classes roll a Spell Check at all - a Thief's own
@@ -6658,43 +6834,27 @@ function spellRowHtml(item) {
   const knownNames = DCC_WIZARD_SPELLS.map(s => s.name);
   const isCustom = !!item.name && !knownNames.includes(item.name);
   const selectValue = isCustom ? SPELL_CUSTOM_KEY : (item.name || "");
-  // Mercurial Magic (Table 5-2, DCC RPG core rulebook) - Wizard/Elf only,
-  // a permanent quirk rolled once per known spell. This app deliberately
-  // does NOT embed that table's text (core-rulebook content, not the free
-  // Reference Booklet this app's other tables source from, and mostly
-  // original descriptive prose - real copyright exposure on a public,
-  // live-hosted repo). Only the mechanic (roll d%, store the number) is
-  // implemented; the note field is blank for the player to fill in
-  // themselves from their own book, same as any other free-text field.
-  // Only offered once a spell is actually named - nothing to attach a
-  // roll to for a blank slot.
+  // Mercurial Magic (Table 5-2, DCC RPG Reference Sheets - see
+  // MERCURIAL_MAGIC_TABLE above) - Wizard/Elf only, a permanent quirk
+  // rolled once per known spell. Only offered once a spell is actually
+  // named - nothing to attach a roll to for a blank slot.
   const hasSpell = !!(item.name && item.name.trim());
   const mercurialBtnHtml = hasSpell
-    ? `<button type="button" class="hp-btn spell-row-mercurial-btn" title="${item.mercurial ? "Reroll" : "Roll"} this spell's Mercurial Magic (d%, Table 5-2 - DCC RPG core rulebook) - a permanent quirk unique to how this caster casts this spell, normally rolled once when it's learned.">✨</button>`
+    ? `<button type="button" class="hp-btn spell-row-mercurial-btn" title="${item.mercurial ? "Reroll" : "Roll"} this spell's Mercurial Magic (d%, Table 5-2) - a permanent quirk unique to how this caster casts this spell, normally rolled once when it's learned.">✨</button>`
     : "";
-  // Many Table 5-2 results reduce to just two numbers - a flat bonus/
-  // penalty to the Spell Check, and/or a shift along the dice chain (see
-  // stepDiceChain) - so those two are offered as small editable fields
-  // that feed straight into pcSpellCheckModifierBreakdown's actual roll
-  // math (via mercurialAdjustmentForSpell), rather than only ever living
-  // in the free-text note the player has to remember to apply by hand.
-  // Everything else (the majority of the table - narrative/conditional
-  // effects with no clean numeric shape) still only has the note field.
+  // Auto-fills note/bonus/die-step from the table for a roll that doesn't
+  // have them saved yet (e.g. one rolled before this feature existed, or
+  // the roll number was just edited elsewhere) - but never overwrites
+  // something already saved, so a player's own added remarks in the note
+  // field survive every re-render.
+  const mercurialTableRow = item.mercurial ? mercurialMagicRowForRoll(item.mercurial) : null;
+  const mercurialNoteValue = item.mercurialNote || (mercurialTableRow ? mercurialTableRow.text : "");
+  const mercurialBonusValue = item.mercurialBonus ||
+    (mercurialTableRow && mercurialTableRow.bonus !== undefined ? formatSignedNumber(mercurialTableRow.bonus) : "");
+  const mercurialDieStepsValue = item.mercurialDieSteps ||
+    (mercurialTableRow && mercurialTableRow.dieSteps !== undefined ? formatSignedNumber(mercurialTableRow.dieSteps) : "");
   const mercurialRowHtml = item.mercurial
-    ? `<div class="mercurial-row">
-        <div class="mercurial-controls">
-          <span class="mercurial-roll-label" title="Rolled on Table 5-2: Mercurial Magic (DCC RPG core rulebook) - this app doesn't include that table's text; look up what ${item.mercurial} means in your own rulebook and jot it into the note field.">Mercurial: ${item.mercurial}</span>
-          <label class="mercurial-field">
-            <span class="mercurial-field-label">Check Bonus</span>
-            <input type="text" class="mercurial-bonus" placeholder="+0" title="Flat bonus/penalty this spell's Mercurial Magic applies to its Spell Check (e.g. Table 5-2's '-4 penalty to spell checks' or a flat bonus result) - added automatically to every roll of this spell." value="${escapeHtml(item.mercurialBonus || "")}" />
-          </label>
-          <label class="mercurial-field">
-            <span class="mercurial-field-label">Die Step</span>
-            <input type="text" class="mercurial-die-steps" placeholder="±0" title="Steps this spell's Mercurial Magic shifts its Spell Check die along the dice chain - positive improves it (Table 5-2's 'die improved by one step', d20→d24), negative worsens it ('reduced by two steps', d20→d14) - applied automatically to every roll of this spell." value="${escapeHtml(item.mercurialDieSteps || "")}" />
-          </label>
-        </div>
-        <textarea class="mercurial-note" placeholder="What this roll means (from your own rulebook) - optional" rows="2">${escapeHtml(item.mercurialNote || "")}</textarea>
-      </div>`
+    ? mercurialRowMarkup(item.mercurial, mercurialNoteValue, mercurialBonusValue, mercurialDieStepsValue)
     : "";
   return `
     <div class="attack-row pc-attack-row" data-id="${item.id}" data-mercurial="${item.mercurial || ""}">
@@ -6878,17 +7038,13 @@ function attachSpellRowListeners() {
     // Present at render time only for an already-rolled spell (see
     // spellRowHtml) - ensureMercurialButton/the roll button's own click
     // handler (attachMercurialRollHandler) create this on the fly for a
-    // spell that hasn't been rolled yet. Bonus/die-steps changes
-    // reschedule a save just like the note does - they're read straight
-    // off the DOM by mercurialAdjustmentForSpell whenever a Spell Check
-    // actually needs them, not cached anywhere, so no extra recompute
-    // step is needed here beyond persisting the value.
-    const mercurialNoteEl = row.querySelector(".mercurial-note");
-    if (mercurialNoteEl) mercurialNoteEl.addEventListener("input", scheduleSave);
-    const mercurialBonusEl = row.querySelector(".mercurial-bonus");
-    if (mercurialBonusEl) mercurialBonusEl.addEventListener("input", scheduleSave);
-    const mercurialDieStepsEl = row.querySelector(".mercurial-die-steps");
-    if (mercurialDieStepsEl) mercurialDieStepsEl.addEventListener("input", scheduleSave);
+    // spell that hasn't been rolled yet. Bonus/die-steps/note changes
+    // reschedule a save - they're read straight off the DOM by
+    // mercurialAdjustmentForSpell whenever a Spell Check actually needs
+    // them, not cached anywhere, so no extra recompute step is needed
+    // here beyond persisting the value.
+    const mercurialRowEl = row.querySelector(".mercurial-row");
+    if (mercurialRowEl) attachMercurialRowListeners(row, mercurialRowEl);
     const mercurialBtn = row.querySelector(".spell-row-mercurial-btn");
     if (mercurialBtn) attachMercurialRollHandler(row, mercurialBtn);
     row.querySelector(".spell-row-remove-btn").addEventListener("click", () => {
@@ -6908,39 +7064,20 @@ function attachMercurialRollHandler(row, mercurialBtn) {
     row.dataset.mercurial = String(rolled);
     let mercurialRowEl = row.querySelector(".mercurial-row");
     if (!mercurialRowEl) {
-      row.insertAdjacentHTML("beforeend", `
-        <div class="mercurial-row">
-          <div class="mercurial-controls">
-            <span class="mercurial-roll-label"></span>
-            <label class="mercurial-field">
-              <span class="mercurial-field-label">Check Bonus</span>
-              <input type="text" class="mercurial-bonus" placeholder="+0" title="Flat bonus/penalty this spell's Mercurial Magic applies to its Spell Check (e.g. Table 5-2's '-4 penalty to spell checks' or a flat bonus result) - added automatically to every roll of this spell." />
-            </label>
-            <label class="mercurial-field">
-              <span class="mercurial-field-label">Die Step</span>
-              <input type="text" class="mercurial-die-steps" placeholder="±0" title="Steps this spell's Mercurial Magic shifts its Spell Check die along the dice chain - positive improves it (Table 5-2's 'die improved by one step', d20→d24), negative worsens it ('reduced by two steps', d20→d14) - applied automatically to every roll of this spell." />
-            </label>
-          </div>
-          <textarea class="mercurial-note" placeholder="What this roll means (from your own rulebook) - optional" rows="2"></textarea>
-        </div>`);
+      row.insertAdjacentHTML("beforeend", mercurialRowMarkup(rolled, "", "", ""));
       mercurialRowEl = row.querySelector(".mercurial-row");
-      mercurialRowEl.querySelector(".mercurial-note").addEventListener("input", scheduleSave);
-      mercurialRowEl.querySelector(".mercurial-bonus").addEventListener("input", scheduleSave);
-      mercurialRowEl.querySelector(".mercurial-die-steps").addEventListener("input", scheduleSave);
+      attachMercurialRowListeners(row, mercurialRowEl);
     } else {
-      // Rerolling: the note/bonus/die-steps already there describe the
-      // OLD result, not this new one - clear them rather than leaving
-      // stale numbers silently applying to a roll they no longer
-      // correspond to.
-      mercurialRowEl.querySelector(".mercurial-note").value = "";
-      mercurialRowEl.querySelector(".mercurial-bonus").value = "";
-      mercurialRowEl.querySelector(".mercurial-die-steps").value = "";
+      mercurialRowEl.querySelector(".mercurial-roll").value = String(rolled);
     }
-    const labelEl = mercurialRowEl.querySelector(".mercurial-roll-label");
-    labelEl.textContent = `Mercurial: ${rolled}`;
-    labelEl.title = `Rolled on Table 5-2: Mercurial Magic (DCC RPG core rulebook) - this app doesn't include that table's text; look up what ${rolled} means in your own rulebook and jot it into the note field.`;
-    mercurialBtn.title = "Reroll this spell's Mercurial Magic (d%, Table 5-2 - DCC RPG core rulebook).";
-    showStatus(`Mercurial Magic: rolled ${rolled} - check Table 5-2 in your rulebook for what that means, or jot it into the note field.`, false, 6000);
+    // Rerolling: whatever note/bonus/die-steps were there described the
+    // OLD result - applyMercurialRollToRow overwrites them with the new
+    // roll's own table entry (or blanks, if it's one of the narrative
+    // results with no clean numeric shape) rather than leaving stale
+    // values silently applying to a roll they no longer correspond to.
+    applyMercurialRollToRow(mercurialRowEl, rolled);
+    mercurialBtn.title = "Reroll this spell's Mercurial Magic (d%, Table 5-2).";
+    showStatus(`Mercurial Magic: rolled ${rolled}.`, false, 6000);
     scheduleSave();
   });
 }
@@ -6961,7 +7098,7 @@ function ensureMercurialButton(row) {
   if (!item || !item.name || !item.name.trim()) return;
   const removeBtn = row.querySelector(".spell-row-remove-btn");
   if (!removeBtn) return;
-  removeBtn.insertAdjacentHTML("beforebegin", `<button type="button" class="hp-btn spell-row-mercurial-btn" title="Roll this spell's Mercurial Magic (d%, Table 5-2 - DCC RPG core rulebook) - a permanent quirk unique to how this caster casts this spell, normally rolled once when it's learned.">✨</button>`);
+  removeBtn.insertAdjacentHTML("beforebegin", `<button type="button" class="hp-btn spell-row-mercurial-btn" title="Roll this spell's Mercurial Magic (d%, Table 5-2) - a permanent quirk unique to how this caster casts this spell, normally rolled once when it's learned.">✨</button>`);
   attachMercurialRollHandler(row, row.querySelector(".spell-row-mercurial-btn"));
 }
 
