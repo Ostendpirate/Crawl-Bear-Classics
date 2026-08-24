@@ -7741,6 +7741,15 @@ function updateOpenSpellsCount() {
 
 function openSpellsModal() {
   document.getElementById("spells-modal-backdrop").style.display = "flex";
+  // autoResizeTextarea reads scrollHeight, which computes as 0 while an
+  // ancestor is display:none - so every .mercurial-note/.manifestation-
+  // note auto-sized while this modal was closed (which is most of the
+  // time; the Sheet's general render pipeline repaints the Spells list
+  // regardless of whether this popup happens to be open) ends up stuck
+  // at the wrong height. Redo it now that the content is actually laid
+  // out and visible.
+  document.querySelectorAll("#spells-modal-backdrop .mercurial-note, #spells-modal-backdrop .manifestation-note")
+    .forEach(autoResizeTextarea);
 }
 function closeSpellsModal() {
   document.getElementById("spells-modal-backdrop").style.display = "none";
