@@ -693,7 +693,13 @@
   .mercurial-field { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; flex: none; }
   .mercurial-field-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--muted); white-space: nowrap; }
   .mercurial-controls input[type=text] { flex: none; width: 46px; text-align: center; font-size: 11px; padding: 4px 2px; }
-  .mercurial-row .mercurial-note { flex: 1; min-width: 0; font-size: 11px; padding: 4px 6px; min-height: 32px; resize: none; overflow-y: hidden; }
+  /* No flex-grow here (unlike a typical "fill the row" child) - .mercurial-row
+     is flex-direction:column, so flex:1's implicit flex-basis:0% would size
+     this along the COLUMN's main (vertical) axis instead of the intended
+     width, overriding autoResizeTextarea's own inline height on every
+     resize. Width already stretches to fill the row via the column's
+     default align-items:stretch, so nothing else is needed here. */
+  .mercurial-row .mercurial-note { min-width: 0; font-size: 11px; padding: 4px 6px; min-height: 32px; resize: none; overflow-y: hidden; }
   .manifestation-note { font-size: 11px; padding: 4px 6px; min-height: 32px; margin-top: 0; resize: none; overflow-y: hidden; }
   /* The Spells fieldset's whole editor (known-spells list, free-text
      notes) lives in #spells-modal-backdrop now, not inline on the Sheet -
@@ -9693,6 +9699,22 @@ let roomTokenTemplates = {};
 // wraps its whole body in withRoomMetadataLock so at most one such cycle
 // is ever in flight at a time, regardless of which of the several call
 // paths triggered it.
+// Every locked function below merges into the current in-memory
+// roomOwnerMap/roomTokenTemplates rather than re-fetching via
+// OBR.room.getMetadata() first - an earlier version of this code (from
+// before this lock existed) DID re-fetch fresh each time, specifically to
+// avoid clobbering a write that landed between "we last synced" and "we
+// finish this write." That's exactly what this lock now guarantees can't
+// happen for same-client calls, and OBR.room.onMetadataChange (below) is
+// what keeps these vars current for a genuinely concurrent OTHER client's
+// writes. Re-fetching on top of that turned out to be actively harmful,
+// not just redundant: OBR.room.getMetadata() right after this SAME
+// client's own setMetadata() has resolved isn't guaranteed to already
+// reflect it (the read and the write don't share a synchronous local
+// cache), so a queued call landing inside that gap would read pre-write
+// data and silently revert the previous call's change on its own next
+// write - this was the actual mechanism behind "only one ★ save toggle
+// sticks when I click several in a row."
 let roomMetadataQueue = Promise.resolve();
 function withRoomMetadataLock(fn) {
   const run = roomMetadataQueue.then(fn, fn);
@@ -9891,20 +9913,10 @@ async function toggleTokenSavedImpl(itemId) {
     item.metadata[ROSTER_ID_METADATA_KEY] = rosterId;
   }
 
-  let latestOwnerMap = roomOwnerMap;
-  let latestTemplates = roomTokenTemplates;
-  try {
-    const latestRoomMeta = await OBR.room.getMetadata();
-    const map = latestRoomMeta[ROOM_OWNER_MAP_KEY];
-    latestOwnerMap = (map && typeof map === "object") ? map : {};
-    const templates = latestRoomMeta[ROOM_TOKEN_TEMPLATE_KEY];
-    latestTemplates = (templates && typeof templates === "object") ? templates : {};
-  } catch (err) {
-    console.error("DCC sheet: failed to read latest room metadata before save toggle", err);
-  }
-
-  const nextMap = { ...latestOwnerMap };
-  const nextTemplates = { ...latestTemplates };
+  // Merges into the current in-memory maps, not a fresh network re-fetch -
+  // see withRoomMetadataLock's own comment on why.
+  const nextMap = { ...roomOwnerMap };
+  const nextTemplates = { ...roomTokenTemplates };
   if (!existingRosterId) {
     delete nextMap[item.name];
     delete nextTemplates[item.name];
@@ -10008,20 +10020,10 @@ async function ensureRosterIdsImpl(items) {
     return;
   }
 
-  let latestOwnerMap = roomOwnerMap;
-  let latestTemplates = roomTokenTemplates;
-  try {
-    const latestRoomMeta = await OBR.room.getMetadata();
-    const map = latestRoomMeta[ROOM_OWNER_MAP_KEY];
-    latestOwnerMap = (map && typeof map === "object") ? map : {};
-    const templates = latestRoomMeta[ROOM_TOKEN_TEMPLATE_KEY];
-    latestTemplates = (templates && typeof templates === "object") ? templates : {};
-  } catch (err) {
-    console.error("DCC sheet: failed to read latest room metadata before roster-id migration", err);
-  }
-
-  const nextMap = { ...latestOwnerMap };
-  const nextTemplates = { ...latestTemplates };
+  // Merges into the current in-memory maps, not a fresh network re-fetch -
+  // see withRoomMetadataLock's own comment on why.
+  const nextMap = { ...roomOwnerMap };
+  const nextTemplates = { ...roomTokenTemplates };
   needsId.forEach(item => {
     const rosterId = idByItem.get(item.id);
     if (nextMap[item.name]) {
@@ -10080,21 +10082,15 @@ async function applyPersistentOwnershipImpl(items) {
   if (currentPlayerRole !== "GM") return;
 
   let templatesChanged = false;
-  let latestTemplates = roomTokenTemplates;
   items.forEach(item => {
     if (roomTokenTemplates[rosterKeyFor(item)] && templateNeedsRefresh(item)) {
       templatesChanged = true;
     }
   });
   if (templatesChanged) {
-    try {
-      const latestRoomMeta = await OBR.room.getMetadata();
-      const templates = latestRoomMeta[ROOM_TOKEN_TEMPLATE_KEY];
-      latestTemplates = (templates && typeof templates === "object") ? templates : {};
-    } catch (err) {
-      console.error("DCC sheet: failed to read latest room metadata before template sync", err);
-    }
-    const nextTemplates = { ...latestTemplates };
+    // Merges into the current in-memory roomTokenTemplates, not a fresh
+    // network re-fetch - see withRoomMetadataLock's own comment on why.
+    const nextTemplates = { ...roomTokenTemplates };
     items.forEach(item => {
       if (nextTemplates[rosterKeyFor(item)] && templateNeedsRefresh(item)) {
         nextTemplates[rosterKeyFor(item)] = cloneItemForTemplate(item);
@@ -10314,26 +10310,13 @@ async function handleOwnerSelectChange(id, itemId, sel) {
   item.metadata[ROSTER_ID_METADATA_KEY] = rosterId;
   item.createdUserId = id || currentPlayerId;
 
-  // Merge into a FRESH read of room metadata, not the possibly-stale local
-  // roomOwnerMap/roomTokenTemplates cache. Without this, a write that
-  // lands in between "we last synced" and "we finish this write" - e.g.
-  // the automatic template sync that runs right after a scene switch, on
-  // the same GM client, for a different token - would get silently
-  // discarded when we overwrite the whole key with our stale local copy.
-  let latestOwnerMap = roomOwnerMap;
-  let latestTemplates = roomTokenTemplates;
-  try {
-    const latestRoomMeta = await OBR.room.getMetadata();
-    const map = latestRoomMeta[ROOM_OWNER_MAP_KEY];
-    latestOwnerMap = (map && typeof map === "object") ? map : {};
-    const templates = latestRoomMeta[ROOM_TOKEN_TEMPLATE_KEY];
-    latestTemplates = (templates && typeof templates === "object") ? templates : {};
-  } catch (err) {
-    console.error("DCC sheet: failed to read latest room metadata before owner write", err);
-  }
-
-  const nextMap = { ...latestOwnerMap };
-  const nextTemplates = { ...latestTemplates };
+  // Merges into the current in-memory maps, not a fresh network re-fetch -
+  // see withRoomMetadataLock's own comment on why (this used to re-fetch
+  // here specifically to avoid clobbering a write that lands mid-flight;
+  // the lock now guarantees that can't happen for a same-client call, and
+  // re-fetching turned out to itself be the source of that exact bug).
+  const nextMap = { ...roomOwnerMap };
+  const nextTemplates = { ...roomTokenTemplates };
   // Clean up any leftover legacy entry keyed by this token's current name
   // (from before roster ids existed) now that it's moving to rosterId.
   if (!existingRosterId) {
