@@ -692,6 +692,9 @@
   .spellburn-modal-total-row { display: flex; align-items: center; gap: 8px; padding: 8px 0 2px; margin-top: 4px; border-top: 1px solid var(--border); font-weight: 700; }
   .spellburn-modal-total-row .spellburn-modal-label { color: var(--text); }
   .spellburn-modal-total { flex: none; color: var(--accent); font-size: 15px; font-variant-numeric: tabular-nums; }
+  .spellburn-modal-flavor-row { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(69, 57, 46, 0.5); }
+  .spellburn-modal-flavor-btn { flex: none; width: auto; height: auto; padding: 4px 8px; font-size: 11px; white-space: nowrap; }
+  .spellburn-modal-flavor-text { flex: 1; font-size: 11px; color: var(--muted); line-height: 1.4; padding-top: 4px; }
   .spellburn-modal-actions { display: flex; gap: 8px; margin-top: 10px; }
   .spellburn-modal-cancel-btn, .spellburn-modal-confirm-btn {
     flex: 1;
@@ -1867,6 +1870,10 @@
           <span class="spellburn-modal-label">Stamina</span>
           <span class="spellburn-modal-score" id="spellburn-modal-score-sta"></span>
           <button type="button" class="hp-btn spellburn-modal-minus" data-ability="sta" title="Spend 1 Stamina point">−1</button>
+        </div>
+        <div class="spellburn-modal-flavor-row">
+          <button type="button" class="hp-btn spellburn-modal-flavor-btn" id="spellburn-modal-flavor-btn" title="Roll d24 on Table 5-1: Spellburn Actions for how this Spellburn manifests - pure flavor, not saved to the character.">🎲 Flavor</button>
+          <span class="spellburn-modal-flavor-text" id="spellburn-modal-flavor-text"></span>
         </div>
         <div class="spellburn-modal-total-row">
           <span class="spellburn-modal-label">Points spent this cast</span>
@@ -5685,6 +5692,40 @@ PC_ABILITY_FIELD_IDS.forEach(id => {
   });
 });
 
+// Table 5-1: Spellburn Actions (DCC RPG Reference Sheets - see
+// CRIT_TABLES/MERCURIAL_MAGIC_TABLE above for the same free-source
+// citation) - purely narrative flavor for HOW a wizard's spellburn
+// manifests, with no numeric effect to feed into any roll's math (unlike
+// Mercurial Magic). Rolled fresh from the Spellburn popup's own "🎲
+// Flavor" button (see below) rather than saved to the character - it
+// describes one specific act of spellburn, not a standing trait.
+const SPELLBURN_ACTIONS_TABLE = [
+  "The wizard sacrifices one pound of flesh per spell level, which he must carve from his own body with a knife that is holy to a powerful outsider.",
+  "The wizard must spill his own blood - one tablespoon per spell level.",
+  "The wizard swears an oath to a minor demi-god, who aids him in his time of need but curses him with weakness until the oath is fulfilled.",
+  "The wizard cuts off one of his fingertips.",
+  "The wizard must yank out his hair and burn it.",
+  "The wizard magically enervates his body in order to fuel the spell.",
+  "The wizard promises his soul to serve a powerful demon in the afterlife.",
+  "The wizard agrees to aid followers of a patron saint.",
+  "The wizard uses a hot iron to brand a supernatural symbol on his arm or torso.",
+  "The wizard must tattoo a mystical symbol on his cheek, forehead, or hand.",
+  "The wizard must pull out a fingernail and burn it with incense.",
+  "The wizard must speak aloud his own true name, weakening himself as a result.",
+  "The wizard develops a bleeding sore that will not heal until he pays back the aid of the power that assisted him.",
+  "The wizard must notch his ear in acknowledgment of each time he has been aided.",
+  "The wizard is required to ritually scarify his back, chest, or biceps with the symbol of a powerful supernatural creature.",
+  "The wizard sees maggots drip from his sleeves. When not wearing a shirt, nothing happens and his torso appears normal. However, when wearing a shirt, he constantly sees maggots falling from his sleeves.",
+  "The wizard starts to itch! He has strange, uncontrollable itches and scratches constantly.",
+  "The wizard develops an odd tic: he twitches his nose, tilts his head, or blinks one eye constantly.",
+  "The wizard begins muttering under his breath, repeating the name of the entity that has aided him. He can't stop.",
+  "The wizard must cut his cheeks and let the blood flow down his face.",
+  "The wizard must place his hand into an open flame.",
+  "The wizard must sacrifice one of his most favored possessions.",
+  "The wizard must walk on one leg for the remainder of the day.",
+  "Roll again twice.",
+];
+
 // Spellburn (DCC RPG core rulebook, Wizard/Elf only) - spend points from
 // one of these three abilities before a Spell Check for a +1 bonus each,
 // temporarily lowering that ability score. See openSpellburnModal's own
@@ -5838,6 +5879,7 @@ let spellburnModalSnapshot = null;
 function openSpellburnModal(ctx) {
   spellburnModalCtx = ctx;
   spellburnModalSnapshot = null;
+  document.getElementById("spellburn-modal-flavor-text").textContent = "";
   document.getElementById("spellburn-modal-backdrop").style.display = "flex";
   refreshSpellburnModal();
 }
@@ -5967,6 +6009,14 @@ document.getElementById("spellburn-modal-backdrop").addEventListener("click", (e
 });
 document.querySelectorAll(".spellburn-modal-minus").forEach(btn => {
   btn.addEventListener("click", () => spellburnModalMinusClick(btn.dataset.ability));
+});
+// Table 5-1 flavor roll (see SPELLBURN_ACTIONS_TABLE) - purely
+// descriptive, so unlike the ability "-" buttons above this has nothing
+// to persist; each click just re-rolls and repaints the result text.
+document.getElementById("spellburn-modal-flavor-btn").addEventListener("click", () => {
+  const roll = Math.floor(Math.random() * SPELLBURN_ACTIONS_TABLE.length) + 1;
+  document.getElementById("spellburn-modal-flavor-text").textContent =
+    `d24 → ${roll}: ${SPELLBURN_ACTIONS_TABLE[roll - 1]}`;
 });
 
 // Maps each derived field to the ability field that feeds it, and (for
