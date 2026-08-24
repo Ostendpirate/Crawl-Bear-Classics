@@ -692,20 +692,19 @@
   .spellburn-modal-total-row { display: flex; align-items: center; gap: 8px; padding: 8px 0 2px; margin-top: 4px; border-top: 1px solid var(--border); font-weight: 700; }
   .spellburn-modal-total-row .spellburn-modal-label { color: var(--text); }
   .spellburn-modal-total { flex: none; color: var(--accent); font-size: 15px; font-variant-numeric: tabular-nums; }
-  .spellburn-modal-confirm-btn {
-    display: block;
-    width: 100%;
-    margin-top: 10px;
+  .spellburn-modal-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .spellburn-modal-cancel-btn, .spellburn-modal-confirm-btn {
+    flex: 1;
     padding: 8px;
-    background: var(--accent);
-    color: #1e1b18;
-    border: none;
     border-radius: 5px;
     font-size: 13px;
     font-weight: 700;
     cursor: pointer;
   }
+  .spellburn-modal-confirm-btn { background: var(--accent); color: #1e1b18; border: none; }
   .spellburn-modal-confirm-btn:hover { filter: brightness(1.1); }
+  .spellburn-modal-cancel-btn { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  .spellburn-modal-cancel-btn:hover { background: var(--border); color: var(--text); }
   .attack-ammo-line {
     display: flex;
     align-items: center;
@@ -1873,7 +1872,10 @@
           <span class="spellburn-modal-label">Points spent this cast</span>
           <span class="spellburn-modal-total" id="spellburn-modal-total">0</span>
         </div>
-        <button type="button" class="spellburn-modal-confirm-btn" id="spellburn-modal-confirm">Confirm</button>
+        <div class="spellburn-modal-actions">
+          <button type="button" class="spellburn-modal-cancel-btn" id="spellburn-modal-cancel" title="Undo every point spent since opening this popup, and close">Cancel</button>
+          <button type="button" class="spellburn-modal-confirm-btn" id="spellburn-modal-confirm">Confirm</button>
+        </div>
       </div>
     </div>
   </div>
@@ -5823,8 +5825,19 @@ document.getElementById("newday-modal-backdrop").addEventListener("click", (e) =
 // multi-Action-Die caster can carry independent pending Spellburn per die.
 let spellburnModalCtx = null;
 
+// Captured once, the first time refreshSpellburnModal runs after
+// openSpellburnModal (see there) - the exact ability scores and pending
+// total this row/line had before any spend THIS popup session. Cancel
+// (cancelSpellburnModal) restores these directly rather than replaying
+// "-1" spends in reverse, so it's an exact rollback no matter how many
+// points went into which abilities while the popup was open - and, since
+// it's re-captured fresh on every open, it correctly leaves any earlier,
+// already-confirmed Spellburn from a previous cast alone.
+let spellburnModalSnapshot = null;
+
 function openSpellburnModal(ctx) {
   spellburnModalCtx = ctx;
+  spellburnModalSnapshot = null;
   document.getElementById("spellburn-modal-backdrop").style.display = "flex";
   refreshSpellburnModal();
 }
@@ -5832,6 +5845,7 @@ function openSpellburnModal(ctx) {
 function closeSpellburnModal() {
   document.getElementById("spellburn-modal-backdrop").style.display = "none";
   spellburnModalCtx = null;
+  spellburnModalSnapshot = null;
 }
 
 // Repaints the popup's three ability scores and its "points spent" total
@@ -5860,6 +5874,7 @@ async function refreshSpellburnModal() {
     const atk = stats.attacks.find(a => a.id === ctx.attackId);
     pendingPoints = (atk && atk.spellburnPending && atk.spellburnPending[ctx.slotKey]) || 0;
   }
+  if (!spellburnModalSnapshot) spellburnModalSnapshot = { scores: { ...scores }, pendingPoints };
   SPELLBURN_ABILITIES.forEach(ability => {
     const score = scores[ability];
     document.getElementById(`spellburn-modal-score-${ability}`).textContent =
@@ -5890,7 +5905,62 @@ async function spellburnModalMinusClick(ability) {
   await refreshSpellburnModal();
 }
 
+// Undoes every point spent since this popup opened - restores the three
+// ability scores and the row/line's pending total straight back to
+// spellburnModalSnapshot (see its own comment) rather than closing with
+// whatever's already been spent, the way Confirm/× do.
+async function cancelSpellburnModal() {
+  const ctx = spellburnModalCtx;
+  const snapshot = spellburnModalSnapshot;
+  if (!ctx || !snapshot) {
+    closeSpellburnModal();
+    return;
+  }
+  if (ctx.kind === "sheet") {
+    SPELLBURN_ABILITIES.forEach(ability => {
+      const score = snapshot.scores[ability];
+      if (score === null || score === undefined) return;
+      const el = document.getElementById(`pc-${ability}`);
+      if (el) el.value = `${score} (${formatSignedNumber(dccAbilityModifier(score))})`;
+    });
+    let pending = {};
+    try { pending = JSON.parse(ctx.row.dataset.spellburnPending || "{}"); } catch (e) { pending = {}; }
+    pending[ctx.slotKey] = snapshot.pendingPoints;
+    ctx.row.dataset.spellburnPending = JSON.stringify(pending);
+    refreshDerivedPcFields();
+    refreshSpellAttackRows();
+    scheduleSave();
+    showStatus("Spellburn cancelled - ability scores restored.", false, 4000);
+  } else {
+    try {
+      await OBR.scene.items.updateItems([ctx.itemId], items => {
+        items.forEach(item => {
+          const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+          if (mode !== "pc") return;
+          const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+          SPELLBURN_ABILITIES.forEach(ability => {
+            const score = snapshot.scores[ability];
+            if (score === null || score === undefined) return;
+            data[ability] = `${score} (${formatSignedNumber(dccAbilityModifier(score))})`;
+          });
+          data.attacks = (data.attacks || []).map(a => {
+            if (a.id !== ctx.attackId) return a;
+            const pending = { ...(a.spellburnPending || {}) };
+            pending[ctx.slotKey] = snapshot.pendingPoints;
+            return { ...a, spellburnPending: pending };
+          });
+          item.metadata[PC_METADATA_KEY] = data;
+        });
+      });
+    } catch (err) {
+      console.error("DCC sheet: failed to cancel Spellburn", err);
+    }
+  }
+  closeSpellburnModal();
+}
+
 document.getElementById("spellburn-modal-close").addEventListener("click", closeSpellburnModal);
+document.getElementById("spellburn-modal-cancel").addEventListener("click", cancelSpellburnModal);
 document.getElementById("spellburn-modal-confirm").addEventListener("click", closeSpellburnModal);
 document.getElementById("spellburn-modal-backdrop").addEventListener("click", (e) => {
   if (e.target.id === "spellburn-modal-backdrop") closeSpellburnModal();
