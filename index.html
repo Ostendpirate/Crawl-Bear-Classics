@@ -9528,6 +9528,17 @@ document.getElementById("owner-select").addEventListener("change", async () => {
     ? { ...nextTemplates, [rosterId]: cloneItemForTemplate(item) }
     : nextTemplates;
 
+  // Also patch the LOCAL lastRosterItems snapshot the render below reads
+  // from - without this, tokenRosterItemHtml's rosterKeyFor(item) still
+  // sees this item's stale, pre-write metadata (no roster id yet, on a
+  // first-ever assignment) and falls back to matching by name, which was
+  // just deleted from roomOwnerMap above - so the roster would show NO
+  // owner at all until the write below round-trips back through
+  // items.onChange, instead of the new assignment appearing right away.
+  item.createdUserId = id || currentPlayerId;
+  const rosterIdx = lastRosterItems.findIndex(i => i.id === itemId);
+  if (rosterIdx !== -1) lastRosterItems[rosterIdx] = item;
+
   // Optimistic local update - the roster reflects the new owner right
   // away instead of waiting on the writes below to round-trip and echo
   // back through onMetadataChange/items.onChange.
