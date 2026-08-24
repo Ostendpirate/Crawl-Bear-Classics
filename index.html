@@ -9955,6 +9955,7 @@ async function refreshTokenRoster() {
     if (currentPlayerRole === "GM") {
       await ensureRosterIds(lastRosterItems);
       await applyPersistentOwnership(lastRosterItems);
+      await pruneOrphanedTokenTemplates();
       const beforeCount = lastRosterItems.length;
       // No longer passed lastRosterItems - cloneMissingAssignedTokens now
       // fetches its own fresh snapshot right when its turn in the lock
@@ -10129,6 +10130,53 @@ async function applyPersistentOwnershipImpl(items) {
     });
   } catch (err) {
     console.error("DCC sheet: failed to apply persistent ownership", err);
+  }
+}
+
+// GM-only: deletes a roomTokenTemplates entry that can never be resolved
+// back to a real, current token - a token that was auto-saved by an OLDER
+// version of this extension (before roster ids existed, when getting
+// assigned to a player also saved it automatically) has a template keyed
+// by its NAME, not a roster id. ensureRosterIds only migrates a name-keyed
+// entry when a live item with that exact name is actually present to
+// stamp - if that original token was later renamed, deleted, or simply
+// hasn't been open in any scene since, the entry can never migrate and
+// cloneMissingAssignedTokens has no way to tell "genuinely still missing,
+// waiting to be cloned back in" apart from "permanently orphaned, will
+// never match anything again" - both just look like "no current item has
+// this key." It keeps re-cloning the orphaned one into every new scene
+// forever, which is why a manually-deleted stray copy of one of these
+// reappears the moment you change scenes again. The one reliable signal
+// that tells them apart: a genuinely-tracked entry's OWN snapshot carries
+// the exact same roster id as its own map key (stamped into the item
+// before the snapshot was taken - see toggleTokenSavedImpl); an orphaned
+// pre-roster-id entry's snapshot has no roster id in its metadata at all.
+// Pruned rather than migrated, since there's no live item left to migrate
+// it onto. Run after ensureRosterIds/applyPersistentOwnership (so anything
+// that CAN still be migrated this pass gets the chance first) and before
+// cloneMissingAssignedTokens (so a freshly-pruned orphan isn't cloned one
+// more time on this same pass).
+function pruneOrphanedTokenTemplates() {
+  return withRoomMetadataLock(() => pruneOrphanedTokenTemplatesImpl());
+}
+async function pruneOrphanedTokenTemplatesImpl() {
+  if (currentPlayerRole !== "GM") return;
+  const nextTemplates = { ...roomTokenTemplates };
+  let changed = false;
+  Object.keys(nextTemplates).forEach(key => {
+    const snapshot = nextTemplates[key];
+    const snapshotRosterId = snapshot && snapshot.metadata && snapshot.metadata[ROSTER_ID_METADATA_KEY];
+    if (snapshotRosterId !== key) {
+      delete nextTemplates[key];
+      changed = true;
+    }
+  });
+  if (!changed) return;
+  roomTokenTemplates = nextTemplates;
+  try {
+    await OBR.room.setMetadata({ [ROOM_TOKEN_TEMPLATE_KEY]: roomTokenTemplates });
+  } catch (err) {
+    console.error("DCC sheet: failed to persist orphaned-template cleanup", err);
   }
 }
 
