@@ -281,6 +281,21 @@
     padding: 0 14px 8px;
   }
 
+  .chat-log-header { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+  .clear-log-btn {
+    width: auto;
+    height: auto;
+    padding: 4px 10px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  /* Armed state after the first click - see the click handler's arm/
+     confirm pattern (this app has no confirm() dialog convention, so a
+     destructive, shared-with-the-table action like clearing the log gets
+     a second click to actually go through instead). */
+  .clear-log-btn.confirm { background: #a5453a; color: #fff; }
+  .clear-log-btn:hover { background: #a5453a; color: #fff; }
+
   .chat-log {
     display: flex;
     flex-direction: column;
@@ -1805,6 +1820,9 @@
     <div id="view-chat" style="display:none">
       <h1>Log</h1>
       <div class="subtitle">Rolls made from the Tracker. Monster rolls are only visible to the GM.</div>
+      <div class="chat-log-header" id="chat-log-header" style="display:none">
+        <button type="button" class="hp-btn clear-log-btn" id="clear-log-btn" title="Clear the shared roll log for everyone at the table">🗑 Clear Log</button>
+      </div>
       <div class="chat-log" id="chat-log-list"></div>
       <div class="empty" id="chat-log-empty" style="display:none; padding:24px 10px;">
         No rolls yet.<br/><br/>
@@ -9249,6 +9267,13 @@ function refreshOwnerRowVisibility() {
   if (row) row.style.display = currentPlayerRole === "GM" ? "block" : "none";
 }
 
+// Clearing the Log wipes it for every client sharing this scene, so it's
+// GM-only, same as the Owner row above.
+function refreshClearLogVisibility() {
+  const row = document.getElementById("chat-log-header");
+  if (row) row.style.display = currentPlayerRole === "GM" ? "flex" : "none";
+}
+
 // Builds the <option> list for the Owner select. Always includes the
 // currently-connected party (OBR.party.getPlayers() excludes the GM
 // themselves, which is fine since the GM doesn't need to "own" a token
@@ -11185,6 +11210,41 @@ function renderChatLog() {
   listEl.innerHTML = visible.slice().reverse().map(chatEntryHtml).join("");
 }
 
+// Clearing the log wipes CHAT_LOG_METADATA_KEY for the whole table (it's
+// shared scene metadata, not per-client), so - since this app has no
+// confirm() dialog convention - the first click only arms the button
+// ("Confirm?"); a second click within CLEAR_LOG_ARM_MS actually clears.
+// Anything else (switching tabs, waiting it out) disarms it.
+const CLEAR_LOG_ARM_MS = 4000;
+let clearLogArmTimeout = null;
+function disarmClearLogBtn() {
+  const btn = document.getElementById("clear-log-btn");
+  clearTimeout(clearLogArmTimeout);
+  clearLogArmTimeout = null;
+  if (!btn) return;
+  btn.classList.remove("confirm");
+  btn.textContent = "🗑 Clear Log";
+}
+document.getElementById("clear-log-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("clear-log-btn");
+  if (!clearLogArmTimeout) {
+    btn.classList.add("confirm");
+    btn.textContent = "Confirm clear?";
+    clearLogArmTimeout = setTimeout(disarmClearLogBtn, CLEAR_LOG_ARM_MS);
+    return;
+  }
+  disarmClearLogBtn();
+  btn.disabled = true;
+  try {
+    lastChatLog = [];
+    await OBR.scene.setMetadata({ [CHAT_LOG_METADATA_KEY]: [] });
+    renderChatLog();
+  } catch (err) {
+    console.error("DCC sheet: failed to clear chat log", err);
+  }
+  btn.disabled = false;
+});
+
 // ---- Dice Roller ----
 // Broadcasts land on this channel; overlay.html (the background surface
 // that renders on top of the whole map) listens on the exact same string
@@ -11738,6 +11798,7 @@ OBR.onReady(async () => {
       if (viewChatEl.style.display !== "none") renderChatLog();
       refreshDiceGmRowVisibility();
       refreshOwnerRowVisibility();
+      refreshClearLogVisibility();
       refreshSavedTokensRowVisibility();
       rosterNeedsRerender = true;
     }
@@ -11947,6 +12008,7 @@ OBR.onReady(async () => {
     currentPlayerRole = await OBR.player.getRole();
     refreshDiceGmRowVisibility();
     refreshOwnerRowVisibility();
+    refreshClearLogVisibility();
     refreshSavedTokensRowVisibility();
   } catch (err) {
     console.error("DCC sheet: initial getRole failed", err);
