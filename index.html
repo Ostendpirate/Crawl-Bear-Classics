@@ -1360,7 +1360,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-24 17:29</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-24 17:31</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1770,6 +1770,10 @@
         <fieldset>
           <legend>Spells</legend>
           <button type="button" class="open-spells-btn" id="open-spells-btn">🔮 Open Spells<span class="open-spells-count" id="open-spells-count"></span></button>
+          <div id="pc-corruption-notes-wrap" style="display:none; margin-top:8px;">
+            <div class="spell-section-header">Corruption Effects <span class="spell-section-hint">optional</span></div>
+            <textarea id="pc-corruption-notes" class="manifestation-note" placeholder="What each Corruption roll actually did to this character - permanent and cumulative, unlike a Spell Check's other one-off results." rows="2"></textarea>
+          </div>
         </fieldset>
 
         <fieldset>
@@ -2048,10 +2052,6 @@
           <div style="margin-bottom:8px;">
             <button type="button" id="pc-corruption-btn" class="hp-btn" style="display:none;" title="Roll Corruption (Tables 5-3/5-4/5-5) - Wizard/Elf only.">☣ Corruption</button>
             <button type="button" id="pc-disapproval-btn" class="hp-btn" style="display:none;" title="Roll Disapproval (Table 5-7) - Cleric only.">😇 Disapproval</button>
-          </div>
-          <div id="pc-corruption-notes-wrap" style="display:none; margin-bottom:8px;">
-            <div class="spell-section-header">Corruption Effects <span class="spell-section-hint">optional</span></div>
-            <textarea id="pc-corruption-notes" class="manifestation-note" placeholder="What each Corruption roll actually did to this character - permanent and cumulative, unlike a Spell Check's other one-off results." rows="2"></textarea>
           </div>
           <div class="attack-list" id="pc-spells-list"></div>
           <button type="button" class="add-attack-btn" id="add-spell-pc">+ Add Spell</button>
