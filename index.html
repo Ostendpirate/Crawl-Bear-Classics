@@ -1039,6 +1039,15 @@
     z-index: 500;
     padding: 12px;
   }
+  /* The Corruption/Disapproval buttons live INSIDE #spells-modal-backdrop
+     (moved there when the whole Spells section became a popup), so
+     opening either while that popup is still open stacks two same-
+     z-index .tables-modal-backdrop siblings at once - whichever comes
+     LATER in the HTML (spells-modal-backdrop does) painted on top,
+     making the Corruption/Disapproval modal open but be completely
+     invisible/unclickable behind it. Bumped above the shared 500 so a
+     modal opened from within another modal always stacks on top of it. */
+  #corruption-modal-backdrop, #disapproval-modal-backdrop { z-index: 510; }
   .tables-modal {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -1351,7 +1360,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-24 17:08</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-24 17:29</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2040,6 +2049,10 @@
             <button type="button" id="pc-corruption-btn" class="hp-btn" style="display:none;" title="Roll Corruption (Tables 5-3/5-4/5-5) - Wizard/Elf only.">☣ Corruption</button>
             <button type="button" id="pc-disapproval-btn" class="hp-btn" style="display:none;" title="Roll Disapproval (Table 5-7) - Cleric only.">😇 Disapproval</button>
           </div>
+          <div id="pc-corruption-notes-wrap" style="display:none; margin-bottom:8px;">
+            <div class="spell-section-header">Corruption Effects <span class="spell-section-hint">optional</span></div>
+            <textarea id="pc-corruption-notes" class="manifestation-note" placeholder="What each Corruption roll actually did to this character - permanent and cumulative, unlike a Spell Check's other one-off results." rows="2"></textarea>
+          </div>
           <div class="attack-list" id="pc-spells-list"></div>
           <button type="button" class="add-attack-btn" id="add-spell-pc">+ Add Spell</button>
         </div>
@@ -2082,7 +2095,7 @@ const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al", "montype"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-spells","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax"];
+const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-spells","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-corruption-notes"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
 const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
@@ -5589,6 +5602,14 @@ function scheduleSave() {
 });
 nameEl.addEventListener("input", scheduleSave);
 
+// A single persistent element (unlike the Spells list's own per-row
+// notes, which get this same treatment in attachSpellRowListeners on
+// every re-render) - only needs wiring once, here, alongside its sibling
+// PC_ALL_FIELD_IDS listener above rather than a second generic pass.
+document.getElementById("pc-corruption-notes").addEventListener("input", () => {
+  autoResizeTextarea(document.getElementById("pc-corruption-notes"));
+});
+
 // Monster Type -> Crit auto-fill wiring. Picking a type, editing HD, or
 // clicking the sync button are all deliberate "compute this for me"
 // actions, so each one always overwrites Crit and opts the field back
@@ -7817,6 +7838,19 @@ function recalcPcSpellSection() {
   if (corruptionBtn) corruptionBtn.style.display = abilityId === "int" ? "" : "none";
   const disapprovalBtn = document.getElementById("pc-disapproval-btn");
   if (disapprovalBtn) disapprovalBtn.style.display = abilityId === "per" ? "" : "none";
+  // Persistent record of what past Corruption rolls actually did to this
+  // character (see the ☣ button's own CORRUPTION_TABLES flavor text,
+  // which only ever shows transiently in the roll modal) - same
+  // Wizard/Elf-only gate as the button itself. Resized here too (passive,
+  // every-render pass, same contract as Manifestation/Mercurial's own
+  // notes) since it can carry a saved value on first load, when
+  // autoResizeTextarea's scrollHeight read would otherwise be wrong if
+  // this section had just become visible for the first time this pass.
+  const corruptionNotesWrap = document.getElementById("pc-corruption-notes-wrap");
+  if (corruptionNotesWrap) {
+    corruptionNotesWrap.style.display = abilityId === "int" ? "" : "none";
+    if (abilityId === "int") autoResizeTextarea(document.getElementById("pc-corruption-notes"));
+  }
   if (!wrapEl) return;
   if (!abilityId) {
     wrapEl.style.display = "none";
