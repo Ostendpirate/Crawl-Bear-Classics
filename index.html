@@ -6437,10 +6437,8 @@ document.getElementById("add-armor-pc").addEventListener("click", () => {
 // of their own) - used to populate the Spells section's spell-name field
 // as a dropdown for those two classes, so a rolled/chosen spell always
 // matches an actual named spell in the book instead of being typed
-// freehand (and easily mis-typed/mis-remembered). Cleric isn't on this
-// table at all and keeps the plain free-text field (see spellRowHtml) -
-// Clerics pray for any cleric spell they qualify for by level rather
-// than maintaining a fixed "known spells" list the way Wizard/Elf do.
+// freehand (and easily mis-typed/mis-remembered). Cleric gets its own
+// equivalent list, DCC_CLERIC_SPELLS (Table 5-9) - see spellRowHtml.
 //
 // `cleric: true` marks a spell whose entry is "as per the cleric spell
 // of the same name" (Table 5-8's own * footnote) - shown with a trailing
@@ -6449,10 +6447,8 @@ document.getElementById("add-armor-pc").addEventListener("click", () => {
 // marks Invoke patron/Patron bond (the ** footnote: rolling either one
 // grants BOTH spells for a single spell slot). Table 5-8's own
 // "(Patron spell)***" table results aren't concrete named spells at all
-// (they resolve to whatever the character's specific patron grants), so
-// they're deliberately left off this list - the "✎ Custom / Patron
-// spell…" option in the dropdown (see dccWizardSpellOptionsHtml) is
-// where that gets named instead.
+// (they resolve to whatever the character's specific patron grants) -
+// DCC_PATRON_SPELLS below (Table 5-10) is where those get named instead.
 const DCC_WIZARD_SPELLS = [
   { name: "Animal summoning", level: 1, page: 129 },
   { name: "Cantrip", level: 1, page: 130 },
@@ -6543,39 +6539,131 @@ const DCC_WIZARD_SPELLS = [
   { name: "Replication", level: 5, page: 253 },
 ];
 
-// Sentinel <option> value for "this row's spell isn't on Table 5-8" -
-// picking it reveals a plain text field for a patron-granted or homebrew
-// spell name (see spellRowHtml/attachSpellRowListeners), same "escape
-// hatch alongside a constrained picker" pattern DCC_WEAPONS' own
-// "Custom / Other" entry already uses for Attacks.
+// Table 5-9: Cleric Spells - same page-citation-only treatment as
+// DCC_WIZARD_SPELLS above (no spell-effect text, just what's needed to
+// pick a real spell and know where to look up what it does).
+const DCC_CLERIC_SPELLS = [
+  { name: "Blessing", level: 1, page: 255 },
+  { name: "Darkness", level: 1, page: 258 },
+  { name: "Detect evil", level: 1, page: 259 },
+  { name: "Detect magic", level: 1, page: 260 },
+  { name: "Food of the gods", level: 1, page: 262 },
+  { name: "Holy sanctuary", level: 1, page: 263 },
+  { name: "Paralysis", level: 1, page: 264 },
+  { name: "Protection from evil", level: 1, page: 265 },
+  { name: "Resist cold or heat", level: 1, page: 266 },
+  { name: "Second sight", level: 1, page: 267 },
+  { name: "Word of command", level: 1, page: 268 },
+
+  { name: "Banish", level: 2, page: 269 },
+  { name: "Binding", level: 2, page: 270 },
+  { name: "Cure paralysis", level: 2, page: 272 },
+  { name: "Curse", level: 2, page: 273 },
+  { name: "Divine symbol", level: 2, page: 275 },
+  { name: "Lotus stare", level: 2, page: 276 },
+  { name: "Neutralize poison or disease", level: 2, page: 277 },
+  { name: "Restore vitality", level: 2, page: 278 },
+  { name: "Snake charm", level: 2, page: 280 },
+  { name: "Stinging stone", level: 2, page: 282 },
+  { name: "Wood wyrding", level: 2, page: 284 },
+
+  { name: "Animate dead", level: 3, page: 285 },
+  { name: "Bolt from the blue", level: 3, page: 287 },
+  { name: "Exorcise", level: 3, page: 288 },
+  { name: "Remove curse", level: 3, page: 289 },
+  { name: "Speak with the dead", level: 3, page: 290 },
+  { name: "Spiritual weapon", level: 3, page: 291 },
+  { name: "True name", level: 3, page: 293 },
+
+  { name: "Affliction of the gods", level: 4, page: 295 },
+  { name: "Cause earthquake", level: 4, page: 296 },
+  { name: "Sanctify / desecrate", level: 4, page: 298 },
+  { name: "Vermin blight", level: 4, page: 300 },
+
+  { name: "Righteous fire", level: 5, page: 301 },
+  { name: "Weather control", level: 5, page: 302 },
+  { name: "Whirling doom", level: 5, page: 303 },
+];
+
+// Table 5-10: Patron Spells - each of a Wizard/Elf's own patron's three
+// personal spells (granted via Invoke patron/Patron bond - DCC_WIZARD_SPELLS'
+// own `patron: true` entries), grouped by patron rather than numbered
+// level since these three don't correspond to spell levels 1-3 the way
+// Table 5-8's groups do. Patrons whose Reference Sheets entry lists "N/A"
+// for every spell (Yddgrrl the World Root, Obitue-Que, Ithha) have no
+// named personal spells here - their followers use "✎ Custom spell…"
+// in the dropdown instead.
+const DCC_PATRON_SPELLS = [
+  { patron: "Bobugbubilz", name: "Tadpole transformation", page: 325 },
+  { patron: "Bobugbubilz", name: "Glorious mire", page: 326 },
+  { patron: "Bobugbubilz", name: "Bottomfeeder bond", page: 328 },
+  { patron: "Azi Dahaka", name: "Snake trick", page: 333 },
+  { patron: "Azi Dahaka", name: "Kith of the hydra", page: 334 },
+  { patron: "Azi Dahaka", name: "Reap the whirlwind", page: 335 },
+  { patron: "Sezrekan", name: "Sequester", page: 339 },
+  { patron: "Sezrekan", name: "Shield maiden", page: 340 },
+  { patron: "Sezrekan", name: "Phylactery of the soul", page: 341 },
+  { patron: "The King of Elfland", name: "Forest walk", page: 345 },
+  { patron: "The King of Elfland", name: "Warhorn of Elfland", page: 346 },
+  { patron: "The King of Elfland", name: "The dreaming", page: 347 },
+  { patron: "The Three Fates", name: "Blade of Atropos", page: 351 },
+  { patron: "The Three Fates", name: "Curse of Moirae", page: 352 },
+  { patron: "The Three Fates", name: "Warp & weft", page: 353 },
+];
+
+// Sentinel <option> value for "this row's spell isn't on the list" -
+// picking it reveals a plain text field for a homebrew spell name (see
+// spellRowHtml/attachSpellRowListeners), same "escape hatch alongside a
+// constrained picker" pattern DCC_WEAPONS' own "Custom / Other" entry
+// already uses for Attacks.
 const SPELL_CUSTOM_KEY = "__custom_spell__";
 
-// Builds the <option>/<optgroup> markup for a Wizard/Elf spell-name
-// dropdown, grouped by spell level the way Table 5-8 itself is laid out.
-// selectedValue is either a known spell's exact name, SPELL_CUSTOM_KEY
-// (custom/patron mode is active), or "" (nothing picked yet). A
+// Builds the <option>/<optgroup> markup for a caster's known-spells
+// dropdown, grouped by spell level the way Table 5-8/5-9 themselves are
+// laid out. Shared by Wizard/Elf (DCC_WIZARD_SPELLS, plus
+// extraGroupsHtml for DCC_PATRON_SPELLS) and Cleric (DCC_CLERIC_SPELLS,
+// no extra groups). selectedValue is either a known spell's exact name,
+// SPELL_CUSTOM_KEY (custom mode is active), or "" (nothing picked yet). A
 // selectedValue that's NEITHER a known name NOR SPELL_CUSTOM_KEY (data
 // saved before this dropdown existed, or a name that's since fallen off
 // the table) stays offered and selected as its own option rather than
 // silently disappearing - same "a stale pick shows as itself" contract
 // spellSelectOptionsHtml (the Attacks-row spell picker) already uses.
-function dccWizardSpellOptionsHtml(selectedValue) {
+// `extraKnownNames` (e.g. patron spell names, which live outside
+// `spellList`) still count toward "is this actually known," so they
+// don't get misidentified as a stale/fallen-off pick.
+function dccSpellOptionsHtml(spellList, selectedValue, { extraKnownNames = [], extraGroupsHtml = "" } = {}) {
   const isCustomSelected = selectedValue === SPELL_CUSTOM_KEY;
-  const knownNames = DCC_WIZARD_SPELLS.map(s => s.name);
+  const knownNames = spellList.map(s => s.name).concat(extraKnownNames);
   const isStale = !isCustomSelected && selectedValue && !knownNames.includes(selectedValue);
   const placeholder = `<option value=""${selectedValue ? "" : " selected"}>— Select a spell —</option>`;
   const staleOption = isStale
     ? `<option value="${escapeHtml(selectedValue)}" selected>${escapeHtml(selectedValue)}</option>`
     : "";
-  const groups = [1, 2, 3, 4, 5].map(level => {
-    const opts = DCC_WIZARD_SPELLS.filter(s => s.level === level).map(s => {
+  const levels = [...new Set(spellList.map(s => s.level))].sort((a, b) => a - b);
+  const groups = levels.map(level => {
+    const opts = spellList.filter(s => s.level === level).map(s => {
       const label = `${s.name}${s.cleric ? "*" : ""} (p.${s.page})`;
       return `<option value="${escapeHtml(s.name)}"${s.name === selectedValue ? " selected" : ""}>${escapeHtml(label)}</option>`;
     }).join("");
     return `<optgroup label="Level ${level}">${opts}</optgroup>`;
   }).join("");
-  const customOption = `<option value="${SPELL_CUSTOM_KEY}"${isCustomSelected ? " selected" : ""}>✎ Custom / Patron spell…</option>`;
-  return `${placeholder}${staleOption}${groups}<optgroup label="Other">${customOption}</optgroup>`;
+  const customOption = `<option value="${SPELL_CUSTOM_KEY}"${isCustomSelected ? " selected" : ""}>✎ Custom spell…</option>`;
+  return `${placeholder}${staleOption}${groups}${extraGroupsHtml}<optgroup label="Other">${customOption}</optgroup>`;
+}
+
+// One <optgroup> per patron in DCC_PATRON_SPELLS, appended to the
+// Wizard/Elf dropdown (see dccSpellOptionsHtml's extraGroupsHtml) after
+// the numbered spell-level groups.
+function dccPatronSpellOptgroupsHtml(selectedValue) {
+  const patrons = [...new Set(DCC_PATRON_SPELLS.map(s => s.patron))];
+  return patrons.map(patron => {
+    const opts = DCC_PATRON_SPELLS.filter(s => s.patron === patron).map(s => {
+      const label = `${s.name} (p.${s.page})`;
+      return `<option value="${escapeHtml(s.name)}"${s.name === selectedValue ? " selected" : ""}>${escapeHtml(label)}</option>`;
+    }).join("");
+    return `<optgroup label="Patron: ${escapeHtml(patron)}">${opts}</optgroup>`;
+  }).join("");
 }
 
 // Table 5-2: Mercurial Magic - a Wizard/Elf's permanent, once-per-known-
@@ -6887,10 +6975,11 @@ function emptySpellItem() {
 function spellRowHtml(item) {
   const classEl = document.getElementById("pc-class");
   const cls = classEl ? classEl.value : "";
-  // Cleric doesn't roll on Table 5-8 at all (see the table's own header
-  // comment above) - keeps the original plain free-text field, unchanged
-  // from before this dropdown existed.
-  if (cls !== "Wizard" && cls !== "Elf") {
+  const isWizardOrElf = cls === "Wizard" || cls === "Elf";
+  const isCleric = cls === "Cleric";
+  // Any other/no class keeps the original plain free-text field, from
+  // before either dropdown existed.
+  if (!isWizardOrElf && !isCleric) {
     return `
       <div class="attack-row pc-attack-row" data-id="${item.id}">
         <div class="attack-weapon-line">
@@ -6901,15 +6990,21 @@ function spellRowHtml(item) {
         ${manifestationFieldHtml(item)}
       </div>`;
   }
-  const knownNames = DCC_WIZARD_SPELLS.map(s => s.name);
+  const spellList = isWizardOrElf ? DCC_WIZARD_SPELLS : DCC_CLERIC_SPELLS;
+  const extraKnownNames = isWizardOrElf ? DCC_PATRON_SPELLS.map(s => s.name) : [];
+  const knownNames = spellList.map(s => s.name).concat(extraKnownNames);
   const isCustom = !!item.name && !knownNames.includes(item.name);
   const selectValue = isCustom ? SPELL_CUSTOM_KEY : (item.name || "");
+  const optionsHtml = dccSpellOptionsHtml(spellList, selectValue, isWizardOrElf
+    ? { extraKnownNames, extraGroupsHtml: dccPatronSpellOptgroupsHtml(selectValue) }
+    : {});
   // Mercurial Magic (Table 5-2, DCC RPG Reference Sheets - see
   // MERCURIAL_MAGIC_TABLE above) - Wizard/Elf only, a permanent quirk
-  // rolled once per known spell. Only offered once a spell is actually
-  // named - nothing to attach a roll to for a blank slot.
+  // rolled once per known spell; Clerics don't get it at all. Only
+  // offered once a spell is actually named - nothing to attach a roll to
+  // for a blank slot.
   const hasSpell = !!(item.name && item.name.trim());
-  const mercurialBtnHtml = hasSpell
+  const mercurialBtnHtml = isWizardOrElf && hasSpell
     ? `<button type="button" class="hp-btn spell-row-mercurial-btn" title="${item.mercurial ? "Reroll" : "Roll"} this spell's Mercurial Magic (d%, Table 5-2) - a permanent quirk unique to how this caster casts this spell, normally rolled once when it's learned.">✨</button>`
     : "";
   // Auto-fills note/bonus/die-step from the table for a roll that doesn't
@@ -6917,20 +7012,20 @@ function spellRowHtml(item) {
   // the roll number was just edited elsewhere) - but never overwrites
   // something already saved, so a player's own added remarks in the note
   // field survive every re-render.
-  const mercurialTableRow = item.mercurial ? mercurialMagicRowForRoll(item.mercurial) : null;
+  const mercurialTableRow = isWizardOrElf && item.mercurial ? mercurialMagicRowForRoll(item.mercurial) : null;
   const mercurialNoteValue = item.mercurialNote || (mercurialTableRow ? mercurialTableRow.text : "");
   const mercurialBonusValue = item.mercurialBonus ||
     (mercurialTableRow && mercurialTableRow.bonus !== undefined ? formatSignedNumber(mercurialTableRow.bonus) : "");
   const mercurialDieStepsValue = item.mercurialDieSteps ||
     (mercurialTableRow && mercurialTableRow.dieSteps !== undefined ? formatSignedNumber(mercurialTableRow.dieSteps) : "");
-  const mercurialRowHtml = item.mercurial
+  const mercurialRowHtml = isWizardOrElf && item.mercurial
     ? mercurialRowMarkup(item.mercurial, mercurialNoteValue, mercurialBonusValue, mercurialDieStepsValue)
     : "";
   return `
     <div class="attack-row pc-attack-row" data-id="${item.id}" data-mercurial="${item.mercurial || ""}">
       <div class="attack-weapon-line">
-        <select class="attack-name spell-row-select"${isCustom ? ' style="display:none"' : ""}>${dccWizardSpellOptionsHtml(selectValue)}</select>
-        <input type="text" class="attack-name spell-row-custom-name" placeholder="Custom/patron spell name"${isCustom ? "" : ' style="display:none"'} value="${escapeHtml(isCustom ? item.name : "")}" />
+        <select class="attack-name spell-row-select"${isCustom ? ' style="display:none"' : ""}>${optionsHtml}</select>
+        <input type="text" class="attack-name spell-row-custom-name" placeholder="Custom spell name"${isCustom ? "" : ' style="display:none"'} value="${escapeHtml(isCustom ? item.name : "")}" />
         <button type="button" class="hp-btn spell-row-custom-back"${isCustom ? "" : ' style="display:none"'} title="Back to spell list">↩</button>
         ${mercurialBtnHtml}
         ${concentrationCheckboxHtml(item)}
@@ -7051,9 +7146,9 @@ function attachSpellRowListeners() {
     const backBtn = row.querySelector(".spell-row-custom-back");
     if (selectEl) {
       selectEl.addEventListener("change", () => {
-        // Picking "✎ Custom / Patron spell…" swaps the dropdown out for
-        // a plain text field (plus a small ↩ button to switch back) -
-        // same show/hide-in-place pattern as the Attacks list's own
+        // Picking "✎ Custom spell…" swaps the dropdown out for a plain
+        // text field (plus a small ↩ button to switch back) - same
+        // show/hide-in-place pattern as the Attacks list's own
         // weapon-vs-spell row switch, just without a full row rebuild
         // since only these sibling fields differ.
         const isCustom = selectEl.value === SPELL_CUSTOM_KEY;
@@ -7065,8 +7160,8 @@ function attachSpellRowListeners() {
         }
         if (backBtn) backBtn.style.display = isCustom ? "" : "none";
         // The spell this row represents just changed (a different known
-        // spell, or dropping into Custom/Patron mode with no name typed
-        // yet) - any Mercurial Magic already rolled belongs to whichever
+        // spell, or dropping into Custom mode with no name typed yet) -
+        // any Mercurial Magic already rolled belongs to whichever
         // spell was here before, so it no longer applies. Not cleared on
         // customEl's own "input" listener below, so correcting a typo in
         // a custom name doesn't also wipe an already-rolled quirk for it.
@@ -7089,7 +7184,7 @@ function attachSpellRowListeners() {
     }
     if (backBtn) {
       backBtn.addEventListener("click", () => {
-        // Bails back out of Custom/Patron mode to the Table 5-8 dropdown -
+        // Bails back out of Custom mode to the known-spells dropdown -
         // resets to the blank placeholder rather than trying to guess
         // which known spell (if any) the custom name was meant to be.
         if (selectEl) {
@@ -7153,9 +7248,10 @@ function attachMercurialRollHandler(row, mercurialBtn) {
 }
 
 // Inserts the ✨ Mercurial Magic button once this row actually names a
-// spell, if it isn't there already. Picking a spell for a previously-
-// blank row, or typing a Custom/Patron name, only patches sibling fields
-// in place (see the .spell-row-select/customEl listeners above) rather
+// spell (Wizard/Elf only - see ensureMercurialButton's own class check),
+// if it isn't there already. Picking a spell for a previously-blank row,
+// or typing a Custom name, only patches sibling fields in place (see the
+// .spell-row-select/customEl listeners above) rather
 // than re-running spellRowHtml - so without this, a freshly-added spell
 // never got its roll button until the next full reload. Only ever ADDS
 // the button - clearMercurial (called on a genuine identity change, e.g.
@@ -7164,6 +7260,9 @@ function attachMercurialRollHandler(row, mercurialBtn) {
 // without either one fighting the other.
 function ensureMercurialButton(row) {
   if (row.querySelector(".spell-row-mercurial-btn")) return;
+  const classEl = document.getElementById("pc-class");
+  const cls = classEl ? classEl.value : "";
+  if (cls !== "Wizard" && cls !== "Elf") return;
   const item = readSpellItems().find(i => i.id === row.dataset.id);
   if (!item || !item.name || !item.name.trim()) return;
   const removeBtn = row.querySelector(".spell-row-remove-btn");
@@ -8008,10 +8107,11 @@ document.getElementById("pc-class").addEventListener("change", () => {
   // selector (Table 1-5/.../1-18 - whose options are also class-driven).
   renderAttacks("pc", readAttacks("pc"));
   // A new Class can also mean the Spells section's spell-name field
-  // switches between Table 5-8's dropdown (Wizard/Elf) and plain free
-  // text (Cleric/anything else) - see spellRowHtml. Re-render from
-  // whatever's currently on screen so already-picked spell names carry
-  // over into the new field type rather than being lost.
+  // switches between Table 5-8's dropdown (Wizard/Elf), Table 5-9's
+  // dropdown (Cleric), and plain free text (anything else) - see
+  // spellRowHtml. Re-render from whatever's currently on screen so
+  // already-picked spell names carry over into the new field type rather
+  // than being lost.
   renderSpellItems(readSpellItems());
   cfgRenderFromCurrentForm("pc");
   scheduleSave();
