@@ -678,7 +678,7 @@
      Spellburn button and #pc-spellburn-newday-btn need the same
      auto-width/padded treatment .backstab-toggle-btn already gets for the
      same reason. */
-  .spell-attack-burn-btn, .tracker-burn-btn, #pc-spellburn-newday-btn, .newday-modal-recover {
+  .spell-attack-burn-btn, .tracker-burn-btn, #pc-spellburn-newday-btn, .newday-modal-recover, #pc-corruption-btn, #pc-disapproval-btn {
     width: auto;
     height: auto;
     padding: 3px 8px;
@@ -708,6 +708,31 @@
   .spellburn-modal-confirm-btn:hover { filter: brightness(1.1); }
   .spellburn-modal-cancel-btn { background: transparent; color: var(--muted); border: 1px solid var(--border); }
   .spellburn-modal-cancel-btn:hover { background: var(--border); color: var(--text); }
+  /* Shared by the Corruption and Disapproval popups (corruption-modal-*
+     / disapproval-modal-* ids) - a small "pick inputs, roll, see result"
+     form, same tables-modal-backdrop/tables-modal chrome as every other
+     popup. */
+  .roll-modal-tier-row { display: flex; gap: 6px; margin-bottom: 10px; }
+  .roll-modal-tier-btn {
+    flex: 1;
+    padding: 6px;
+    border-radius: 5px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .roll-modal-tier-btn:hover { background: var(--border); color: var(--text); }
+  .roll-modal-tier-btn.active { background: var(--accent); color: #1e1b18; border-color: var(--accent); }
+  .roll-modal-inputs { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+  .roll-modal-field { display: flex; flex-direction: column; gap: 3px; }
+  .roll-modal-field-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--muted); white-space: nowrap; }
+  .roll-modal-field input[type=number] { width: 64px; text-align: center; padding: 5px 2px; }
+  .roll-modal-static { font-size: 13px; font-weight: 700; color: var(--text); padding: 5px 0; }
+  .roll-modal-result { margin-top: 12px; font-size: 12px; line-height: 1.5; color: var(--text); min-height: 18px; }
+  .roll-modal-result-roll { color: var(--accent); font-weight: 700; }
   .attack-ammo-line {
     display: flex;
     align-items: center;
@@ -1690,6 +1715,10 @@
           <legend>Spells</legend>
           <div id="pc-spellcheck-wrap" style="display:none">
             <div class="fumble-die-note" id="pc-spellcheck-note" style="margin-bottom:6px;"></div>
+            <div style="margin-bottom:8px;">
+              <button type="button" id="pc-corruption-btn" class="hp-btn" style="display:none;" title="Roll Corruption (Tables 5-3/5-4/5-5) - Wizard/Elf only.">☣ Corruption</button>
+              <button type="button" id="pc-disapproval-btn" class="hp-btn" style="display:none;" title="Roll Disapproval (Table 5-7) - Cleric only.">😇 Disapproval</button>
+            </div>
             <div class="attack-list" id="pc-spells-list"></div>
             <button type="button" class="add-attack-btn" id="add-spell-pc">+ Add Spell</button>
           </div>
@@ -1897,6 +1926,63 @@
         <button type="button" class="tables-modal-close" id="newday-modal-close" title="Close">×</button>
       </div>
       <div class="tables-modal-body" id="newday-modal-body"></div>
+    </div>
+  </div>
+
+  <div id="corruption-modal-backdrop" class="tables-modal-backdrop" style="display:none">
+    <div class="tables-modal">
+      <div class="tables-modal-header">
+        <div>
+          <div class="tables-modal-title">Corruption</div>
+          <div class="tables-modal-subtitle">Corruption Roll = 1d10 − Spell Level + Luck modifier (Tables 5-3/5-4/5-5). A wizard may burn 1 Luck, after seeing the result, to avoid it entirely.</div>
+        </div>
+        <button type="button" class="tables-modal-close" id="corruption-modal-close" title="Close">×</button>
+      </div>
+      <div class="tables-modal-body">
+        <div class="roll-modal-tier-row">
+          <button type="button" class="roll-modal-tier-btn active" id="corruption-modal-tier-minor" data-tier="minor">Minor</button>
+          <button type="button" class="roll-modal-tier-btn" id="corruption-modal-tier-major" data-tier="major">Major</button>
+          <button type="button" class="roll-modal-tier-btn" id="corruption-modal-tier-greater" data-tier="greater">Greater</button>
+        </div>
+        <div class="roll-modal-inputs">
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">Spell Level</span>
+            <input type="number" id="corruption-modal-level" min="0" value="1" />
+          </label>
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">Luck Mod</span>
+            <span class="roll-modal-static" id="corruption-modal-luck">+0</span>
+          </label>
+          <button type="button" class="btn-next" id="corruption-modal-roll-btn">🎲 Roll</button>
+        </div>
+        <div class="roll-modal-result" id="corruption-modal-result"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="disapproval-modal-backdrop" class="tables-modal-backdrop" style="display:none">
+    <div class="tables-modal">
+      <div class="tables-modal-header">
+        <div>
+          <div class="tables-modal-title">Disapproval</div>
+          <div class="tables-modal-subtitle">Upon disapproval, roll 1d4 per point of Spell Check result, minus Luck modifier (Table 5-7).</div>
+        </div>
+        <button type="button" class="tables-modal-close" id="disapproval-modal-close" title="Close">×</button>
+      </div>
+      <div class="tables-modal-body">
+        <div class="roll-modal-inputs">
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">Spell Check Result</span>
+            <input type="number" id="disapproval-modal-result-input" min="0" value="1" />
+          </label>
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">Luck Mod</span>
+            <span class="roll-modal-static" id="disapproval-modal-luck">+0</span>
+          </label>
+          <button type="button" class="btn-next" id="disapproval-modal-roll-btn">🎲 Roll</button>
+        </div>
+        <div class="roll-modal-result" id="disapproval-modal-result"></div>
+      </div>
     </div>
   </div>
 
@@ -6019,6 +6105,159 @@ document.getElementById("spellburn-modal-flavor-btn").addEventListener("click", 
     `d24 → ${roll}: ${SPELLBURN_ACTIONS_TABLE[roll - 1]}`;
 });
 
+// Tables 5-3/5-4/5-5: Minor/Major/Greater Corruption (DCC RPG Reference
+// Sheets - Wizard/Elf only; a Cleric's equivalent consequence is
+// Disapproval, DISAPPROVAL_TABLE below). Rows share lookupTableRow's
+// existing max-ascending contract (see CRIT_TABLES/FUMBLE_TABLE) - the
+// "1 or less"/"10+" ends of each d10 table are the first row's max:1 and
+// the last row's max:Infinity respectively.
+const CORRUPTION_TABLES = {
+  minor: {
+    label: "Minor Corruption — Table 5-3",
+    rows: [
+      { max: 1, text: "Character develops horrid pustules on his face. These pustules do not heal and impose a -1 penalty to Personality." },
+      { max: 2, text: "Character's skin on one random portion of his body appears to melt. Like wax, it flows and reforms into odd puddles and shapes. This is an ongoing, constant motion that itches constantly and repulses others. Determine location randomly (1d6): (1) face; (2) arms; (3) legs; (4) torso; (5) hands; (6) feet." },
+      { max: 3, text: "One of the character's legs grows 1d6\". Character now walks with an odd gait." },
+      { max: 4, text: "Eyes affected. Roll 1d4: (1) eyes glow with unearthly color; (2) eyes gain light sensitivity (-1 to all rolls in daylight); (3) character gains infravision (sees heat signatures at range of 100'); (4) eyes become large and unblinking, like a fish." },
+      { max: 5, text: "Character develops painful lesions on his chest and legs and open sores on his hands and feet that do not heal." },
+      { max: 6, text: "Ears mutate. Roll 1d5: (1) ears become pointed; (2) ears fall off (character still hears normally); (3) ears enlarge and look like an elephant's; (4) ears elongate and look like a donkey's (character also gains braying laugh); (5) ears shrivel and fold back." },
+      { max: 7, text: "Chills. Character shakes constantly and cannot remain quiet due to chattering teeth." },
+      { max: 8, text: "Character's facial appearance is permanently disfigured according to the magic that was summoned. If fire magic was used, his eyebrows are scorched and his skin glows red; if cold magic was used, his skin is pasty white and his lips are blue. If ambiguous magic was used, his appearance grows gaunt and he permanently loses 5 pounds." },
+      { max: 9, text: "Character's hair is suffused with dark energy. Roll 1d4: (1) hair turns bone white; (2) hair turns pitch black; (3) hair falls out completely; (4) hair sticks straight up." },
+      { max: Infinity, text: "Character passes out. He is unconscious for 1d6 hours or until awakened by vigorous means." },
+    ],
+  },
+  major: {
+    label: "Major Corruption — Table 5-4",
+    rows: [
+      { max: 1, text: "Febrile. Character slowly weakens over 1d4 months, suffering a -1 penalty to Strength for each month." },
+      { max: 2, text: "A duplicate of the character's face grows on his back. It looks just like his normal face. The eyes, nose, and mouth can be operated independently." },
+      { max: 3, text: "Consumption. Character's body feeds on its own mass. Character loses 2d10 pounds in one month and suffers a -1 penalty to Stamina." },
+      { max: 4, text: "Corpulence. Character gains 6d12 pounds in one month. The weight gain imposes a -1 penalty to Agility, and the character's speed is reduced by 5'." },
+      { max: 5, text: "Character crackles with energy of a type associated with the spells he most commonly casts. The energy could manifest as flames, lightning, cold waves, etc." },
+      { max: 6, text: "Character's height changes by 1d20-10 inches. There is no change in weight; the character's body grows thin and tall or short and fat." },
+      { max: 7, text: "Demonic taint. Roll 1d3: (1) character's fingers elongate into claws, and he gains an attack for 1d6 damage; (2) character's feet transform into cloven hoofs; (3) character's legs become goat-like." },
+      { max: 8, text: "Character's skin changes to an unearthly shade. Roll 1d8: (1) albino; (2) pitch black; (3) clear; (4) shimmering quality; (5) deep blue; (6) malevolent yellow; (7) ashen and pallid; (8) texture and color of fishy scales; (9) thick bear-like fur; (10) reptilian scales." },
+      { max: 9, text: "Small horns grow on the character's forehead. This appears as a ridge-like, simian forehead for the first month; then buds for the second month; goat horns after the third month; and finally, bull horns after six months." },
+      { max: Infinity, text: "Character's tongue forks and his nostrils narrow to slits. The character is able to smell with his tongue like a snake." },
+    ],
+  },
+  greater: {
+    label: "Greater Corruption — Table 5-5",
+    rows: [
+      { max: 1, text: "A sliver of soul energy is claimed by a demon lord. Character experiences unearthly pain, suffering 3d6 damage, a permanent -2 penalty to all ability scores, and an additional -2 penalty to Luck." },
+      { max: 2, text: "Decay. Character's flesh falls off in zombie-like chunks. Character loses 1d4 hp per day. Only magical healing can stave off the decay." },
+      { max: 3, text: "Character's head becomes bestial in a painful overnight transformation. Roll 1d6: (1) snake; (2) goat; (3) bull; (4) rat; (5) insect; (6) fish." },
+      { max: 4, text: "Character's limbs are replaced by suckered tentacles. One limb is replaced at random each month for four months. At the end of four months, it is impossible to hide the character's inhuman nature." },
+      { max: 5, text: "Small tentacles grow around the character's mouth and ears. The tentacles are maggot-sized at first, but grow at rate of 1\" per month to a mature length of 12\"." },
+      { max: 6, text: "Third eye. Roll 1d4 for location: (1) middle of forehead; (2) palm of hand; (3) chest; (4) back of head." },
+      { max: 7, text: "Fingers on one hand fuse while the thumb enlarges. After one week, the hand has transformed into a crab claw. Character gains a natural attack for 1d6 damage and can no longer grasp normal weapons and objects." },
+      { max: 8, text: "Character grows a tail over 1d7 days. Roll 1d6: (1) scorpion tail that can attack for 1d4 damage plus poison (DC 10 Fort save or target loses 1d4 Str permanently); (2) scaly snake tail; (3) forked demon tail (grants +1 Agility); (4) fleshy tail ending in a useable third hand; (5) fused cartilaginous links ending in spiked stump that can attack for 1d6 damage; (6) bushy horse's tail." },
+      { max: 9, text: "Bodily transformation. Roll 1d6: (1) character grows scales across his entire body; (2) character grows gills; (3) character sprouts feathers; (4) character develops webbed toes and feet." },
+      { max: Infinity, text: "Character grows a beak in place of his mouth. Transformation starts as a puckering of the lips that slowly turns into a full-fledged bird or squid beak over the next 1d12 months. Character gains a bite attack for 1d3 damage." },
+    ],
+  },
+};
+
+// Table 5-7: Disapproval (DCC RPG Reference Sheets) - Cleric only.
+const DISAPPROVAL_TABLE = {
+  label: "Disapproval — Table 5-7",
+  rows: [
+    { max: 1, text: "The cleric must atone for his sins. He must do nothing but utter chants and intonations for the next 10 minutes, starting as soon as he is able (i.e., if he is in combat, he can wait until the danger is over)." },
+    { max: 2, text: "The cleric must pray for forgiveness immediately. He must spend at least one hour in prayer, beginning as soon as he is able (i.e., if he is in combat, he can wait until the danger is over). Failure to finish the full hour of prayers within the next 120 minutes is looked upon unfavorably; he incurs a -1 penalty to all spell checks until he completes the full hour." },
+    { max: 3, text: "The cleric must increase his god's power by recruiting a new follower. If he does not convert one new follower to his deity's worship by the next sunrise, he takes a -1 penalty to all checks on the following day. This penalty resets after 24 hours." },
+    { max: 4, text: "The cleric immediately incurs an additional -1 penalty to all spell checks that lasts until the next day." },
+    { max: 5, text: "The cleric must undergo the test of humility. For the remainder of the day, he must defer to all other characters and creatures as if they were his superiors. Failure (at the discretion of the judge) means he immediately loses all spellcasting ability (including healing and laying on hands) for the remainder of the day." },
+    { max: 6, text: "The cleric incurs an immediate -1 penalty to all attempts to lay on hands until he goes on a quest to heal the crippled. This quest is of his own design, but generally speaking must result in significant aid to the crippled, blind, lamed, sickly, etc. Once the quest is completed, the deity revokes the penalty. While the penalty remains, it applies to all attempts to lay on hands, even if the \"normal\" disapproval range has been reduced back to a natural 1." },
+    { max: 7, text: "The cleric must endure a test of faith. He gains an illness that costs him 1 point each of Strength, Agility, and Stamina. The ability score loss heals at the normal rate of 1 point per day. The cleric may not use magic to heal the loss. If the cleric endures the test to the satisfaction of the deity, he retains his magical abilities. If not (judge's discretion), his disapproval range immediately increases by another point." },
+    { max: 8, text: "The cleric immediately incurs a -4 penalty to spell checks on the specific spell that resulted in disapproval (including laying on hands and turning unholy, if those were the acts that produced disapproval). This lasts until the next day." },
+    { max: 9, text: "The cleric immediately incurs an additional -2 penalty to all spell checks that lasts until the next day." },
+    { max: 10, text: "The cleric loses access to one randomly determined level 1 spell. This spell cannot be cast until the next day." },
+    { max: 11, text: "The cleric is ordered by his deity to meditate on his faith and come to a better understanding of what he has done to earn disapproval. The cleric incurs an immediate and permanent -2 penalty to all spell checks. The only way to lift this penalty is for the cleric to meditate. For every full day of meditation, the cleric can make a DC 15 Will save. Success means the spell check penalties are removed." },
+    { max: 12, text: "The cleric is temporarily disowned by his deity. For the rest of the day, the character cannot accumulate XP and may not gain class levels as a cleric. After the time period expires, the character begins to accumulate XP again as normal but does not accrue \"back pay\" (so to speak) for XP missed while he was disowned." },
+    { max: 13, text: "The cleric loses access to two randomly determined level 1 spells. These spells cannot be cast until the next day." },
+    { max: 14, text: "The cleric's deity wishes to test whether the cleric is a man of the faith or a man of the flesh. Calculate the cleric's total net worth in gold pieces. The cleric immediately incurs a permanent -4 penalty to all spell checks. The only way to remove this penalty is for the cleric to sacrifice his material possessions. For every 10% of his net worth sacrificed to the deity, one point of penalty is removed. Or, in other words, sacrificing 40% of what he owns will return the cleric to a normal spell check penalty. A sacrifice can be destruction, consecration, donation, transformation into a temple or statue, etc." },
+    { max: 15, text: "The deity is not forgiving on this day. When the cleric rests for the night, he does not \"reset\" his disapproval range at the next morning – it carries over from this day to the next. The disapproval ranged resets as normal on the following day." },
+    { max: 16, text: "Cleric is temporarily barred from using his lay on hands ability. The deity will not grant healing powers for the next 1d4 days. After that time, the cleric regains the use of his healing abilities." },
+    { max: 17, text: "The cleric loses access to 1d4+1 spells, randomly determined from all the character knows. These spells cannot be cast for the next 24 hours." },
+    { max: 18, text: "Cleric is temporarily unable to turn unholy creatures. The cleric regains the ability after 1d4 days." },
+    { max: 19, text: "The cleric is stained with the mark of the unfaithful. This physical mark appears like a brand, tattoo, or birthmark, with the symbol determined by the cleric's faith. The symbol is automatically visible to all worshippers of the cleric's faith, even through clothing, but may be invisible to others. To all who see and comment on the mark, the cleric must explain his sin and describe what he is doing as penance. If he continues to sustain his faith for a week while retaining the mark, it disappears." },
+    { max: Infinity, text: "The cleric's ability to lay on hands is restricted. The ability works only once per day per creature healed – no single character can be healed more than once per day. After 24 hours, the ability's use reverts to normal." },
+  ],
+};
+
+// Both Corruption and Disapproval need the caster's current Luck
+// modifier - reads straight off pc-lck live, same as everything else on
+// the Sheet.
+function pcLuckModifierLive() {
+  const el = document.getElementById("pc-lck");
+  const score = parseAbilityScore(el ? el.value : "");
+  return score === null ? 0 : dccAbilityModifier(score);
+}
+
+let corruptionModalTier = "minor";
+
+function openCorruptionModal() {
+  document.getElementById("corruption-modal-luck").textContent = formatSignedNumber(pcLuckModifierLive());
+  document.getElementById("corruption-modal-result").innerHTML = "";
+  document.getElementById("corruption-modal-backdrop").style.display = "flex";
+}
+function closeCorruptionModal() {
+  document.getElementById("corruption-modal-backdrop").style.display = "none";
+}
+document.getElementById("pc-corruption-btn").addEventListener("click", openCorruptionModal);
+document.getElementById("corruption-modal-close").addEventListener("click", closeCorruptionModal);
+document.getElementById("corruption-modal-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "corruption-modal-backdrop") closeCorruptionModal();
+});
+document.querySelectorAll(".roll-modal-tier-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    corruptionModalTier = btn.dataset.tier;
+    document.querySelectorAll(".roll-modal-tier-btn").forEach(b => b.classList.toggle("active", b === btn));
+  });
+});
+document.getElementById("corruption-modal-roll-btn").addEventListener("click", () => {
+  const level = parseInt(document.getElementById("corruption-modal-level").value, 10) || 0;
+  const luckMod = pcLuckModifierLive();
+  const d10 = Math.floor(Math.random() * 10) + 1;
+  const total = d10 - level + luckMod;
+  const table = CORRUPTION_TABLES[corruptionModalTier];
+  const row = lookupTableRow(table, total);
+  document.getElementById("corruption-modal-result").innerHTML = row
+    ? `<span class="roll-modal-result-roll">d10 ${d10} − ${level} + ${luckMod} = ${total}</span> — ${escapeHtml(row.text)}`
+    : "";
+});
+
+function openDisapprovalModal() {
+  document.getElementById("disapproval-modal-luck").textContent = formatSignedNumber(pcLuckModifierLive());
+  document.getElementById("disapproval-modal-result").innerHTML = "";
+  document.getElementById("disapproval-modal-backdrop").style.display = "flex";
+}
+function closeDisapprovalModal() {
+  document.getElementById("disapproval-modal-backdrop").style.display = "none";
+}
+document.getElementById("pc-disapproval-btn").addEventListener("click", openDisapprovalModal);
+document.getElementById("disapproval-modal-close").addEventListener("click", closeDisapprovalModal);
+document.getElementById("disapproval-modal-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "disapproval-modal-backdrop") closeDisapprovalModal();
+});
+document.getElementById("disapproval-modal-roll-btn").addEventListener("click", () => {
+  const checkResult = Math.max(0, parseInt(document.getElementById("disapproval-modal-result-input").value, 10) || 0);
+  const luckMod = pcLuckModifierLive();
+  let sum = 0;
+  const rolls = [];
+  for (let i = 0; i < checkResult; i++) {
+    const d4 = Math.floor(Math.random() * 4) + 1;
+    rolls.push(d4);
+    sum += d4;
+  }
+  const total = sum - luckMod;
+  const row = lookupTableRow(DISAPPROVAL_TABLE, total);
+  document.getElementById("disapproval-modal-result").innerHTML = row
+    ? `<span class="roll-modal-result-roll">${checkResult}d4 (${rolls.join("+") || 0}) − ${luckMod} = ${total}</span> — ${escapeHtml(row.text)}`
+    : "";
+});
+
 // Maps each derived field to the ability field that feeds it, and (for
 // the three saves) the matching key into a DCC_CLASS_TABLES level row.
 // Init has no per-level class table entry the way Fort/Ref/Will do - its
@@ -7361,6 +7600,13 @@ function recalcPcSpellSection() {
   // Cast-a-Spell row's own Spellburn controls use (spellAttackRowHtml).
   const newDayBtn = document.getElementById("pc-spellburn-newday-btn");
   if (newDayBtn) newDayBtn.style.display = abilityId === "int" ? "" : "none";
+  // Corruption (Tables 5-3/5-4/5-5) is a Wizard/Elf-only consequence;
+  // Disapproval (Table 5-7) is Cleric's equivalent - see
+  // openCorruptionModal/openDisapprovalModal.
+  const corruptionBtn = document.getElementById("pc-corruption-btn");
+  if (corruptionBtn) corruptionBtn.style.display = abilityId === "int" ? "" : "none";
+  const disapprovalBtn = document.getElementById("pc-disapproval-btn");
+  if (disapprovalBtn) disapprovalBtn.style.display = abilityId === "per" ? "" : "none";
   if (!wrapEl) return;
   if (!abilityId) {
     wrapEl.style.display = "none";
