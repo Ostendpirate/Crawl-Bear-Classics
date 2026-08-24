@@ -8822,8 +8822,13 @@ function tokenRosterItemHtml(item, showOwner) {
   const mode = item.metadata[MODE_METADATA_KEY] || "monster";
   const isActive = item.id === currentItemId;
   const owner = roomOwnerMap[rosterKeyFor(item)];
+  // owner.name is a snapshot taken at assignment time (see the Owner
+  // dropdown handler), so it - and this label - stays visible even after
+  // that player disconnects; "(offline)" here is purely a live indicator,
+  // same convention as the Owner dropdown's own offline option.
+  const isOffline = !!(owner && owner.id) && !currentPartyPlayers.some(p => p.id === owner.id);
   const ownerLabel = showOwner && owner && owner.name
-    ? `<span class="token-roster-owner" title="Assigned to ${escapeHtml(owner.name)}">${escapeHtml(owner.name)}</span>`
+    ? `<span class="token-roster-owner" title="Assigned to ${escapeHtml(owner.name)}${isOffline ? " (offline)" : ""}">${escapeHtml(owner.name)}${isOffline ? " (offline)" : ""}</span>`
     : "";
   return `
     <div class="token-roster-item${isActive ? " active" : ""}" data-id="${item.id}">
@@ -9123,6 +9128,21 @@ async function ensureRosterIds(items) {
   }
 }
 
+// The createdUserId this item SHOULD have, or null if it's outside this
+// extension's business to touch. A managed roster key (mapped set) is
+// always authoritative - assigned to mapped.id, or back to the GM when
+// explicitly unassigned (mapped.id null). An unmanaged monster/NPC token
+// defaults to the GM too, since nothing else in the room ever explicitly
+// claimed it. An unmanaged PC token returns null: whatever native
+// createdUserId it already has (e.g. a player's own dragged-in token) is
+// left untouched.
+function desiredOwnerIdFor(item) {
+  const mapped = roomOwnerMap[rosterKeyFor(item)];
+  if (mapped) return mapped.id || currentPlayerId;
+  const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+  return mode === "monster" ? currentPlayerId : null;
+}
+
 // GM-only: for any character token whose roster key matches a persisted
 // assignment but whose native createdUserId hasn't caught up yet (new
 // scene, first time this key has appeared, etc.), re-apply it. This is
@@ -9164,24 +9184,24 @@ async function applyPersistentOwnership(items) {
     }
   }
 
-  // Covers both directions: apply a positive assignment (mapped.id set),
-  // and clean up a stale owner left over from before an explicit
-  // unassignment (mapped exists with id: null, hands createdUserId back
-  // to the GM). Tokens never touched by the Owner dropdown (mapped
-  // undefined) are left alone entirely - their createdUserId is native
-  // Owlbear data, not ours to touch.
-  const toFix = items.filter(item => {
-    const mapped = roomOwnerMap[rosterKeyFor(item)];
-    if (!mapped) return false;
-    const desired = mapped.id || currentPlayerId;
-    return item.createdUserId !== desired;
-  });
+  // Covers three cases: apply a positive assignment (mapped.id set), clean
+  // up a stale owner left over from before an explicit unassignment
+  // (mapped exists with id: null, hands createdUserId back to the GM), and
+  // - for a monster/NPC token specifically - claim it for the GM even if
+  // it's never been touched by the Owner dropdown at all (mapped
+  // undefined), so a monster a player happened to drop onto the map isn't
+  // left natively owned by that player. A PC token that's never been
+  // touched is left alone in that same case - that's the native "player
+  // dragged their own token onto the map" ownership this extension
+  // deliberately doesn't override until the GM actually visits the Owner
+  // dropdown for it.
+  const toFix = items.filter(item => desiredOwnerIdFor(item) !== null && item.createdUserId !== desiredOwnerIdFor(item));
   if (!toFix.length) return;
   try {
     await OBR.scene.items.updateItems(toFix.map(item => item.id), draftItems => {
       draftItems.forEach(item => {
-        const mapped = roomOwnerMap[rosterKeyFor(item)];
-        if (mapped) item.createdUserId = mapped.id || currentPlayerId;
+        const desired = desiredOwnerIdFor(item);
+        if (desired !== null) item.createdUserId = desired;
       });
     });
   } catch (err) {
