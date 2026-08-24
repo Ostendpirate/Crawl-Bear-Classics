@@ -670,7 +670,7 @@
   .mercurial-field { display: flex; align-items: center; gap: 4px; flex: none; }
   .mercurial-field-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--muted); white-space: nowrap; }
   .mercurial-controls input[type=text] { flex: none; width: 46px; text-align: center; font-size: 11px; padding: 4px 2px; }
-  .mercurial-row .mercurial-note { flex: 1; min-width: 0; font-size: 11px; padding: 4px 6px; min-height: 32px; }
+  .mercurial-row .mercurial-note { flex: 1; min-width: 0; font-size: 11px; padding: 4px 6px; min-height: 32px; resize: none; overflow-y: hidden; }
   .manifestation-note { font-size: 11px; padding: 4px 6px; min-height: 32px; margin-top: 4px; }
   .spellburn-row, .attack-detail-burn-row { margin-top: 4px; }
   /* .hp-btn's base size (22x22px, meant for one icon glyph) squeezes any
@@ -4713,6 +4713,12 @@ function readAttacks(mode) {
       name: row.querySelector(".attack-name").value,
       bonus: row.querySelector(".attack-bonus").value,
       damage: row.querySelector(".attack-damage").value,
+      // A "Cast a Spell" row (spellAttackRowHtml) - distinct from an
+      // ordinary weapon row, even though it shares .attack-name/.attack-
+      // damage as hidden mirror fields (see spellAttackRowHtml's own
+      // comment). syncWeaponsIntoEquipment uses this to keep spells out
+      // of the Weapons equipment block - a spell isn't gear.
+      isSpell: row.classList.contains("spell-attack-row"),
     };
     if (mode === "pc") {
       const weaponEl = row.querySelector(".attack-weapon");
@@ -7083,6 +7089,19 @@ function mercurialRowMarkup(roll, note, bonus, dieSteps) {
     </div>`;
 }
 
+// Grows a textarea's height to fit its content instead of scrolling
+// internally - .mercurial-note's own CSS pairs this with resize:none/
+// overflow-y:hidden (a manual resize handle and this auto-sizing would
+// otherwise fight each other). Resetting height to "auto" first is
+// required for scrollHeight to shrink back down, not just grow - without
+// it a textarea that's had a long value replaced by a short one would
+// stay stuck at the taller size.
+function autoResizeTextarea(el) {
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
+}
+
 // Repaints a `.mercurial-row`'s note/bonus/die-step from
 // MERCURIAL_MAGIC_TABLE for whatever roll it currently shows - the single
 // place both the initial ✨ roll and a manual edit of the roll number
@@ -7096,7 +7115,10 @@ function applyMercurialRollToRow(mercurialRowEl, roll) {
   const noteEl = mercurialRowEl.querySelector(".mercurial-note");
   const bonusEl = mercurialRowEl.querySelector(".mercurial-bonus");
   const dieStepsEl = mercurialRowEl.querySelector(".mercurial-die-steps");
-  if (noteEl) noteEl.value = tableRow ? tableRow.text : "";
+  if (noteEl) {
+    noteEl.value = tableRow ? tableRow.text : "";
+    autoResizeTextarea(noteEl);
+  }
   if (bonusEl) bonusEl.value = tableRow && tableRow.bonus !== undefined ? formatSignedNumber(tableRow.bonus) : "";
   if (dieStepsEl) dieStepsEl.value = tableRow && tableRow.dieSteps !== undefined ? formatSignedNumber(tableRow.dieSteps) : "";
 }
@@ -7126,7 +7148,18 @@ function attachMercurialRowListeners(row, mercurialRowEl) {
     rollEl.addEventListener("input", () => commitRoll(false));
     rollEl.addEventListener("change", () => commitRoll(true));
   }
-  mercurialRowEl.querySelector(".mercurial-note").addEventListener("input", scheduleSave);
+  const noteEl = mercurialRowEl.querySelector(".mercurial-note");
+  // Grows to fit whatever's typed or auto-filled (see
+  // applyMercurialRollToRow) instead of scrolling internally - table
+  // entries run well past the fixed 2-line box this used to be. Sized
+  // once right away for whatever's already in it (auto-filled text on
+  // first paint, or a saved note from before this existed), then again
+  // on every edit.
+  autoResizeTextarea(noteEl);
+  noteEl.addEventListener("input", () => {
+    autoResizeTextarea(noteEl);
+    scheduleSave();
+  });
   mercurialRowEl.querySelector(".mercurial-bonus").addEventListener("input", scheduleSave);
   mercurialRowEl.querySelector(".mercurial-die-steps").addEventListener("input", scheduleSave);
 }
@@ -8129,18 +8162,22 @@ function syncArmorIntoEquipment() {
 
 // Same auto-managed-block pattern as syncArmorIntoEquipment above, but for
 // the Weapons (Equipment) textarea and the Attacks list instead of Armor &
-// Shields - every configured attack (named, or with a Bonus/Damage set)
-// gets a line the moment it's added or edited, flagged if currently
+// Shields - every configured WEAPON attack (named, or with a Bonus/Damage
+// set) gets a line the moment it's added or edited, flagged if currently
 // equipped, without disturbing anything else the player has typed below
 // that block (ammunition counts, spares, magic properties, etc.). Now that
 // Armor and Weapons each have their own dedicated field, this only ever
 // needs to recognize its OWN "(dmg ...)" line shape - it no longer has to
 // coexist with the Armor block's "(+N AC)" lines in the same textarea.
+// Explicitly excludes "Cast a Spell" rows (readAttacks' isSpell) - a known
+// spell isn't gear, and would otherwise show up here as e.g. "Fireball
+// (dmg none set)" since those rows mirror their spell's name into the
+// same hidden .attack-name field a weapon row's real name lives in.
 function syncWeaponsIntoEquipment() {
   const equipEl = document.getElementById("pc-equip-weapons");
   if (!equipEl) return;
 
-  const attacks = readAttacks("pc").filter(a => a.name || a.bonus || a.damage);
+  const attacks = readAttacks("pc").filter(a => !a.isSpell && (a.name || a.bonus || a.damage));
   const lines = (equipEl.value || "").split("\n").filter(line => {
     return !/^.+ \(dmg .*\)( \[equipped\])?$/.test(line.trim());
   });
