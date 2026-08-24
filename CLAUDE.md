@@ -14,6 +14,7 @@ No build, test, or lint tooling — plain static HTML/CSS/JS files served as-is.
 - This is a local Git repo, remote `origin` on GitHub — the command-line `git` in Claude's session has no push credentials configured (no PAT/SSH key set up for it), so the user pushes/syncs manually; never run `git push`.
 - After making a meaningful change, commit it to git with a clear, descriptive message so every version is tracked automatically. Small logical changes = small separate commits, not one giant commit at the end.
 - Do not create commits for exploratory reads or failed attempts — only for changes actually saved to the project.
+- Bump the `#build-stamp` text (near the top of `index.html`, in `<body>` right after the main nav tabs) to the current date/time on every meaningful commit. It exists so the user can tell, from inside the OBR popover itself, whether a push has actually gone live yet — without it, there's no way to distinguish "GitHub Pages hasn't redeployed yet" from "OBR is serving a cached copy" from "it deployed but didn't fix anything," which matters a lot for a repo with no build/test tooling and no other way to verify a fix landed. Don't skip this step even for a one-line fix.
 
 ## Architecture
 
