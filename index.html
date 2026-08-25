@@ -178,6 +178,8 @@
     min-width: 0;
   }
   .save-box label { margin-bottom: 2px; }
+  .save-box label.roll-label { cursor: pointer; border-radius: 3px; }
+  .save-box label.roll-label:hover { background: var(--accent); color: #1e1b18; }
   .save-box input, .save-box select {
     text-align: center;
     padding: 2px;
@@ -1471,7 +1473,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 20:48</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 20:56</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1581,9 +1583,9 @@
         </div>
 
         <div class="saves">
-          <div class="save-box"><label>Fort</label><input type="text" id="fort" placeholder="+2"/></div>
-          <div class="save-box"><label>Ref</label><input type="text" id="ref" placeholder="+0"/></div>
-          <div class="save-box"><label>Will</label><input type="text" id="will" placeholder="+1"/></div>
+          <div class="save-box"><label class="roll-label" data-roll-save="fort" title="Click to roll a Fortitude save: d20 + Fort.">Fort</label><input type="text" id="fort" placeholder="+2"/></div>
+          <div class="save-box"><label class="roll-label" data-roll-save="ref" title="Click to roll a Reflex save: d20 + Ref.">Ref</label><input type="text" id="ref" placeholder="+0"/></div>
+          <div class="save-box"><label class="roll-label" data-roll-save="will" title="Click to roll a Will save: d20 + Will.">Will</label><input type="text" id="will" placeholder="+1"/></div>
           <div class="save-box">
             <label>AL</label>
             <select id="al">
@@ -1696,12 +1698,12 @@
         <fieldset>
           <legend>Abilities</legend>
           <div class="ability-grid">
-            <div class="save-box"><label>Str</label><input type="text" id="pc-str" placeholder="14 (+1)"/></div>
-            <div class="save-box"><label>Agi</label><input type="text" id="pc-agi" placeholder="10 (+0)"/></div>
-            <div class="save-box"><label>Sta</label><input type="text" id="pc-sta" placeholder="12 (+0)"/></div>
-            <div class="save-box"><label>Per</label><input type="text" id="pc-per" placeholder="8 (-1)"/></div>
-            <div class="save-box"><label>Int</label><input type="text" id="pc-int" placeholder="9 (+0)"/></div>
-            <div class="save-box"><label>Lck</label><input type="text" id="pc-lck" placeholder="11 (+0)"/></div>
+            <div class="save-box"><label class="roll-label" data-roll-ability="str" title="Click to roll a Strength check: d20 + Strength modifier.">Str</label><input type="text" id="pc-str" placeholder="14 (+1)"/></div>
+            <div class="save-box"><label class="roll-label" data-roll-ability="agi" title="Click to roll an Agility check: d20 + Agility modifier.">Agi</label><input type="text" id="pc-agi" placeholder="10 (+0)"/></div>
+            <div class="save-box"><label class="roll-label" data-roll-ability="sta" title="Click to roll a Stamina check: d20 + Stamina modifier.">Sta</label><input type="text" id="pc-sta" placeholder="12 (+0)"/></div>
+            <div class="save-box"><label class="roll-label" data-roll-ability="per" title="Click to roll a Personality check: d20 + Personality modifier.">Per</label><input type="text" id="pc-per" placeholder="8 (-1)"/></div>
+            <div class="save-box"><label class="roll-label" data-roll-ability="int" title="Click to roll an Intelligence check: d20 + Intelligence modifier.">Int</label><input type="text" id="pc-int" placeholder="9 (+0)"/></div>
+            <div class="save-box"><label class="roll-label" data-roll-ability="lck" title="Click to roll a Luck check: d20 + Luck modifier. For the DCC roll-under Luck Check, use the button below instead.">Lck</label><input type="text" id="pc-lck" placeholder="11 (+0)"/></div>
           </div>
           <button type="button" id="pc-luck-check-btn" class="hp-btn luck-check-btn" title="Luck Check (DCC RPG core rulebook) - roll 1d20; success on a result equal to or less than your current Luck score. For judge-adjudicated feats resolved by Luck alone.">🍀 Luck Check</button>
           <button type="button" id="pc-spellburn-newday-btn" class="newday-btn" title="Spellburn recovery (DCC RPG core rulebook: a burned ability score recovers 1 point per day of rest) - recovers 1 point to ONE Str/Agi/Sta ability spent on Spellburn (see the Cast a Spell row), up to what it was before any Spellburn. Also clears any Lost spells. Thief/Halfling additionally recover Luck equal to their Level, up to its own natural max. Asks which to recover if more than one is eligible. Click once per in-game day that passes.">🌙 New Day</button>
@@ -1816,21 +1818,21 @@
 
         <div class="saves pc-saves">
           <div class="save-box">
-            <label>Fort</label>
+            <label class="roll-label" data-roll-save="pc-fort" title="Click to roll a Fortitude save: d20 + Fort.">Fort</label>
             <div class="field-sync-row">
               <input type="text" id="pc-fort" placeholder="+0"/>
               <button type="button" class="derived-sync-btn" data-target="pc-fort" title="Set to Stamina modifier + class/level save bonus">↻</button>
             </div>
           </div>
           <div class="save-box">
-            <label>Ref</label>
+            <label class="roll-label" data-roll-save="pc-ref" title="Click to roll a Reflex save: d20 + Ref.">Ref</label>
             <div class="field-sync-row">
               <input type="text" id="pc-ref" placeholder="+0"/>
               <button type="button" class="derived-sync-btn" data-target="pc-ref" title="Set to Agility modifier + class/level save bonus">↻</button>
             </div>
           </div>
           <div class="save-box">
-            <label>Will</label>
+            <label class="roll-label" data-roll-save="pc-will" title="Click to roll a Will save: d20 + Will.">Will</label>
             <div class="field-sync-row">
               <input type="text" id="pc-will" placeholder="+0"/>
               <button type="button" class="derived-sync-btn" data-target="pc-will" title="Set to Personality modifier + class/level save bonus">↻</button>
@@ -6208,6 +6210,58 @@ PC_ABILITY_FIELD_IDS.forEach(id => {
     }
     refreshDerivedPcFields();
   });
+});
+
+const ABILITY_CHECK_LABELS = { str: "Strength", agi: "Agility", sta: "Stamina", per: "Personality", int: "Intelligence", lck: "Luck" };
+const SAVE_ROLL_LABELS = { fort: "Fortitude", ref: "Reflex", will: "Will" };
+
+// Ability check (DCC RPG core rulebook has no separate formal "ability
+// check" subsystem the way some other d20 games do, but a Judge calling
+// for a flat d20 + ability modifier check against a task DC is standard
+// practice at the table) - PC-only, click a Str/Agi/Sta/Per/Int/Lck label
+// in the Abilities fieldset to roll. Distinct from the dedicated 🍀 Luck
+// Check button below (a roll-UNDER check against the Luck score itself,
+// per DCC's own Luck rules) - clicking the Lck label instead rolls an
+// ordinary d20 + Luck modifier check, for the (less common) case a Judge
+// calls for that instead.
+function rollPcAbilityCheck(abilityId) {
+  const mod = abilityModifierFromField(`pc-${abilityId}`);
+  const label = `${ABILITY_CHECK_LABELS[abilityId] || abilityId} Check`;
+  const rolled = Math.floor(Math.random() * 20) + 1;
+  const total = rolled + mod;
+  const text = `${label}: d20 (${rolled}) ${formatSignedNumber(mod)} = ${markRollTotal(total)}`;
+  const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
+  showStatus(text, false, 4000);
+  appendChatLog({ kind: "ability", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId)) });
+  broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: mod, notation: "d20", total, label });
+}
+
+// Save roll - reads whatever's currently in the Fort/Ref/Will field
+// (already a flat "+N" bonus, not a raw ability score, so parseModifier
+// not abilityModifierFromField) and rolls d20 + that. Shared by both the
+// PC save boxes (id `pc-fort`/`pc-ref`/`pc-will`) and the Monster save
+// boxes (id `fort`/`ref`/`will`) via the fieldId this is called with.
+function rollSaveFromField(fieldId, saveId, mode) {
+  const el = document.getElementById(fieldId);
+  const mod = parseModifier(el ? el.value : "");
+  const label = `${SAVE_ROLL_LABELS[saveId] || saveId} Save`;
+  const rolled = Math.floor(Math.random() * 20) + 1;
+  const total = rolled + mod;
+  const text = `${label}: d20 (${rolled}) ${formatSignedNumber(mod)} = ${markRollTotal(total)}`;
+  const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || (mode === "monster" ? "Monster" : "Character");
+  showStatus(text, false, 4000);
+  appendChatLog({ kind: "save", tokenName: rollerName, text, gmOnly: isGmOnlyRoll(mode, lastRosterItems.find(i => i.id === currentItemId)) });
+  broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: mod, notation: "d20", total, label });
+}
+
+document.querySelectorAll(".roll-label[data-roll-ability]").forEach(el => {
+  el.addEventListener("click", () => rollPcAbilityCheck(el.dataset.rollAbility));
+});
+document.querySelectorAll(".roll-label[data-roll-save]").forEach(el => {
+  const fieldId = el.dataset.rollSave;
+  const saveId = fieldId.replace(/^pc-/, "");
+  const mode = fieldId.startsWith("pc-") ? "pc" : "monster";
+  el.addEventListener("click", () => rollSaveFromField(fieldId, saveId, mode));
 });
 
 // Table 5-1: Spellburn Actions (DCC RPG Reference Sheets - see
