@@ -1467,7 +1467,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 21:37</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 21:38</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1850,7 +1850,7 @@
           <div class="skills-list" id="pc-skills-list"></div>
         </fieldset>
 
-        <fieldset>
+        <fieldset id="pc-spells-fieldset">
           <legend>Spells</legend>
           <button type="button" class="open-spells-btn" id="open-spells-btn">🔮 Open Spells<span class="open-spells-count" id="open-spells-count"></span></button>
           <div id="pc-corruption-notes-wrap" style="display:none; margin-top:8px;">
@@ -8994,6 +8994,15 @@ function recalcPcSpellSection() {
   const classEl = document.getElementById("pc-class");
   const cls = classEl ? classEl.value : "";
   const abilityId = pcCasterAbilityId(cls);
+  // The whole "Spells" fieldset (known-spells library + Open Spells
+  // button) only makes sense for an actual caster (Wizard/Elf/Cleric -
+  // see pcCasterAbilityId) - hidden entirely for everyone else, same
+  // "class-gated, not just its contents" treatment as pc-spellcheck-wrap
+  // below. A "Cast a Spell" attack row already can't exist for a
+  // non-caster (see the pc-class change handler), so there'd be nothing
+  // to open here anyway.
+  const spellsFieldset = document.getElementById("pc-spells-fieldset");
+  if (spellsFieldset) spellsFieldset.style.display = abilityId ? "" : "none";
   // New Day is EVERY class's button now - natural healing (1 HP/night)
   // applies to everyone, not just Wizard/Elf's own Spellburn recovery or
   // Thief/Halfling's own Luck recovery (see openNewDayModal's own
