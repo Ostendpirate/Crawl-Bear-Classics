@@ -341,6 +341,18 @@
   }
   .chat-entry-time { font-size: 10px; color: var(--muted); white-space: nowrap; flex: none; }
   .chat-entry-text { color: var(--muted); word-break: break-word; }
+  .chat-entry-luck-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .chat-luck-burn-btn {
+    background: var(--border);
+    border: none;
+    color: var(--text);
+    padding: 3px 7px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1.2;
+  }
+  .chat-luck-burn-btn:hover { background: var(--accent); color: #1e1b18; }
   .gm-badge {
     font-size: 9px;
     text-transform: uppercase;
@@ -1473,7 +1485,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 20:56</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 21:10</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -9583,7 +9595,12 @@ async function rollSpellAttackRow(row) {
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
   const text = `${label} - Spell Check: d${check.sides} (${rolled}) ${formatSignedNumber(check.modifier)}${critBonus ? ` ${formatSignedNumber(critBonus)}(level)` : ""} = ${markRollTotal(total)}${note}`;
   showStatus(text, false, note ? 8000 : 4000);
-  appendChatLog({ kind: "spell", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId)) });
+  // luckTargets (see chatEntryHtml's own comment) - same natural-1
+  // exclusion as the cache write further down.
+  const luckTargets = (currentItemId && rolled !== 1)
+    ? [{ type: "spell", itemId: currentItemId, attackId: row.dataset.id, slotKey: slotKeyForBurn, chatKind: "spell", label }]
+    : [];
+  appendChatLog({ kind: "spell", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId)), luckTargets });
   broadcastDiceRoll({ rollerName, dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier + critBonus, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
   if (burnPoints > 0) {
     delete pending[slotKeyForBurn];
@@ -10473,7 +10490,10 @@ function skillRowHtml(row, prevOverride) {
   // attackRowHtml/spellAttackRowHtml. Skills roll a single flat d20 (or,
   // rarely, another die - row.isDie) with no Action Die slot to key by,
   // so unlike Attacks/Spell Checks this is just ONE cached last-roll value
-  // per row, not a per-slot map. Only ever adjusts a roll already made
+  // per row, not a per-slot map. Cached in token metadata (skillLuckLastRoll,
+  // see setSkillLuckLastRollForStats), not this row's own DOM, so the same
+  // roll can also be adjusted from a Log entry (see chatEntryHtml) - no
+  // data-* attribute needed here. Only ever adjusts a roll already made
   // (see openLuckBurnModal's own comment) - clicking with nothing rolled
   // yet just tells the player to roll first, so this button's label/title
   // stay static. Skipped for a `rollable: false` row (Backstab) - nothing
@@ -10482,7 +10502,7 @@ function skillRowHtml(row, prevOverride) {
     ? ""
     : `<button type="button" class="skill-luck-burn-btn" data-key="${row.key}" title="Burn Luck (DCC RPG core rulebook) - after rolling this, permanently spend Luck to boost the result you got.">🍀</button>`;
   return `
-    <div class="skill-row" data-key="${row.key}" data-label="${escapeHtml(row.label)}" data-ability="${row.ability || ""}" data-is-die="${row.isDie ? "1" : "0"}" data-check-penalty-applies="${row.checkPenaltyApplies ? "1" : "0"}" data-requires-tools="${row.requiresTools ? "1" : "0"}" data-luck-last-roll="{}">
+    <div class="skill-row" data-key="${row.key}" data-label="${escapeHtml(row.label)}" data-ability="${row.ability || ""}" data-is-die="${row.isDie ? "1" : "0"}" data-check-penalty-applies="${row.checkPenaltyApplies ? "1" : "0"}" data-requires-tools="${row.requiresTools ? "1" : "0"}">
       <div class="skill-row-label">${escapeHtml(row.label)}${note}</div>
       <input type="text" class="skill-row-value" id="pc-skill-${row.key}" data-key="${row.key}" data-auto-synced="${auto ? "1" : "0"}" value="${escapeHtml(value)}" title="${escapeHtml(skillRowTitle(row))}" />
       <button type="button" class="derived-sync-btn skill-row-sync-btn" data-key="${row.key}" title="Recompute from Level/Alignment/Ability/Armor">↻</button>
@@ -10537,33 +10557,19 @@ function attachSkillRowListeners() {
   });
   // Burning Luck (DCC RPG core rulebook) - one cached last-roll value per
   // row, no per-slot map (a skill has no Action Die to key by - see
-  // skillRowHtml's own comment). Sheet-only; skills have no Tracker
-  // equivalent, so unlike attackOrSpellLuckBurnCtx this stays purely
-  // row.dataset-based rather than routing through OBR metadata.
+  // skillRowHtml's own comment). Metadata-based via skillLuckBurnCtx, same
+  // as attackOrSpellLuckBurnCtx/initiativeLuckBurnCtx, so the same roll can
+  // also be adjusted from a Log entry - guarded on currentItemId same as
+  // the weapon/spell row's own .luck-burn-btn handler.
   listEl.querySelectorAll(".skill-luck-burn-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       const row = btn.closest(".skill-row");
       if (!row) return;
-      const label = row.dataset.label || "this roll";
-      openLuckBurnModal({
-        kind: "sheet",
-        label,
-        getLastRoll: () => {
-          try {
-            const parsed = JSON.parse(row.dataset.luckLastRoll || "{}");
-            return parsed && parsed.total !== undefined ? parsed : null;
-          } catch (e) {
-            return null;
-          }
-        },
-        applyAdjustment: (bonus, detail, newTotal, oldTotal, rollLabel) => {
-          row.dataset.luckLastRoll = "{}";
-          scheduleSave();
-          const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
-          const gmOnly = isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId));
-          postLuckAdjustmentNote({ rollerName, kind: "skill", gmOnly, label: rollLabel || label, bonus, detail, oldTotal, newTotal });
-        },
-      });
+      if (!currentItemId) {
+        showStatus("Open this character on a token first.", true);
+        return;
+      }
+      openLuckBurnModal(skillLuckBurnCtx(currentItemId, row.dataset.key, row.dataset.label || "this roll"));
     });
   });
 }
@@ -10686,7 +10692,7 @@ function recalcPcSkillsSection(force) {
 // on a PC-mode sheet), same as every other roll type except
 // rollPcHpLevelUp, which stays sheet-only on purpose (a level-up HP roll
 // isn't really "table" information the way a skill check is).
-function rollPcSkill(key) {
+async function rollPcSkill(key) {
   const row = document.querySelector(`.skill-row[data-key="${key}"]`);
   const input = row ? row.querySelector(".skill-row-value") : null;
   if (!row || !input) return;
@@ -10694,14 +10700,16 @@ function rollPcSkill(key) {
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
   const gmOnly = isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId));
   // Burning Luck (post-roll) - see skillRowHtml's own comment (one cached
-  // last-roll value per row, no per-slot map). No skill here has a
-  // weapon-fumble/Spell-Check-nat-1 style "fails regardless of total"
-  // rule (Disable Trap's own natural-1 consequence is a side effect, not
-  // an automatic failure), so unlike rollAttackFor/rollSpellAttackRow this
-  // caches unconditionally.
-  const cacheLuckLastRoll = total => {
-    row.dataset.luckLastRoll = JSON.stringify({ total, label });
-    scheduleSave();
+  // last-roll value per row, no per-slot map, metadata-based via
+  // setSkillLuckLastRollForStats). No skill here has a weapon-fumble/
+  // Spell-Check-nat-1 style "fails regardless of total" rule (Disable
+  // Trap's own natural-1 consequence is a side effect, not an automatic
+  // failure), so unlike rollAttackFor/rollSpellAttackRow this caches
+  // unconditionally - guarded only on currentItemId being set, same as
+  // every other metadata-writing roll.
+  const luckTargets = currentItemId ? [{ type: "skill", itemId: currentItemId, skillKey: key, label }] : [];
+  const cacheLuckLastRoll = async total => {
+    if (currentItemId) await setSkillLuckLastRollForStats(currentItemId, key, total, label);
   };
   if (row.dataset.isDie === "1") {
     const sidesMatch = /d(\d+)/i.exec(input.value || "");
@@ -10714,9 +10722,9 @@ function rollPcSkill(key) {
     const total = rolled + modifier;
     const text = `${label}: d${sides} (${rolled}) ${formatSignedNumber(modifier)} = ${markRollTotal(total)}`;
     showStatus(text, false, 4000);
-    appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly });
+    appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly, luckTargets });
     broadcastDiceRoll({ rollerName, dice: [{ sides, value: rolled }], modifier, notation: `d${sides}`, total, label });
-    cacheLuckLastRoll(total);
+    await cacheLuckLastRoll(total);
     return;
   }
   const bonus = parseModifier(input.value);
@@ -10731,9 +10739,9 @@ function rollPcSkill(key) {
   const trapTriggerNote = (key === "disableTrap" && rolled === 1) ? " ⚠️ Natural 1 - the trap triggers!" : "";
   const text = `${label}: d20 (${rolled}) ${formatSignedNumber(bonus)} = ${markRollTotal(total)}${trapTriggerNote}`;
   showStatus(text, rolled === 1 && key === "disableTrap", trapTriggerNote ? 6000 : 4000);
-  appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly });
+  appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly, luckTargets });
   broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: bonus, notation: "d20", total, label });
-  cacheLuckLastRoll(total);
+  await cacheLuckLastRoll(total);
 }
 
 document.getElementById("pc-tables-btn").addEventListener("click", openTablesModalForPc);
@@ -12976,12 +12984,20 @@ async function rollAttackFor(itemId, attackId, slotKey) {
   const rollDuration = (isCrit || isFumble) ? 9000 : 6500;
   showTrackerStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
   showStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
+  // luckTargets (see chatEntryHtml/attackOrSpellLuckBurnCtx's own comments)
+  // - lets this Log entry offer its own 🍀 Burn Luck button. Empty on a
+  // fumble, same "Luck can't override an automatic miss" reasoning
+  // luckCacheTotal itself follows above.
+  const luckTargets = luckCacheTotal !== null
+    ? [{ type: "attack", itemId, attackId, slotKey: effectiveSlotKey, chatKind: "attack", label: atk.name || "Attack" }]
+    : [];
   await appendChatLog({
     kind: "attack",
     tokenName: item.name || "Token",
     mode: stats.mode,
     text,
     gmOnly: isGmOnlyRoll(stats.mode, item),
+    luckTargets,
   });
 
   broadcastDiceRoll({
@@ -13272,12 +13288,17 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
   const rollDuration = (anyCrit || anyFumble) ? 9000 : 6500;
   showTrackerStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
   showStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
+  // luckTargets (see chatEntryHtml's own comment) - up to one PER HAND
+  // (luckCacheQueue), so a two-weapon Log entry can offer a separate 🍀
+  // button for each hand that actually connected.
+  const luckTargets = luckCacheQueue.map(cached => ({ type: "attack", itemId, attackId: cached.attackId, slotKey, chatKind: "attack", label: cached.label }));
   await appendChatLog({
     kind: "attack",
     tokenName: item.name || "Token",
     mode: stats.mode,
     text,
     gmOnly: isGmOnlyRoll(stats.mode, item),
+    luckTargets,
   });
 
   broadcastDiceRoll({
@@ -13385,7 +13406,12 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   const rollDuration = note ? 9000 : 6500;
   showTrackerStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
   showStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
-  await appendChatLog({ kind: "spell", tokenName: item.name || "Token", text, gmOnly: isGmOnlyRoll(stats.mode, item) });
+  // luckTargets (see chatEntryHtml's own comment) - same natural-1
+  // exclusion as the cache write below.
+  const luckTargets = rolled !== 1
+    ? [{ type: "spell", itemId, attackId, slotKey, chatKind: "spell", label }]
+    : [];
+  await appendChatLog({ kind: "spell", tokenName: item.name || "Token", text, gmOnly: isGmOnlyRoll(stats.mode, item), luckTargets });
   broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier + critBonus, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
   // Burning Luck (post-roll) - see rollSpellAttackRow's own comment
   // (Sheet-side sibling) for why a natural 1 is never cached.
@@ -13599,6 +13625,92 @@ async function clearInitiativeLuckLastRollForStats(itemId) {
   });
 }
 
+// Builds the ctx openLuckBurnModal needs for Initiative's Burn Luck
+// button - shared by the Tracker's own .init-luck-burn-btn AND a Log
+// entry's 🍀 button (see chatEntryHtml), both of which just need "this
+// token's Initiative" regardless of which tab triggered the click.
+function initiativeLuckBurnCtx(itemId) {
+  return {
+    kind: "tracker",
+    itemId,
+    label: "Initiative",
+    getLastRoll: async () => {
+      const [item] = await OBR.scene.items.getItems([itemId]);
+      if (!item) return null;
+      return getStatsForItem(item).data.initLuckLastRoll || null;
+    },
+    applyAdjustment: async (bonus, detail, newTotal, oldTotal, label) => {
+      const [item] = await OBR.scene.items.getItems([itemId]);
+      await clearInitiativeLuckLastRollForStats(itemId);
+      const rollerName = item ? (item.name || "Token") : "Token";
+      const gmOnly = item ? isGmOnlyRoll(getStatsForItem(item).mode, item) : false;
+      postLuckAdjustmentNote({ rollerName, kind: "initiative", gmOnly, label: label || "Initiative", bonus, detail, oldTotal, newTotal });
+    },
+  };
+}
+
+// Sibling of setLuckLastRollForStats, for a Skill's own cached last roll -
+// keyed by skill key (skillRowHtml's row.key) in its own top-level map,
+// same reasoning as initLuckLastRoll: Skills aren't part of the attacks
+// array. Metadata-based (not Sheet-DOM, unlike this app's very first
+// Skills Burn Luck design) so a Burn Luck click can resolve it from
+// anywhere - the Skills section itself, OR a Log entry (see
+// chatEntryHtml) - even when this PC isn't the token currently open on
+// the Sheet tab.
+async function setSkillLuckLastRollForStats(itemId, skillKey, total, label) {
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      if (mode !== "pc") return;
+      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+      const byKey = { ...(data.skillLuckLastRoll || {}) };
+      byKey[skillKey] = { total, label };
+      data.skillLuckLastRoll = byKey;
+      item.metadata[PC_METADATA_KEY] = data;
+    });
+  });
+}
+
+async function clearSkillLuckLastRollForStats(itemId, skillKey) {
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      if (mode !== "pc") return;
+      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+      if (!data.skillLuckLastRoll || !(skillKey in data.skillLuckLastRoll)) return;
+      const byKey = { ...data.skillLuckLastRoll };
+      delete byKey[skillKey];
+      data.skillLuckLastRoll = byKey;
+      item.metadata[PC_METADATA_KEY] = data;
+    });
+  });
+}
+
+// Builds the ctx openLuckBurnModal needs for one Skill row's Burn Luck
+// button - shared by the Sheet's own .skill-luck-burn-btn AND a Log
+// entry's 🍀 button, same "always metadata-based" reasoning
+// attackOrSpellLuckBurnCtx/initiativeLuckBurnCtx already follow.
+function skillLuckBurnCtx(itemId, skillKey, label) {
+  return {
+    kind: "tracker",
+    itemId,
+    label,
+    getLastRoll: async () => {
+      const [item] = await OBR.scene.items.getItems([itemId]);
+      if (!item) return null;
+      const data = getStatsForItem(item).data;
+      return (data.skillLuckLastRoll && data.skillLuckLastRoll[skillKey]) || null;
+    },
+    applyAdjustment: async (bonus, detail, newTotal, oldTotal, rollLabel) => {
+      const [item] = await OBR.scene.items.getItems([itemId]);
+      await clearSkillLuckLastRollForStats(itemId, skillKey);
+      const rollerName = item ? (item.name || "Token") : "Token";
+      const gmOnly = item ? isGmOnlyRoll(getStatsForItem(item).mode, item) : false;
+      postLuckAdjustmentNote({ rollerName, kind: "skill", gmOnly, label: rollLabel || label || "this roll", bonus, detail, oldTotal, newTotal });
+    },
+  };
+}
+
 // Tracker-side sibling of spellburnRecoverableAbilities, sourced from a
 // token's saved stats instead of the live Sheet DOM - see
 // openFailedSpellburnModalForStats.
@@ -13796,29 +13908,11 @@ function attachTrackerRowListeners() {
       // Initiative Luck burn (see initiativeLuckBurnLineHtml) - same
       // "standing, not tied to a specific attack/slot" shape as
       // Concentration Save just above, so it gets the same early-return
-      // treatment. Targets a top-level cached field (data.initLuckLastRoll),
-      // not any attack's own luckLastRoll.
+      // treatment. Ctx is shared with the Log's own 🍀 button - see
+      // initiativeLuckBurnCtx.
       const initLuckBtn = wrap.querySelector(".init-luck-burn-btn");
       if (initLuckBtn) {
-        initLuckBtn.addEventListener("click", () => {
-          openLuckBurnModal({
-            kind: "tracker",
-            itemId: parentId,
-            label: "Initiative",
-            getLastRoll: async () => {
-              const [pendingItem] = await OBR.scene.items.getItems([parentId]);
-              if (!pendingItem) return null;
-              return getStatsForItem(pendingItem).data.initLuckLastRoll || null;
-            },
-            applyAdjustment: async (bonus, detail, newTotal, oldTotal, label) => {
-              const [pendingItem] = await OBR.scene.items.getItems([parentId]);
-              await clearInitiativeLuckLastRollForStats(parentId);
-              const rollerName = pendingItem ? (pendingItem.name || "Token") : "Token";
-              const gmOnly = pendingItem ? isGmOnlyRoll(getStatsForItem(pendingItem).mode, pendingItem) : false;
-              postLuckAdjustmentNote({ rollerName, kind: "initiative", gmOnly, label: label || "Initiative", bonus, detail, oldTotal, newTotal });
-            },
-          });
-        });
+        initLuckBtn.addEventListener("click", () => openLuckBurnModal(initiativeLuckBurnCtx(parentId)));
         return;
       }
       const row = wrap.querySelector(".attack-detail-row");
@@ -14172,10 +14266,25 @@ async function appendChatLog(entry) {
   }
 }
 
+// luckTargets (attached by rollAttackFor/rollTwoWeaponAttack/
+// rollSpellAttackRow/rollSpellAttackForTracker/rollPcSkill/rollInitiativeFor
+// - see each one's own comment) lets a Log entry offer its own 🍀 Burn
+// Luck button(s) right where the roll is actually seen, instead of making
+// the player go find the specific attack/spell/skill/Initiative row again
+// (see chatLuckBurnCtxFor/the delegated click listener on #chat-log-list
+// below). Usually a single-element array; two-weapon fighting can carry
+// one PER HAND. Omitted (or empty) whenever the roll itself couldn't be
+// cached in the first place (a natural-1 weapon fumble/Spell Check, or no
+// token open for a Sheet-triggered roll) - same as the row-based buttons,
+// there's simply nothing to show.
 function chatEntryHtml(entry) {
   const time = new Date(entry.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const luckTargets = Array.isArray(entry.luckTargets) ? entry.luckTargets : [];
+  const luckRowHtml = luckTargets.length
+    ? `<div class="chat-entry-luck-row">${luckTargets.map((t, i) => `<button type="button" class="chat-luck-burn-btn" data-luck-index="${i}" title="Burn Luck (DCC RPG core rulebook) - permanently spend Luck to boost this result.">🍀${luckTargets.length > 1 ? ` ${escapeHtml(t.label || "")}` : " Burn Luck"}</button>`).join("")}</div>`
+    : "";
   return `
-    <div class="chat-entry${entry.gmOnly ? " gm-only" : ""}">
+    <div class="chat-entry${entry.gmOnly ? " gm-only" : ""}" data-entry-id="${entry.id}">
       <div class="chat-entry-top">
         <div class="chat-entry-name-wrap">
           ${entry.gmOnly ? `<span class="gm-badge" title="Only visible to the GM">GM</span>` : ""}
@@ -14184,8 +14293,36 @@ function chatEntryHtml(entry) {
         <span class="chat-entry-time">${time}</span>
       </div>
       <div class="chat-entry-text">${rollTextToHtml(entry.text)}</div>
+      ${luckRowHtml}
     </div>`;
 }
+
+// Maps one luckTargets entry (see chatEntryHtml's own comment) to the ctx
+// openLuckBurnModal needs - just a dispatcher over the same ctx builders
+// the row-based Burn Luck buttons already use, so a Log-triggered burn is
+// identical in every way (including resolving whatever the FRESHEST cached
+// roll for that target is, which may have since moved on from this exact
+// entry if it was rolled again without burning - same characteristic the
+// row-based buttons already have).
+function chatLuckBurnCtxFor(target) {
+  if (!target) return null;
+  if (target.type === "attack" || target.type === "spell") {
+    return attackOrSpellLuckBurnCtx(target.itemId, target.attackId, target.slotKey, target.chatKind);
+  }
+  if (target.type === "skill") return skillLuckBurnCtx(target.itemId, target.skillKey, target.label);
+  if (target.type === "initiative") return initiativeLuckBurnCtx(target.itemId);
+  return null;
+}
+
+document.getElementById("chat-log-list").addEventListener("click", e => {
+  const btn = e.target.closest(".chat-luck-burn-btn");
+  if (!btn) return;
+  const entryEl = btn.closest(".chat-entry");
+  const entry = entryEl ? lastChatLog.find(en => en.id === entryEl.dataset.entryId) : null;
+  const target = entry && entry.luckTargets ? entry.luckTargets[parseInt(btn.dataset.luckIndex, 10)] : null;
+  const ctx = chatLuckBurnCtxFor(target);
+  if (ctx) openLuckBurnModal(ctx);
+});
 
 function renderChatLog() {
   const listEl = document.getElementById("chat-log-list");
@@ -14613,12 +14750,18 @@ async function rollInitiativeFor(id) {
     });
   });
   await refreshTracker();
+  // luckTargets (see chatEntryHtml/openLuckBurnModal's own comments) - lets
+  // this Log entry offer its own 🍀 Burn Luck button, same as the
+  // Tracker's .init-luck-burn-btn, instead of making the player go find
+  // this token's own Initiative row again.
+  const luckTargets = stats.mode === "pc" ? [{ type: "initiative", itemId: id, label: "Initiative" }] : [];
   await appendChatLog({
     kind: "initiative",
     tokenName: item.name || "Token",
     mode: stats.mode,
     text: `Initiative: ${markRollTotal(String(roll))}${mod ? ` (d${initDie} ${mod >= 0 ? "+" : ""}${mod})` : ` (d${initDie})`}`,
     gmOnly: isGmOnlyRoll(stats.mode, item),
+    luckTargets,
   });
   broadcastDiceRoll({
     rollerName: item.name || "Token",
