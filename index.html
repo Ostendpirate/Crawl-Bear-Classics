@@ -1250,6 +1250,25 @@
     line-height: 1;
   }
   .skill-row-roll-btn:hover { background: var(--accent); color: #1e1b18; }
+  /* Compact icon-only sibling of .skill-row-roll-btn (no "Burn Luck" text
+     label - the row is already a tight single line of fixed-width
+     controls, no room for a text button) - grows slightly (auto width)
+     only once a bonus is actually pending, so the +N stays readable. */
+  .skill-luck-burn-btn {
+    flex: none;
+    min-width: 26px;
+    height: 26px;
+    padding: 0 4px;
+    font-size: 12px;
+    background: var(--border);
+    border: none;
+    border-radius: 5px;
+    color: var(--text);
+    cursor: pointer;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .skill-luck-burn-btn:hover { background: var(--accent); color: #1e1b18; }
   .occ-tooltip {
     display: none;
     position: fixed;
@@ -1452,7 +1471,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 18:13</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 18:16</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -10405,12 +10424,22 @@ function skillRowHtml(row, prevOverride) {
   const rollBtnHtml = row.rollable === false
     ? ""
     : `<button type="button" class="skill-row-roll-btn" data-key="${row.key}" title="Roll ${escapeHtml(row.label)}">🎲</button>`;
+  // Burning Luck (DCC RPG core rulebook) - ANY class, same as
+  // attackRowHtml/spellAttackRowHtml. Skills roll a single flat d20 (or,
+  // rarely, another die - row.isDie) with no Action Die slot to key by,
+  // so unlike Attacks/Spell Checks this is just ONE pending value per row,
+  // not a per-slot map. Skipped for a `rollable: false` row (Backstab) -
+  // nothing to burn Luck toward if there's no roll button to apply it to.
+  const luckBurnBtnHtml = row.rollable === false
+    ? ""
+    : `<button type="button" class="skill-luck-burn-btn" data-key="${row.key}" title="Burn Luck (DCC RPG core rulebook) - permanently spend Luck for a one-time bonus to this roll.">🍀</button>`;
   return `
-    <div class="skill-row" data-key="${row.key}" data-label="${escapeHtml(row.label)}" data-ability="${row.ability || ""}" data-is-die="${row.isDie ? "1" : "0"}" data-check-penalty-applies="${row.checkPenaltyApplies ? "1" : "0"}" data-requires-tools="${row.requiresTools ? "1" : "0"}">
+    <div class="skill-row" data-key="${row.key}" data-label="${escapeHtml(row.label)}" data-ability="${row.ability || ""}" data-is-die="${row.isDie ? "1" : "0"}" data-check-penalty-applies="${row.checkPenaltyApplies ? "1" : "0"}" data-requires-tools="${row.requiresTools ? "1" : "0"}" data-luck-burn-pending="{}">
       <div class="skill-row-label">${escapeHtml(row.label)}${note}</div>
       <input type="text" class="skill-row-value" id="pc-skill-${row.key}" data-key="${row.key}" data-auto-synced="${auto ? "1" : "0"}" value="${escapeHtml(value)}" title="${escapeHtml(skillRowTitle(row))}" />
       <button type="button" class="derived-sync-btn skill-row-sync-btn" data-key="${row.key}" title="Recompute from Level/Alignment/Ability/Armor">↻</button>
       ${rollBtnHtml}
+      ${luckBurnBtnHtml}
     </div>`;
 }
 
@@ -10457,6 +10486,37 @@ function attachSkillRowListeners() {
   });
   listEl.querySelectorAll(".skill-row-roll-btn").forEach(btn => {
     btn.addEventListener("click", () => rollPcSkill(btn.dataset.key));
+  });
+  // Burning Luck (DCC RPG core rulebook) - one pending value per row, no
+  // per-slot map (a skill has no Action Die to key by - see
+  // skillRowHtml's own comment). Sheet-only; skills have no Tracker
+  // equivalent.
+  listEl.querySelectorAll(".skill-luck-burn-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const row = btn.closest(".skill-row");
+      if (!row) return;
+      openLuckBurnModal({
+        kind: "sheet",
+        label: row.dataset.label || "this roll",
+        getPending: () => {
+          // "{}" (nothing burned yet) has to resolve to null, not a
+          // truthy-but-fieldless object - refreshLuckBurnModal only
+          // falls back to its own default shape when this returns a
+          // falsy value (see its own comment).
+          try {
+            const parsed = JSON.parse(row.dataset.luckBurnPending || "{}");
+            return parsed && parsed.points ? parsed : null;
+          } catch (e) {
+            return null;
+          }
+        },
+        setPending: pending => {
+          row.dataset.luckBurnPending = JSON.stringify(pending || {});
+          btn.textContent = pending && pending.bonus ? `🍀${formatSignedNumber(pending.bonus)}` : "🍀";
+          scheduleSave();
+        },
+      });
+    });
   });
 }
 
@@ -10585,22 +10645,39 @@ function rollPcSkill(key) {
   const label = row.dataset.label || key;
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
   const gmOnly = isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId));
+  // Burning Luck - see skillRowHtml's own comment (one flat pending value
+  // per row, no per-slot map).
+  let luckPending = null;
+  try {
+    const parsed = JSON.parse(row.dataset.luckBurnPending || "{}");
+    luckPending = parsed && parsed.points ? parsed : null;
+  } catch (e) { luckPending = null; }
+  const luckBonus = luckPending ? luckPending.bonus : 0;
+  const luckNote = luckPending ? ` 🍀 Burn Luck: ${formatSignedNumber(luckPending.bonus)} (${luckPending.detail}).` : "";
+  const clearLuckPending = () => {
+    if (!luckPending) return;
+    row.dataset.luckBurnPending = "{}";
+    const luckBtn = row.querySelector(".skill-luck-burn-btn");
+    if (luckBtn) luckBtn.textContent = "🍀";
+    scheduleSave();
+  };
   if (row.dataset.isDie === "1") {
     const sidesMatch = /d(\d+)/i.exec(input.value || "");
     const sides = sidesMatch ? parseInt(sidesMatch[1], 10) : 20;
     const abilityId = row.dataset.ability;
     const abilityMod = abilityId ? abilityModifierFromField(`pc-${abilityId}`) : 0;
     const penalty = row.dataset.checkPenaltyApplies === "1" ? computePcCheckPenaltyTotal() : 0;
-    const modifier = abilityMod + penalty;
+    const modifier = abilityMod + penalty + luckBonus;
     const rolled = Math.floor(Math.random() * sides) + 1;
     const total = rolled + modifier;
-    const text = `${label}: d${sides} (${rolled}) ${formatSignedNumber(modifier)} = ${markRollTotal(total)}`;
+    const text = `${label}: d${sides} (${rolled}) ${formatSignedNumber(modifier)} = ${markRollTotal(total)}${luckNote}`;
     showStatus(text, false, 4000);
     appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly });
     broadcastDiceRoll({ rollerName, dice: [{ sides, value: rolled }], modifier, notation: `d${sides}`, total, label });
+    clearLuckPending();
     return;
   }
-  const bonus = parseModifier(input.value);
+  const bonus = parseModifier(input.value) + luckBonus;
   const rolled = Math.floor(Math.random() * 20) + 1;
   const total = rolled + bonus;
   // Disable Trap's own rule: "A natural 1 on a disable trap check triggers
@@ -10610,10 +10687,11 @@ function rollPcSkill(key) {
   // natural 1 has special text on an attack roll (Fumble) elsewhere in
   // this app.
   const trapTriggerNote = (key === "disableTrap" && rolled === 1) ? " ⚠️ Natural 1 - the trap triggers!" : "";
-  const text = `${label}: d20 (${rolled}) ${formatSignedNumber(bonus)} = ${markRollTotal(total)}${trapTriggerNote}`;
+  const text = `${label}: d20 (${rolled}) ${formatSignedNumber(bonus)} = ${markRollTotal(total)}${trapTriggerNote}${luckNote}`;
   showStatus(text, rolled === 1 && key === "disableTrap", trapTriggerNote ? 6000 : 4000);
   appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly });
   broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: bonus, notation: "d20", total, label });
+  clearLuckPending();
 }
 
 document.getElementById("pc-tables-btn").addEventListener("click", openTablesModalForPc);
