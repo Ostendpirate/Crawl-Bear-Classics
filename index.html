@@ -1467,7 +1467,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 21:41</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 21:51</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -5859,9 +5859,34 @@ async function saveCurrent() {
   const cfg = MODES[currentMode];
   const data = readForm(currentMode);
   const name = nameEl.value;
+  // dataToWrite starts as `data` and, for a PC, gets Burn Luck's
+  // metadata-only caches merged back in below - reassigned inside the
+  // updateItems callback since that's the only place with the item's true
+  // LIVE metadata to read them from.
+  let dataToWrite = data;
   await OBR.scene.items.updateItems([currentItemId], items => {
     items.forEach(item => {
-      item.metadata[cfg.metadataKey] = data;
+      if (currentMode === "pc") {
+        // skillLuckLastRoll/initLuckLastRoll/saveLuckLastRoll/
+        // abilityLuckLastRoll (see setSkillLuckLastRollForStats and its
+        // siblings) are metadata-only Burn Luck caches with no Sheet DOM
+        // field to round-trip through readForm() the way attacks[].
+        // luckLastRoll does via each row's own data-luck-last-roll
+        // attribute - readForm() above has no way to know about them, so
+        // without this merge, ANY save (even one from an edit completely
+        // unrelated to Luck) would silently wipe whichever of these was
+        // most recently written, making the Log's own 🍀 button
+        // intermittently find nothing to adjust.
+        const existing = item.metadata[cfg.metadataKey] || {};
+        dataToWrite = {
+          ...data,
+          skillLuckLastRoll: existing.skillLuckLastRoll,
+          initLuckLastRoll: existing.initLuckLastRoll,
+          saveLuckLastRoll: existing.saveLuckLastRoll,
+          abilityLuckLastRoll: existing.abilityLuckLastRoll,
+        };
+      }
+      item.metadata[cfg.metadataKey] = dataToWrite;
       item.metadata[MODE_METADATA_KEY] = currentMode;
       if (name.trim()) {
         item.name = name;
@@ -5872,7 +5897,7 @@ async function saveCurrent() {
       }
     });
   });
-  cfg.render(data);
+  cfg.render(dataToWrite);
   showStatus("Saved");
   // Keeps lastAppliedSheetSignature (and the per-mode data it's built
   // from) matching what was JUST written, rather than leaving it stale
@@ -5881,8 +5906,11 @@ async function saveCurrent() {
   // trigger one more (harmless but avoidable) fillForm() rebuild the
   // moment it arrives. saveCurrent only ever writes ONE mode's data, so
   // the OTHER mode's half of the signature carries forward from whatever
-  // it was last known to be.
-  if (currentMode === "monster") lastKnownMonsterData = data; else lastKnownPcData = data;
+  // it was last known to be. Uses dataToWrite (not `data`) so this
+  // matches exactly what actually landed in metadata, Luck caches
+  // included - otherwise this bookkeeping alone would (harmlessly)
+  // mismatch and trigger that same avoidable rebuild on the next echo.
+  if (currentMode === "monster") lastKnownMonsterData = dataToWrite; else lastKnownPcData = dataToWrite;
   lastAppliedSheetSignature = sheetSignatureFor(
     { id: currentItemId, name },
     lastKnownMonsterData,
