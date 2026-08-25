@@ -784,7 +784,7 @@
      auto-width/padded treatment .backstab-toggle-btn already gets for the
      same reason. */
   .spell-attack-burn-btn, .tracker-burn-btn, .newday-modal-recover, #pc-corruption-btn, #pc-disapproval-btn,
-  .spell-attack-reversed-btn, .tracker-reversed-btn {
+  .spell-attack-reversed-btn, .tracker-reversed-btn, #pc-luck-check-btn, .luck-burn-btn, .tracker-luck-burn-btn {
     width: auto;
     height: auto;
     padding: 3px 8px;
@@ -1452,7 +1452,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 17:13</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 18:00</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1684,8 +1684,10 @@
             <div class="save-box"><label>Int</label><input type="text" id="pc-int" placeholder="9 (+0)"/></div>
             <div class="save-box"><label>Lck</label><input type="text" id="pc-lck" placeholder="11 (+0)"/></div>
           </div>
-          <button type="button" id="pc-spellburn-newday-btn" class="newday-btn" title="Spellburn recovery (DCC RPG core rulebook: a burned ability score recovers 1 point per day of rest) - recovers 1 point to ONE Str/Agi/Sta ability spent on Spellburn (see the Cast a Spell row), up to what it was before any Spellburn. Also clears any Lost spells. Asks which ability if more than one is burned. Click once per in-game day that passes.">🌙 New Day</button>
+          <button type="button" id="pc-luck-check-btn" class="hp-btn luck-check-btn" title="Luck Check (DCC RPG core rulebook) - roll 1d20; success on a result equal to or less than your current Luck score. For judge-adjudicated feats resolved by Luck alone.">🍀 Luck Check</button>
+          <button type="button" id="pc-spellburn-newday-btn" class="newday-btn" title="Spellburn recovery (DCC RPG core rulebook: a burned ability score recovers 1 point per day of rest) - recovers 1 point to ONE Str/Agi/Sta ability spent on Spellburn (see the Cast a Spell row), up to what it was before any Spellburn. Also clears any Lost spells. Thief/Halfling additionally recover Luck equal to their Level, up to its own natural max. Asks which to recover if more than one is eligible. Click once per in-game day that passes.">🌙 New Day</button>
           <input type="hidden" id="pc-spellburnMax" value="" />
+          <input type="hidden" id="pc-luckMax" value="" />
         </fieldset>
 
         <div class="row">
@@ -2093,6 +2095,36 @@
     </div>
   </div>
 
+  <div id="luckburn-modal-backdrop" class="tables-modal-backdrop" style="display:none">
+    <div class="tables-modal">
+      <div class="tables-modal-header">
+        <div>
+          <div class="tables-modal-title">Burn Luck</div>
+          <div class="tables-modal-subtitle" id="luckburn-modal-subtitle">Permanently burn Luck for a one-time bonus to a roll (DCC RPG core rulebook) - Thief rolls their own Luck Die per point spent, Halfling doubles the flat rate, every other class gets a flat +1 per point.</div>
+        </div>
+        <button type="button" class="tables-modal-close" id="luckburn-modal-close" title="Close">×</button>
+      </div>
+      <div class="tables-modal-body">
+        <div class="spellburn-modal-row">
+          <span class="spellburn-modal-label">Luck</span>
+          <span class="spellburn-modal-score" id="luckburn-modal-score"></span>
+          <button type="button" class="hp-btn spellburn-modal-minus" id="luckburn-modal-minus" title="Spend 1 Luck point">−1</button>
+        </div>
+        <div class="spellburn-modal-total-row">
+          <span class="spellburn-modal-label">Bonus this roll</span>
+          <span class="spellburn-modal-total" id="luckburn-modal-total">+0</span>
+        </div>
+        <div class="spellburn-modal-flavor-row" id="luckburn-modal-detail-row" style="display:none">
+          <span class="spellburn-modal-flavor-text" id="luckburn-modal-detail"></span>
+        </div>
+        <div class="spellburn-modal-actions">
+          <button type="button" class="spellburn-modal-cancel-btn" id="luckburn-modal-cancel" title="Undo every point spent since opening this popup, and close">Cancel</button>
+          <button type="button" class="spellburn-modal-confirm-btn" id="luckburn-modal-confirm">Confirm</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="corruption-modal-backdrop" class="tables-modal-backdrop" style="display:none">
     <div class="tables-modal">
       <div class="tables-modal-header">
@@ -2207,7 +2239,7 @@ const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al", "montype"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-corruption-notes"];
+const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
 const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
@@ -6179,6 +6211,31 @@ function applySpellburnLive(ability, points) {
   return true;
 }
 
+// Luck-specific sibling of applySpellburnLive - same live-effect/snapshot
+// contract, but against pc-lck/pc-luckMax specifically rather than one of
+// SPELLBURN_ABILITIES (Luck isn't spent toward a Spell Check bonus - see
+// openLuckBurnModal). Kept as its own function rather than folding Luck
+// into SPELLBURN_ABILITIES because Luck's OWN recovery rule is completely
+// different (luckRecoverable/recoverLuck: only Thief/Halfling, +Level
+// instead of +1) and it's never part of a Spell Check breakdown. Returns
+// the NEW score (not a plain boolean like applySpellburnLive - a 0 result
+// is a perfectly valid successful spend here, so callers must check for
+// `null` specifically, not falsiness).
+function applyLuckBurnLive(points) {
+  const el = document.getElementById("pc-lck");
+  if (!el) return null;
+  const current = parseAbilityScore(el.value);
+  if (current === null) return null;
+  const maxEl = document.getElementById("pc-luckMax");
+  const existingMax = maxEl && maxEl.value ? parseInt(maxEl.value, 10) : NaN;
+  if (maxEl) maxEl.value = String(Number.isFinite(existingMax) ? existingMax : current);
+  const newScore = current - points;
+  el.value = `${newScore} (${formatSignedNumber(dccAbilityModifier(newScore))})`;
+  refreshDerivedPcFields();
+  scheduleSave();
+  return newScore;
+}
+
 // "New Day" recovery (DCC RPG core rulebook: a burned ability score
 // recovers 1 point per day of rest - ONE point, not one per ability). This
 // app has no in-game calendar, so this is a manual, click-once-per-day-
@@ -6221,6 +6278,47 @@ function recoverSpellburnAbility(ability) {
   showStatus(`New Day: recovered 1 point of ${spellburnAbilityLabel(ability)} (now ${next}).`, false, 5000);
 }
 
+// Luck-specific sibling of spellburnRecoverableAbilities/recoverSpellburnAbility
+// - Thief and Halfling are the only classes with a DEFINED nightly Luck
+// recovery rate (DCC RPG core rulebook, their own class descriptions:
+// "restored each night by a number of points equal to their level").
+// Every other class's Luck recovery is left to GM discretion/alignment
+// (no fixed formula given), so this deliberately returns false for them -
+// their Luck field stays a plain manually-edited value, same as before
+// Burn Luck existed. Uses pc-luckMax as its own snapshot ceiling, kept
+// entirely separate from pc-spellburnMax's map (Luck isn't one of
+// SPELLBURN_ABILITIES).
+function luckRecoverable(cls) {
+  if (cls !== "Thief" && cls !== "Halfling") return false;
+  const maxEl = document.getElementById("pc-luckMax");
+  const maxVal = maxEl && maxEl.value ? parseInt(maxEl.value, 10) : NaN;
+  if (!Number.isFinite(maxVal)) return false;
+  const current = parseAbilityScore(document.getElementById("pc-lck").value);
+  return current !== null && current < maxVal;
+}
+
+// Recovers a Thief/Halfling's Luck by their character LEVEL (not a flat 1
+// like Spellburn's str/agi/sta - see luckRecoverable's own comment),
+// capped at pc-luckMax's snapshotted true score. Same "clear the snapshot
+// once fully healed, so a later burn re-snapshots fresh" contract
+// recoverSpellburnAbility follows.
+function recoverLuck(cls) {
+  const maxEl = document.getElementById("pc-luckMax");
+  const maxVal = maxEl && maxEl.value ? parseInt(maxEl.value, 10) : NaN;
+  if (!Number.isFinite(maxVal)) return;
+  const el = document.getElementById("pc-lck");
+  const current = parseAbilityScore(el ? el.value : "");
+  if (current === null) return;
+  const levelEl = document.getElementById("pc-level");
+  const level = parseLevelNumber(levelEl ? levelEl.value : "") || 1;
+  const next = Math.min(maxVal, current + level);
+  el.value = `${next} (${formatSignedNumber(dccAbilityModifier(next))})`;
+  if (next >= maxVal && maxEl) maxEl.value = "";
+  refreshDerivedPcFields();
+  scheduleSave();
+  showStatus(`New Day: recovered ${next - current} point${next - current === 1 ? "" : "s"} of Luck (now ${next}, ${cls}'s own Level).`, false, 5000);
+}
+
 // Resting also clears every known spell's Lost flag (see
 // lostCheckboxHtml/setSpellLost) - piggybacked onto New Day rather than a
 // second button, since both represent the same in-game event. Returns how
@@ -6235,19 +6333,27 @@ function clearAllLostSpells() {
   return clearedCount;
 }
 
-// A day of rest only recovers ONE point total, so if more than one
-// ability is burned the player has to choose which one heals today - a
-// small popup listing just the eligible abilities (same tables-modal
-// chrome the Crit/Fumble Tables button uses, body built fresh each open
-// since which abilities qualify changes over time). With only one eligible
-// ability there's nothing to choose, so this recovers it directly instead
-// of asking.
+// A day of rest only recovers ONE point total per Spellburn ability, so if
+// more than one ability (Str/Agi/Sta Spellburn, plus a Thief/Halfling's
+// own Luck - see luckRecoverable) is eligible the player has to choose
+// which heals today - a small popup listing just the eligible ones (same
+// tables-modal chrome the Crit/Fumble Tables button uses, body built
+// fresh each open since which abilities qualify changes over time). With
+// only one eligible item there's nothing to choose, so this recovers it
+// directly instead of asking. Each item is `{ ability }` for a Spellburn
+// recovery (flat +1) or `{ luck: true }` for a Luck recovery (+Level,
+// Thief/Halfling only).
 function openNewDayModal() {
-  // Runs unconditionally, before the Spellburn-only early return below -
-  // a Wizard/Elf with a Lost spell but nothing currently burned would
-  // otherwise see "nothing to recover" and never get it back.
+  // Runs unconditionally, before the early-return below - a Wizard/Elf
+  // with a Lost spell but nothing currently burned would otherwise see
+  // "nothing to recover" and never get it back.
   const lostCleared = clearAllLostSpells();
-  const recoverable = spellburnRecoverableAbilities();
+  const classEl = document.getElementById("pc-class");
+  const cls = classEl ? classEl.value : "";
+  const recoverable = [
+    ...spellburnRecoverableAbilities().map(ability => ({ ability })),
+    ...(luckRecoverable(cls) ? [{ luck: true }] : []),
+  ];
   if (!recoverable.length) {
     if (lostCleared > 0) {
       scheduleSave();
@@ -6258,22 +6364,35 @@ function openNewDayModal() {
     return;
   }
   if (recoverable.length === 1) {
-    recoverSpellburnAbility(recoverable[0]);
+    const only = recoverable[0];
+    if (only.luck) recoverLuck(cls); else recoverSpellburnAbility(only.ability);
     return;
   }
   const body = document.getElementById("newday-modal-body");
-  body.innerHTML = recoverable.map(ability => {
-    const el = document.getElementById(`pc-${ability}`);
+  body.innerHTML = recoverable.map(item => {
+    if (item.luck) {
+      const current = parseAbilityScore(document.getElementById("pc-lck").value);
+      const levelEl = document.getElementById("pc-level");
+      const level = parseLevelNumber(levelEl ? levelEl.value : "") || 1;
+      return `
+      <div class="spellburn-modal-row">
+        <span class="spellburn-modal-label">Luck</span>
+        <span class="spellburn-modal-score">${current === null ? "—" : `${current} (${formatSignedNumber(dccAbilityModifier(current))})`}</span>
+        <button type="button" class="hp-btn newday-modal-recover" data-luck="1" title="Recover ${level} Luck point${level === 1 ? "" : "s"} (${cls}'s own Level)">+${level}</button>
+      </div>`;
+    }
+    const el = document.getElementById(`pc-${item.ability}`);
     const current = parseAbilityScore(el ? el.value : "");
     return `
     <div class="spellburn-modal-row">
-      <span class="spellburn-modal-label">${spellburnAbilityLabel(ability)}</span>
+      <span class="spellburn-modal-label">${spellburnAbilityLabel(item.ability)}</span>
       <span class="spellburn-modal-score">${current === null ? "—" : `${current} (${formatSignedNumber(dccAbilityModifier(current))})`}</span>
-      <button type="button" class="hp-btn newday-modal-recover" data-ability="${ability}" title="Recover 1 ${spellburnAbilityLabel(ability)} point">+1</button>
+      <button type="button" class="hp-btn newday-modal-recover" data-ability="${item.ability}" title="Recover 1 ${spellburnAbilityLabel(item.ability)} point">+1</button>
     </div>`;
   }).join("");
   body.querySelectorAll(".newday-modal-recover").forEach(btn => {
     btn.addEventListener("click", () => {
+      if (btn.dataset.luck) { recoverLuck(cls); closeNewDayModal(); return; }
       recoverSpellburnAbility(btn.dataset.ability);
       closeNewDayModal();
     });
@@ -6661,6 +6780,224 @@ function pcLuckModifierLive() {
   const score = parseAbilityScore(el ? el.value : "");
   return score === null ? 0 : dccAbilityModifier(score);
 }
+
+// Table 1-7's own Luck Die column (DCC RPG core rulebook) - independently
+// supplied by the user from their own copy of the table, same sourcing as
+// the class Titles/Known Spells tables. Die SIDES only, by Thief level.
+const THIEF_LUCK_DIE_TABLE = { 1: 3, 2: 4, 3: 5, 4: 6, 5: 7, 6: 8, 7: 10, 8: 12, 9: 14, 10: 16 };
+
+// Burning Luck (DCC RPG core rulebook, Chapter 1 + Thief/Halfling class
+// descriptions) - ANY character may permanently burn Luck for a one-time
+// bonus to a roll (1 point spent = +1), but Thief and Halfling each get a
+// special formula on top of that generic rule instead: a Thief rolls
+// their own Luck Die (Table 1-7, sized by character level) once PER POINT
+// burned and sums the results, rather than a flat +1/point; a Halfling
+// simply doubles the flat rate (+2/point, no dice rolled). `points` is how
+// many Luck points this burn is spending - returns the resulting bonus
+// plus a short human-readable breakdown of how it was computed, for the
+// roll result text (`rolls`/`sides` are only meaningful for a Thief -
+// null for everyone else - and let openLuckBurnModal accumulate a running
+// declaration across several "-1" clicks without re-rolling already-
+// committed dice; see its own comment). Dice are rolled fresh on every
+// call, so this is NOT safe to call more than once for the same points -
+// callers accumulating a multi-click declaration must call this with
+// points=1 per click, not points=running-total.
+function computeLuckBurnBonus(cls, levelRaw, points) {
+  if (!points || points <= 0) return { bonus: 0, detail: "", rolls: null, sides: null };
+  if (cls === "Thief") {
+    const level = parseLevelNumber(levelRaw);
+    const sides = THIEF_LUCK_DIE_TABLE[Math.min(10, Math.max(1, level || 1))] || 3;
+    const rolls = Array.from({ length: points }, () => Math.floor(Math.random() * sides) + 1);
+    const bonus = rolls.reduce((sum, r) => sum + r, 0);
+    return { bonus, detail: `${points}d${sides} (${rolls.join("+")})`, rolls, sides };
+  }
+  if (cls === "Halfling") {
+    return { bonus: points * 2, detail: `${points} Luck × 2 (Halfling)`, rolls: null, sides: null };
+  }
+  return { bonus: points, detail: `${points} Luck × 1`, rolls: null, sides: null };
+}
+
+// Luck Check (DCC RPG core rulebook) - "The judge will provide the
+// specifics of any attempt, but the attempt is usually resolved by
+// rolling equal to or less than the character's Luck score on 1d20." Not
+// tied to any specific roll type (unlike Burn Luck below) - universal,
+// standalone, and doesn't spend anything.
+document.getElementById("pc-luck-check-btn").addEventListener("click", () => {
+  const el = document.getElementById("pc-lck");
+  const score = parseAbilityScore(el ? el.value : "");
+  if (score === null) {
+    showStatus("Set a Luck score first.", true, 4000);
+    return;
+  }
+  const rolled = Math.floor(Math.random() * 20) + 1;
+  const success = rolled <= score;
+  const text = `Luck Check: d20 (${rolled}) vs Luck ${score} = ${success ? markRollTotal("SUCCESS") : markFumbleAlert("FAILURE")}`;
+  showStatus(text, !success, 5000);
+  const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
+  appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId)) });
+  broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: 0, notation: "d20", total: rolled, label: "Luck Check" });
+});
+
+// Burn Luck (DCC RPG core rulebook) - a SHARED popup (#luckburn-modal-backdrop),
+// same "one piece of DOM, retargeted per open" pattern as the Spellburn
+// popup (openSpellburnModal), but generalized to work with ANY roll type
+// instead of only a Cast-a-Spell row: `ctx` carries `kind` ("sheet" or
+// "tracker", plus `itemId` for tracker) and a `getPending`/`setPending`
+// pair the CALLER supplies as closures, one per target type (weapon
+// attack, spell check, skill, initiative...) - see attachAttackRowListeners/
+// spellAttackRowHtml/skillRowHtml/etc for what each one actually does with
+// its own row/line's data. This keeps the modal itself completely
+// agnostic to WHERE a pending burn lives, so adding a new roll type never
+// needs to touch this file's modal logic, just a new ctx built at the
+// call site. Both getPending/setPending may return a value directly OR a
+// Promise (the modal always `await`s them), so a synchronous Sheet-side
+// closure and an async Tracker-side one (OBR metadata write) both work
+// through the exact same code path.
+//
+// Pending shape: { points, bonus, rolls, sides, detail } - `bonus` is
+// what actually gets added to the eventual roll (NOT just `points`, since
+// a Thief's dice-based bonus isn't 1:1 with points spent); `rolls`/`sides`
+// are Thief-only, kept so a running declaration can extend its detail
+// text without re-rolling already-committed dice. A target with nothing
+// pending yet should have getPending() return null/undefined - the modal
+// treats that the same as {points:0, bonus:0, rolls:[], sides:null, detail:""}.
+let luckBurnModalCtx = null;
+// Snapshot of the Luck score AND whichever pending value already existed
+// the moment this popup opened - same rollback-to-exact-snapshot purpose
+// spellburnModalSnapshot serves for Spellburn (see cancelLuckBurnModal).
+let luckBurnModalSnapshot = null;
+
+function emptyLuckBurnPending() {
+  return { points: 0, bonus: 0, rolls: [], sides: null, detail: "" };
+}
+
+function openLuckBurnModal(ctx) {
+  luckBurnModalCtx = ctx;
+  luckBurnModalSnapshot = null;
+  document.getElementById("luckburn-modal-subtitle").textContent = ctx.label
+    ? `Permanently burn Luck for a one-time bonus to ${ctx.label} (DCC RPG core rulebook) - Thief rolls their own Luck Die per point spent, Halfling doubles the flat rate, every other class gets a flat +1 per point.`
+    : "Permanently burn Luck for a one-time bonus to a roll (DCC RPG core rulebook) - Thief rolls their own Luck Die per point spent, Halfling doubles the flat rate, every other class gets a flat +1 per point.";
+  document.getElementById("luckburn-modal-backdrop").style.display = "flex";
+  refreshLuckBurnModal();
+}
+
+function closeLuckBurnModal() {
+  document.getElementById("luckburn-modal-backdrop").style.display = "none";
+  luckBurnModalCtx = null;
+  luckBurnModalSnapshot = null;
+}
+
+// Repaints the popup's Luck score and pending-bonus readout from whichever
+// target luckBurnModalCtx currently points at - called on open and after
+// every "-1" click, same "Tracker writes are async, re-read rather than
+// trust a stale local value" reasoning refreshSpellburnModal follows.
+async function refreshLuckBurnModal() {
+  const ctx = luckBurnModalCtx;
+  if (!ctx) return;
+  let luckScore;
+  if (ctx.kind === "sheet") {
+    luckScore = parseAbilityScore(document.getElementById("pc-lck").value);
+  } else {
+    const [item] = await OBR.scene.items.getItems([ctx.itemId]);
+    if (!item || luckBurnModalCtx !== ctx) return; // popup closed/retargeted while this was in flight
+    luckScore = parseAbilityScore(getStatsForItem(item).data.lck);
+  }
+  const pending = (await ctx.getPending()) || emptyLuckBurnPending();
+  if (!luckBurnModalSnapshot) luckBurnModalSnapshot = { luckScore, pending };
+  document.getElementById("luckburn-modal-score").textContent =
+    luckScore === null ? "—" : `${luckScore} (${formatSignedNumber(dccAbilityModifier(luckScore))})`;
+  document.getElementById("luckburn-modal-total").textContent = formatSignedNumber(pending.bonus || 0);
+  const detailRow = document.getElementById("luckburn-modal-detail-row");
+  const detailEl = document.getElementById("luckburn-modal-detail");
+  if (pending.detail) {
+    detailRow.style.display = "";
+    detailEl.textContent = pending.detail;
+  } else {
+    detailRow.style.display = "none";
+  }
+}
+
+// One "-1" click = spend exactly 1 Luck point: lowers the score
+// immediately (applyLuckBurnLive/applyLuckBurnPointForStats, same
+// live-effect contract as Spellburn's own "-" click), rolls THIS point's
+// own bonus via computeLuckBurnBonus(cls, level, 1) - never a lump
+// re-roll of the running total, so previously-committed Thief dice are
+// never disturbed - and folds it into the target's pending value via
+// ctx.setPending.
+async function luckBurnModalMinusClick() {
+  const ctx = luckBurnModalCtx;
+  if (!ctx) return;
+  let cls, levelRaw, newScore;
+  if (ctx.kind === "sheet") {
+    const classEl = document.getElementById("pc-class");
+    const levelEl = document.getElementById("pc-level");
+    cls = classEl ? classEl.value : "";
+    levelRaw = levelEl ? levelEl.value : "";
+    newScore = applyLuckBurnLive(1);
+  } else {
+    const [item] = await OBR.scene.items.getItems([ctx.itemId]);
+    if (!item || luckBurnModalCtx !== ctx) return;
+    const stats = getStatsForItem(item);
+    cls = (stats.data.class || "").trim();
+    levelRaw = stats.data.level;
+    newScore = await applyLuckBurnPointForStats(ctx.itemId, 1);
+  }
+  if (newScore === null) return;
+  const prevPending = (await ctx.getPending()) || emptyLuckBurnPending();
+  const { bonus: pointBonus, rolls: pointRolls, sides } = computeLuckBurnBonus(cls, levelRaw, 1);
+  const nextPoints = prevPending.points + 1;
+  const nextRolls = pointRolls ? [...(prevPending.rolls || []), ...pointRolls] : prevPending.rolls;
+  const nextBonus = prevPending.bonus + pointBonus;
+  const nextDetail = cls === "Thief" && nextRolls && nextRolls.length
+    ? `${nextPoints}d${sides || prevPending.sides} (${nextRolls.join("+")})`
+    : cls === "Halfling"
+      ? `${nextPoints} Luck × 2 (Halfling)`
+      : `${nextPoints} Luck × 1`;
+  await ctx.setPending({ points: nextPoints, bonus: nextBonus, rolls: nextRolls, sides: sides || prevPending.sides, detail: nextDetail });
+  await refreshLuckBurnModal();
+}
+
+// Undoes every point spent since this popup opened - restores the Luck
+// score AND the target's pending value straight back to
+// luckBurnModalSnapshot, same exact-rollback purpose cancelSpellburnModal
+// serves.
+async function cancelLuckBurnModal() {
+  const ctx = luckBurnModalCtx;
+  const snapshot = luckBurnModalSnapshot;
+  if (!ctx || !snapshot) { closeLuckBurnModal(); return; }
+  if (ctx.kind === "sheet") {
+    const el = document.getElementById("pc-lck");
+    if (el && snapshot.luckScore !== null && snapshot.luckScore !== undefined) {
+      el.value = `${snapshot.luckScore} (${formatSignedNumber(dccAbilityModifier(snapshot.luckScore))})`;
+    }
+    refreshDerivedPcFields();
+    await ctx.setPending(snapshot.pending);
+    scheduleSave();
+    showStatus("Burn Luck cancelled - Luck restored.", false, 4000);
+  } else {
+    await OBR.scene.items.updateItems([ctx.itemId], items => {
+      items.forEach(item => {
+        const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+        if (mode !== "pc") return;
+        const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+        if (snapshot.luckScore !== null && snapshot.luckScore !== undefined) {
+          data.lck = `${snapshot.luckScore} (${formatSignedNumber(dccAbilityModifier(snapshot.luckScore))})`;
+        }
+        item.metadata[PC_METADATA_KEY] = data;
+      });
+    });
+    await ctx.setPending(snapshot.pending);
+  }
+  closeLuckBurnModal();
+}
+
+document.getElementById("luckburn-modal-close").addEventListener("click", closeLuckBurnModal);
+document.getElementById("luckburn-modal-cancel").addEventListener("click", cancelLuckBurnModal);
+document.getElementById("luckburn-modal-confirm").addEventListener("click", closeLuckBurnModal);
+document.getElementById("luckburn-modal-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "luckburn-modal-backdrop") closeLuckBurnModal();
+});
+document.getElementById("luckburn-modal-minus").addEventListener("click", luckBurnModalMinusClick);
 
 let corruptionModalTier = "minor";
 
@@ -12743,6 +13080,34 @@ async function applySpellburnPointForStats(itemId, attackId, slotKey, ability) {
       item.metadata[PC_METADATA_KEY] = data;
     });
   });
+}
+
+// Tracker-side sibling of applyLuckBurnLive - reduces Luck by `points` and
+// snapshots pc-luckMax's equivalent (data.luckMax) the same way, straight
+// in item.metadata. Deliberately does NOT touch any attack's pending-bonus
+// data the way applySpellburnPointForStats does above - unlike Spellburn
+// (always tied to a Cast-a-Spell row), Luck burn's pending bonus can live
+// on a weapon attack, a spell attack, a skill, or Initiative, so THAT part
+// is written separately by whichever target's own ctx.setPending
+// (openLuckBurnModal) is currently in play. Returns the new score, or null
+// if the write couldn't happen (no such PC, or Luck unparseable).
+async function applyLuckBurnPointForStats(itemId, points) {
+  let newScore = null;
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      if (mode !== "pc") return;
+      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+      const current = parseAbilityScore(data.lck);
+      if (current === null) return;
+      const existingMax = data.luckMax !== undefined && data.luckMax !== "" ? parseInt(data.luckMax, 10) : NaN;
+      data.luckMax = String(Number.isFinite(existingMax) ? existingMax : current);
+      newScore = current - points;
+      data.lck = `${newScore} (${formatSignedNumber(dccAbilityModifier(newScore))})`;
+      item.metadata[PC_METADATA_KEY] = data;
+    });
+  });
+  return newScore;
 }
 
 // Clears a line's pending Spellburn total once rollSpellAttackForTracker
