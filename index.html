@@ -1452,7 +1452,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 18:09</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 18:13</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -9214,8 +9214,24 @@ function spellAttackRowHtml(atk) {
         <button type="button" class="hp-btn spell-attack-reversed-btn${attemptReversed ? " on" : ""}" title="${escapeHtml(reversedBtnTitle)}">🔄 Cast ${attemptReversed ? "Reversed" : "Normal"}</button>
       </div>`
     : "";
+  // Burning Luck (DCC RPG core rulebook) - ANY class, unlike Spellburn
+  // (Wizard/Elf-only) - see attackRowHtml's own comment for the full
+  // ctx/pending-shape explanation. Shares the exact same .luck-burn-btn
+  // class/click-wiring as a weapon row (attachAttackRowListeners doesn't
+  // distinguish - both are just ".attack-row"), so nothing extra needs
+  // wiring here beyond rendering the button and the data attribute.
+  const luckBurnPendingAttr = escapeHtml(JSON.stringify(atk.luckBurnPending || {}));
+  const luckPendingForSpell = (atk.luckBurnPending && atk.luckBurnPending[effectiveActionDieIndex]) || null;
+  const luckBurnBtnTitle = luckPendingForSpell && luckPendingForSpell.bonus
+    ? `Burn Luck (DCC RPG core rulebook) - ${formatSignedNumber(luckPendingForSpell.bonus)} pending for this roll (${luckPendingForSpell.detail}). Click to burn more, or roll to apply and clear it.`
+    : "Burn Luck (DCC RPG core rulebook) - permanently spend Luck for a one-time bonus to this Spell Check.";
+  const luckBurnHtml = (check && atk.name && atk.name.trim())
+    ? `<div class="luck-burn-row">
+        <button type="button" class="hp-btn luck-burn-btn" title="${escapeHtml(luckBurnBtnTitle)}">🍀 Burn Luck${luckPendingForSpell && luckPendingForSpell.bonus ? ` (${formatSignedNumber(luckPendingForSpell.bonus)})` : ""}</button>
+      </div>`
+    : "";
   return `
-    <div class="attack-row pc-attack-row spell-attack-row" data-id="${atk.id}" data-line-deeds="{}" data-spell-by-slot="${spellBySlotAttr}" data-spellburn-pending="${spellburnPendingAttr}" data-cast-reversed-by-slot="${castReversedBySlotAttr}">
+    <div class="attack-row pc-attack-row spell-attack-row" data-id="${atk.id}" data-line-deeds="{}" data-spell-by-slot="${spellBySlotAttr}" data-spellburn-pending="${spellburnPendingAttr}" data-cast-reversed-by-slot="${castReversedBySlotAttr}" data-luck-burn-pending="${luckBurnPendingAttr}">
       <div class="attack-weapon-line">
         <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
         ${actDieSelectHtml}
@@ -9230,6 +9246,7 @@ function spellAttackRowHtml(atk) {
         <button type="button" class="attack-remove-btn" title="Remove">×</button>
       </div>
       ${spellburnHtml}
+      ${luckBurnHtml}
       ${reversedHtml}
       ${check ? "" : `<div class="attack-row-meta">Only Cleric/Wizard/Elf have a Spell Check - pick a caster Class above to roll this row.</div>`}
     </div>`;
@@ -9307,6 +9324,20 @@ function refreshSpellAttackRows() {
       reversedBtn.title = attemptReversed
         ? "Attempting this spell's reverse effect (e.g. Tear instead of Mending) - Spell Check die reduced 1 step (Reversing Spells). Click to cast normally instead."
         : "Casting normally. Click to attempt this spell's reverse effect instead (e.g. Tear instead of Mending) - costs 1 step down the dice chain (Reversing Spells).";
+    }
+    // Burning Luck - keyed by the SAME Action Die slot as Spellburn above,
+    // so switching this row's Action Die picker has to re-show whichever
+    // pending burn (if any) belongs to the newly-selected slot, not
+    // whatever was on screen for the previous one.
+    const luckBurnBtn = row.querySelector(".luck-burn-btn");
+    if (luckBurnBtn) {
+      let luckBySlot = {};
+      try { luckBySlot = JSON.parse(row.dataset.luckBurnPending || "{}"); } catch (e) { luckBySlot = {}; }
+      const luckPendingForSlot = luckBySlot[slotKeyForBurn] || null;
+      luckBurnBtn.textContent = `🍀 Burn Luck${luckPendingForSlot && luckPendingForSlot.bonus ? ` (${formatSignedNumber(luckPendingForSlot.bonus)})` : ""}`;
+      luckBurnBtn.title = luckPendingForSlot && luckPendingForSlot.bonus
+        ? `Burn Luck (DCC RPG core rulebook) - ${formatSignedNumber(luckPendingForSlot.bonus)} pending for this roll (${luckPendingForSlot.detail}). Click to burn more, or roll to apply and clear it.`
+        : "Burn Luck (DCC RPG core rulebook) - permanently spend Luck for a one-time bonus to this Spell Check.";
     }
     // Die badge (see spellAttackRowHtml) can go stale between full row
     // rebuilds on its own - a class/level change can shift an EXTRA
@@ -9421,6 +9452,14 @@ function rollSpellAttackRow(row) {
     showStatus("Only Cleric/Wizard/Elf roll a Spell Check.", true, 4000);
     return;
   }
+  // Burning Luck - see attackRowHtml's own comment on the pending shape.
+  // A flat add to the final total, same as a weapon attack's own
+  // luckBonus - kept separate from pcSpellCheckModifierBreakdown's
+  // "standing modifiers" composition rather than folded into it.
+  let luckBySlot = {};
+  try { luckBySlot = JSON.parse(row.dataset.luckBurnPending || "{}"); } catch (e) { luckBySlot = {}; }
+  const luckPending = luckBySlot[slotKeyForBurn] || null;
+  const luckBonus = luckPending ? luckPending.bonus : 0;
   const spellName = selectEl ? selectEl.value.trim() : "";
   const label = spellName || "Spell";
   // Regaining spells via Spellburn (DCC RPG core rulebook) - a Lost spell
@@ -9449,7 +9488,14 @@ function rollSpellAttackRow(row) {
   // comment; the die itself is already reduced (check.sides), this just
   // surfaces WHY in the roll result.
   if (attemptReversed) note += ` 🔄 Reversing Spells: attempting this spell's reverse effect - Spell Check die reduced 1 step.`;
-  const total = rolled + check.modifier + critBonus;
+  // Burning Luck - folded into the total exactly like Spellburn's own
+  // points already are (check.modifier), even on a natural 1: DCC RAW
+  // fails a Spell Check on a natural 1 "regardless of total" (see
+  // spellCheckNaturalResultText's own note above), so the total including
+  // this bonus is technically moot there too, same as it already is for
+  // Spellburn - the Luck is still permanently spent either way.
+  if (luckPending) note += ` 🍀 Burn Luck: ${formatSignedNumber(luckPending.bonus)} (${luckPending.detail}).`;
+  const total = rolled + check.modifier + critBonus + luckBonus;
   // Lost (see isSpellLost/setSpellLost's own comment) - this app has no
   // per-spell casting tables to check the actual threshold against, so it
   // defaults to the generic failure band most spells share (a total of 11
@@ -9473,10 +9519,19 @@ function rollSpellAttackRow(row) {
   const text = `${label} - Spell Check: d${check.sides} (${rolled}) ${formatSignedNumber(check.modifier)}${critBonus ? ` ${formatSignedNumber(critBonus)}(level)` : ""} = ${markRollTotal(total)}${note}`;
   showStatus(text, false, note ? 8000 : 4000);
   appendChatLog({ kind: "spell", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId)) });
-  broadcastDiceRoll({ rollerName, dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier + critBonus, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
+  broadcastDiceRoll({ rollerName, dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier + critBonus + luckBonus, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
   if (burnPoints > 0) {
     delete pending[slotKeyForBurn];
     row.dataset.spellburnPending = JSON.stringify(pending);
+    refreshSpellAttackRows();
+    scheduleSave();
+  }
+  // Burning Luck is a one-shot declaration toward THIS roll, same as
+  // Spellburn's own pendingPoints just above - clear it now that it's
+  // been applied.
+  if (luckPending) {
+    delete luckBySlot[slotKeyForBurn];
+    row.dataset.luckBurnPending = JSON.stringify(luckBySlot);
     refreshSpellAttackRows();
     scheduleSave();
   }
@@ -12264,6 +12319,21 @@ function spellTrackerLineHtml(item, stats, line) {
         <button class="hp-btn tracker-reversed-btn${attemptReversed ? " on" : ""}" title="${escapeHtml(reversedBtnTitle)}">🔄 Cast ${attemptReversed ? "Reversed" : "Normal"}</button>
       </div>`
     : "";
+  // Burning Luck (DCC RPG core rulebook) - ANY caster class, unlike
+  // Spellburn/Reversing Spells (Wizard/Elf-only) - so this gates on `check`
+  // alone (any valid Spell Check, Cleric included), not check.abilityId.
+  // Shares the same .tracker-luck-burn-btn class/click-wiring as a weapon
+  // line - see attachTrackerRowListeners, which doesn't distinguish
+  // between the two.
+  const luckPendingForLine = (atk.luckBurnPending && atk.luckBurnPending[line.slotKey]) || null;
+  const luckBurnTitle = luckPendingForLine && luckPendingForLine.bonus
+    ? `Burn Luck (DCC RPG core rulebook) - ${formatSignedNumber(luckPendingForLine.bonus)} pending for this roll (${luckPendingForLine.detail}). Click to burn more, or roll to apply and clear it.`
+    : "Burn Luck (DCC RPG core rulebook) - permanently spend Luck for a one-time bonus to this Spell Check.";
+  const luckBurnHtml = check
+    ? `<div class="attack-detail-luck-burn-row">
+        <button class="hp-btn tracker-luck-burn-btn" title="${escapeHtml(luckBurnTitle)}">🍀 Burn Luck${luckPendingForLine && luckPendingForLine.bonus ? ` (${formatSignedNumber(luckPendingForLine.bonus)})` : ""}</button>
+      </div>`
+    : "";
   return `
     <div class="attack-detail-row-wrap">
       <div class="attack-detail-row" data-attack-id="${line.attackId}" data-slot-key="${line.slotKey || ""}">
@@ -12275,6 +12345,7 @@ function spellTrackerLineHtml(item, stats, line) {
       </div>
       ${burnHtml}
       ${reversedHtml}
+      ${luckBurnHtml}
       ${badges.length ? `<div class="attack-detail-badges">${badges.join(" ")}</div>` : ""}
     </div>`;
 }
@@ -13116,6 +13187,10 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
     showStatus(msg, true);
     return;
   }
+  // Burning Luck - see rollSpellAttackRow's own comment (Sheet-side
+  // sibling).
+  const luckPending = (atk.luckBurnPending && atk.luckBurnPending[slotKey]) || null;
+  const luckBonus = luckPending ? luckPending.bonus : 0;
   const label = (effectiveName || "").trim() || "Spell";
   // Regaining spells via Spellburn - same defense-in-depth guard as the
   // Sheet's own rollSpellAttackRow; see spellAttackRowHtml's comment for
@@ -13148,7 +13223,10 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   // Reversing Spells - see rollSpellAttackRow's own comment (Sheet-side
   // sibling).
   if (attemptReversed) note += ` 🔄 Reversing Spells: attempting this spell's reverse effect - Spell Check die reduced 1 step.`;
-  const total = rolled + check.modifier + critBonus;
+  // Burning Luck - see rollSpellAttackRow's own comment (Sheet-side
+  // sibling) for why this always counts toward the total.
+  if (luckPending) note += ` 🍀 Burn Luck: ${formatSignedNumber(luckPending.bonus)} (${luckPending.detail}).`;
+  const total = rolled + check.modifier + critBonus + luckBonus;
   // Lost (see isSpellLostForStats/setSpellLostForStats's own comment) -
   // same generic-failure-band default and Wizard/Elf-only gate as the
   // Sheet's own rollSpellAttackRow.
@@ -13172,12 +13250,13 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   // the round.
   await markActionSlotsUsed(itemId, [actionSlotKey(stats.mode, attackId, slotKey)]);
   if (burnPoints > 0) await clearSpellburnPendingForStats(itemId, attackId, slotKey);
+  if (luckPending) await clearLuckBurnPendingForStats(itemId, attackId, slotKey);
 
   const rollDuration = note ? 9000 : 6500;
   showTrackerStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
   showStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
   await appendChatLog({ kind: "spell", tokenName: item.name || "Token", text, gmOnly: isGmOnlyRoll(stats.mode, item) });
-  broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier + critBonus, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
+  broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier + critBonus + luckBonus, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
 }
 
 // Tracker-side sibling of applySpellburnLive's single-point spend - same
