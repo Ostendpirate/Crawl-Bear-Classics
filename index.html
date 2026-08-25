@@ -1430,7 +1430,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 14:33</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 15:01</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2047,6 +2047,19 @@
         <button type="button" class="tables-modal-close" id="newday-modal-close" title="Close">×</button>
       </div>
       <div class="tables-modal-body" id="newday-modal-body"></div>
+    </div>
+  </div>
+
+  <div id="failed-spellburn-modal-backdrop" class="tables-modal-backdrop" style="display:none">
+    <div class="tables-modal">
+      <div class="tables-modal-header">
+        <div>
+          <div class="tables-modal-title">Failed Spellburn</div>
+          <div class="tables-modal-subtitle">Natural 1 on a Spell Check while Spellburning (DCC RPG core rulebook) - on top of the points already spent, one burned ability permanently loses 1 more point. Also roll Corruption (☣ button near Spells) if this spell's own write-up calls for it.</div>
+        </div>
+        <button type="button" class="tables-modal-close" id="failed-spellburn-modal-close" title="Close">×</button>
+      </div>
+      <div class="tables-modal-body" id="failed-spellburn-modal-body"></div>
     </div>
   </div>
 
@@ -6126,6 +6139,81 @@ document.getElementById("newday-modal-backdrop").addEventListener("click", (e) =
   if (e.target.id === "newday-modal-backdrop") closeNewDayModal();
 });
 
+// Failed Spellburn (DCC RPG core rulebook): a natural 1 on a Spell Check
+// rolled while Spellburning permanently costs 1 MORE point on top of
+// whatever was already spent - "permanently" meaning, unlike a normal
+// Spellburn spend, New Day recovery can never bring it back (see
+// applyFailedSpellburnLoss lowering pc-spellburnMax's own ceiling, not just
+// the current score). Which ability takes that extra point isn't tracked
+// per-cast (a spend's ability breakdown isn't kept once committed - see
+// applySpellburnLive), so this reuses spellburnRecoverableAbilities' same
+// "currently lowered by Spellburn" set as the best available proxy for
+// "spent on Spellburn today" and lets the player pick among those (or
+// applies directly if only one candidate, same one-eligible shortcut
+// openNewDayModal itself uses). Called from rollSpellAttackRow/
+// rollSpellAttackForTracker only when burnPoints > 0 and the natural roll
+// was a 1.
+function openFailedSpellburnModal() {
+  const eligible = spellburnRecoverableAbilities();
+  if (!eligible.length) return;
+  if (eligible.length === 1) {
+    applyFailedSpellburnLoss(eligible[0]);
+    return;
+  }
+  const body = document.getElementById("failed-spellburn-modal-body");
+  body.innerHTML = eligible.map(ability => {
+    const el = document.getElementById(`pc-${ability}`);
+    const current = parseAbilityScore(el ? el.value : "");
+    return `
+    <div class="spellburn-modal-row">
+      <span class="spellburn-modal-label">${spellburnAbilityLabel(ability)}</span>
+      <span class="spellburn-modal-score">${current === null ? "—" : `${current} (${formatSignedNumber(dccAbilityModifier(current))})`}</span>
+      <button type="button" class="hp-btn failed-spellburn-modal-apply" data-ability="${ability}" title="This ability permanently loses 1 more point">−1</button>
+    </div>`;
+  }).join("");
+  body.querySelectorAll(".failed-spellburn-modal-apply").forEach(btn => {
+    btn.addEventListener("click", () => {
+      applyFailedSpellburnLoss(btn.dataset.ability);
+      closeFailedSpellburnModal();
+    });
+  });
+  document.getElementById("failed-spellburn-modal-backdrop").style.display = "flex";
+}
+
+function closeFailedSpellburnModal() {
+  document.getElementById("failed-spellburn-modal-backdrop").style.display = "none";
+}
+
+// Permanently lowers one ability by 1: both its current score AND its
+// pc-spellburnMax ceiling drop, so a later New Day (recoverSpellburnAbility)
+// can never recover past the new, permanently-lower true score - unlike a
+// normal Spellburn spend (applySpellburnLive), which only lowers the
+// current score and leaves the ceiling (what a day of rest recovers back
+// up to) untouched.
+function applyFailedSpellburnLoss(ability) {
+  const el = document.getElementById(`pc-${ability}`);
+  if (!el) return;
+  const current = parseAbilityScore(el.value);
+  if (current === null) return;
+  const maxEl = document.getElementById("pc-spellburnMax");
+  let maxMap = {};
+  try { maxMap = JSON.parse((maxEl && maxEl.value) || "{}"); } catch (e) { maxMap = {}; }
+  if (maxMap[ability] === undefined) maxMap[ability] = current;
+  maxMap[ability] -= 1;
+  if (maxEl) maxEl.value = JSON.stringify(maxMap);
+  const newScore = current - 1;
+  el.value = `${newScore} (${formatSignedNumber(dccAbilityModifier(newScore))})`;
+  refreshDerivedPcFields();
+  refreshSpellAttackRows();
+  scheduleSave();
+  showStatus(`Failed Spellburn: ${spellburnAbilityLabel(ability)} permanently drops to ${newScore} (natural 1 while Spellburning).`, true, 8000);
+}
+
+document.getElementById("failed-spellburn-modal-close").addEventListener("click", closeFailedSpellburnModal);
+document.getElementById("failed-spellburn-modal-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "failed-spellburn-modal-backdrop") closeFailedSpellburnModal();
+});
+
 // The Spellburn popup (#spellburn-modal-backdrop) is one shared piece of
 // DOM reused for every Cast-a-Spell row/Tracker line - spellburnModalCtx
 // says which one it's currently open for, so a "-" click knows whose
@@ -7412,6 +7500,20 @@ function isSpellLost(name) {
   return !!(item && item.lost);
 }
 
+// Same lookup as isSpellLost, but for the roster item's own Level field -
+// used to gate "regaining spells via spellburn" (DCC RPG core rulebook: a
+// wizard may cast a spell they've Lost for the day by burning that spell's
+// own level in ability score points). Returns null if the spell isn't
+// known or its Level field isn't a usable positive number, which callers
+// treat as "can't regain this one via Spellburn until Level is filled in."
+function spellLevelForName(name) {
+  const trimmed = (name || "").trim();
+  if (!trimmed) return null;
+  const item = readSpellItems().find(s => (s.name || "").trim() === trimmed);
+  const level = item ? parseInt(item.level, 10) : NaN;
+  return Number.isFinite(level) && level > 0 ? level : null;
+}
+
 // Sets ONE known spell's Lost flag by name, straight in the live Spells
 // list DOM - the single source of truth isSpellLost/mercurialAdjustmentForSpell
 // both already read from. Called both by a Spell Check auto-flagging a bad
@@ -8332,8 +8434,15 @@ function spellAttackRowHtml(atk) {
   // resolve fresh, never trust a stale saved field" contract check itself
   // already follows above.
   const isLost = check && check.abilityId === "int" && isSpellLost(atk.name);
+  // Regaining spells via Spellburn (DCC RPG core rulebook): a Lost spell
+  // can still be cast if the wizard burns that spell's own level in
+  // ability score points first - see rollSpellAttackRow for where
+  // burnPoints ultimately gets checked again before actually rolling.
+  const spellLevelForBurn = isLost ? spellLevelForName(atk.name) : null;
+  const isRegainable = isLost && spellLevelForBurn !== null && pendingPoints >= spellLevelForBurn;
+  const rollBlocked = isLost && !isRegainable;
   const lostBadgeHtml = isLost
-    ? `<span class="weapon-badge weapon-badge-lost spell-lost-badge" title="Lost (DCC RPG core rulebook) - this spell failed its last Spell Check badly enough to lose it until you rest. Click to un-mark if this spell's own casting table says this roll shouldn't have lost it.">🔒 Lost</span>`
+    ? `<span class="weapon-badge weapon-badge-lost spell-lost-badge" title="Lost (DCC RPG core rulebook) - this spell failed its last Spell Check badly enough to lose it until you rest. Click to un-mark if this spell's own casting table says this roll shouldn't have lost it. ${spellLevelForBurn !== null ? `Burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} via 🩸 Spellburn to cast it anyway.` : "Fill in this spell's Level to allow regaining it via Spellburn."}">🔒 Lost</span>`
     : "";
   const dieBadgeHtml = (check || isLost) ? `<div class="attack-row-badges">${check ? `<span class="weapon-badge weapon-badge-die" title="Spell Check die this row rolls">d${check.sides}</span>` : ""}${lostBadgeHtml}</div>` : "";
   const spellBySlotAttr = escapeHtml(JSON.stringify(atk.spellBySlot || {}));
@@ -8346,9 +8455,14 @@ function spellAttackRowHtml(atk) {
   // and adds 1 to this row's own pending total (data-spellburn-pending,
   // keyed by Action Die slot exactly like data-spell-by-slot), which
   // rollSpellAttackRow then applies as this roll's bonus and clears.
+  const spellburnBtnTitle = isLost
+    ? (spellLevelForBurn !== null
+      ? `Regain a Lost spell via Spellburn (DCC RPG core rulebook) - burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} of Str/Agi/Sta total to cast this Lost spell anyway (${Math.min(pendingPoints, spellLevelForBurn)}/${spellLevelForBurn} so far). Extra points beyond that still add +1 each to the Spell Check.`
+      : "This spell is Lost - fill in its Level (Spells section) to regain it via Spellburn.")
+    : "Spellburn (DCC RPG core rulebook) - spend Str/Agi/Sta points for a +1 bonus per point to this Spell Check. See the New Day button near Abilities to recover spent points over time. Spending 20 points in one go automatically treats the roll as a natural 20.";
   const spellburnHtml = (check && check.abilityId === "int" && atk.name && atk.name.trim())
     ? `<div class="spellburn-row">
-        <button type="button" class="hp-btn spell-attack-burn-btn" title="Spellburn (DCC RPG core rulebook) - spend Str/Agi/Sta points for a +1 bonus per point to this Spell Check. See the New Day button near Abilities to recover spent points over time. Spending 20 points in one go automatically treats the roll as a natural 20.">🩸 Spellburn${pendingPoints > 0 ? ` (${pendingPoints})` : ""}</button>
+        <button type="button" class="hp-btn spell-attack-burn-btn" title="${escapeHtml(spellburnBtnTitle)}">🩸 Spellburn${pendingPoints > 0 ? ` (${pendingPoints})` : ""}</button>
       </div>`
     : "";
   return `
@@ -8363,7 +8477,7 @@ function spellAttackRowHtml(atk) {
         <select class="spell-attack-select" title="Which known spell this row casts - add more in the Spells section below.">${spellSelectOptionsHtml(atk.name)}</select>
         <input type="text" class="attack-bonus spell-attack-bonus" readonly value="${escapeHtml(bonusText)}" title="${escapeHtml(bonusTitle)}" />
         <input type="hidden" class="attack-damage" value="" />
-        <button type="button" class="hp-btn spell-attack-roll-btn${isLost ? " disabled" : ""}"${isLost ? " disabled" : ""} title="${isLost ? "This spell is Lost until you rest - see the 🔒 badge above (click it to un-mark), or New Day near Abilities." : "Roll Spell Check"}">🎲</button>
+        <button type="button" class="hp-btn spell-attack-roll-btn${rollBlocked ? " disabled" : ""}"${rollBlocked ? " disabled" : ""} title="${rollBlocked ? (spellLevelForBurn !== null ? `This spell is Lost - burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} via 🩸 Spellburn to cast it anyway, or use New Day near Abilities to rest it off.` : "This spell is Lost until you rest - see the 🔒 badge above (click it to un-mark), or New Day near Abilities.") : (isLost ? "Regaining this Lost spell via Spellburn - rolling still resolves as a normal Spell Check." : "Roll Spell Check")}">🎲</button>
         <button type="button" class="attack-remove-btn" title="Remove">×</button>
       </div>
       ${spellburnHtml}
@@ -8442,10 +8556,14 @@ function refreshSpellAttackRows() {
     // spell (or a manual correction via the Spells popup's checkbox)
     // immediately picks up that spell's own current Lost state.
     const isLost = check && check.abilityId === "int" && isSpellLost(nameEl2 ? nameEl2.value : "");
+    // Regaining spells via Spellburn - see spellAttackRowHtml's own comment.
+    const spellLevelForBurn = isLost ? spellLevelForName(nameEl2 ? nameEl2.value : "") : null;
+    const isRegainable = isLost && spellLevelForBurn !== null && pendingPoints >= spellLevelForBurn;
+    const rollBlocked = isLost && !isRegainable;
     let badgeWrap = row.querySelector(".attack-row-badges");
     const badgesHtml = [
       check ? `<span class="weapon-badge weapon-badge-die" title="Spell Check die this row rolls">d${check.sides}</span>` : "",
-      isLost ? `<span class="weapon-badge weapon-badge-lost spell-lost-badge" title="Lost (DCC RPG core rulebook) - this spell failed its last Spell Check badly enough to lose it until you rest. Click to un-mark if this spell's own casting table says this roll shouldn't have lost it.">🔒 Lost</span>` : "",
+      isLost ? `<span class="weapon-badge weapon-badge-lost spell-lost-badge" title="Lost (DCC RPG core rulebook) - this spell failed its last Spell Check badly enough to lose it until you rest. Click to un-mark if this spell's own casting table says this roll shouldn't have lost it. ${spellLevelForBurn !== null ? `Burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} via 🩸 Spellburn to cast it anyway.` : "Fill in this spell's Level to allow regaining it via Spellburn."}">🔒 Lost</span>` : "",
     ].filter(Boolean).join("");
     if (badgesHtml) {
       if (!badgeWrap) {
@@ -8461,13 +8579,22 @@ function refreshSpellAttackRows() {
     } else if (badgeWrap) {
       badgeWrap.remove();
     }
+    if (burnBtn) {
+      burnBtn.title = isLost
+        ? (spellLevelForBurn !== null
+          ? `Regain a Lost spell via Spellburn (DCC RPG core rulebook) - burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} of Str/Agi/Sta total to cast this Lost spell anyway (${Math.min(pendingPoints, spellLevelForBurn)}/${spellLevelForBurn} so far). Extra points beyond that still add +1 each to the Spell Check.`
+          : "This spell is Lost - fill in its Level (Spells section) to regain it via Spellburn.")
+        : "Spellburn (DCC RPG core rulebook) - spend Str/Agi/Sta points for a +1 bonus per point to this Spell Check. See the New Day button near Abilities to recover spent points over time. Spending 20 points in one go automatically treats the roll as a natural 20.";
+    }
     const rollBtn = row.querySelector(".spell-attack-roll-btn");
     if (rollBtn) {
-      rollBtn.classList.toggle("disabled", isLost);
-      rollBtn.disabled = isLost;
-      rollBtn.title = isLost
-        ? "This spell is Lost until you rest - see the 🔒 badge above (click it to un-mark), or New Day near Abilities."
-        : "Roll Spell Check";
+      rollBtn.classList.toggle("disabled", rollBlocked);
+      rollBtn.disabled = rollBlocked;
+      rollBtn.title = rollBlocked
+        ? (spellLevelForBurn !== null
+          ? `This spell is Lost - burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} via 🩸 Spellburn to cast it anyway, or use New Day near Abilities to rest it off.`
+          : "This spell is Lost until you rest - see the 🔒 badge above (click it to un-mark), or New Day near Abilities.")
+        : (isLost ? "Regaining this Lost spell via Spellburn - rolling still resolves as a normal Spell Check." : "Roll Spell Check");
     }
   });
 }
@@ -8530,6 +8657,20 @@ function rollSpellAttackRow(row) {
   }
   const spellName = selectEl ? selectEl.value.trim() : "";
   const label = spellName || "Spell";
+  // Regaining spells via Spellburn (DCC RPG core rulebook) - a Lost spell
+  // can only actually be rolled once its own level's worth of points is
+  // burned; the roll button's disabled state already blocks this in
+  // practice (see spellAttackRowHtml/refreshSpellAttackRows), this is just
+  // defense in depth against a stale button.
+  if (check.abilityId === "int" && isSpellLost(spellName)) {
+    const requiredLevel = spellLevelForName(spellName);
+    if (requiredLevel === null || burnPoints < requiredLevel) {
+      showStatus(requiredLevel !== null
+        ? `${label} is Lost - burn ${requiredLevel} point${requiredLevel === 1 ? "" : "s"} via 🩸 Spellburn first to cast it anyway.`
+        : `${label} is Lost - fill in its Level (Spells section) to regain it via Spellburn.`, true, 5000);
+      return;
+    }
+  }
   // Spellburn: spending a full 20 points in one declaration automatically
   // treats this check as a natural max, no die actually rolled - reuses
   // spellCheckNaturalResultText's own crit handling below rather than a
@@ -8547,6 +8688,16 @@ function rollSpellAttackRow(row) {
   if (spellName && check.abilityId === "int" && total <= 11) {
     setSpellLost(spellName, true);
     if (rolled !== 1) note += ` ${markFumbleAlert("🔒 LOST")} - this spell can't be cast again until you rest (check this spell's own casting table for exceptions).`;
+  }
+  // Failed Spellburn (DCC RPG core rulebook): a natural 1 while Spellburning
+  // permanently costs 1 MORE ability point on top of what was already
+  // spent, plus the usual corruption exposure any natural 1 carries (see
+  // spellCheckNaturalResultText's own note above) - openFailedSpellburnModal
+  // picks (or auto-applies, if only one candidate) which currently-burned
+  // ability eats that extra point.
+  if (rolled === 1 && burnPoints > 0) {
+    note += ` ${markFumbleAlert("🩸 FAILED SPELLBURN")} - an ability permanently loses 1 more point (choose which next), and this also counts toward Corruption (☣ button near Spells).`;
+    openFailedSpellburnModal();
   }
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
   const text = `${label} - Spell Check: d${check.sides} (${rolled}) ${formatSignedNumber(check.modifier)}${critBonus ? ` ${formatSignedNumber(critBonus)}(level)` : ""} = ${markRollTotal(total)}${note}`;
@@ -11033,6 +11184,15 @@ function isSpellLostForStats(stats, name) {
   return !!(spellItem && spellItem.lost);
 }
 
+// Stats-based sibling of spellLevelForName - see its own comment.
+function spellLevelForNameForStats(stats, name) {
+  const trimmed = (name || "").trim();
+  if (!trimmed) return null;
+  const spellItem = (stats.data.pcSpells || []).find(s => (s.name || "").trim() === trimmed);
+  const level = spellItem ? parseInt(spellItem.level, 10) : NaN;
+  return Number.isFinite(level) && level > 0 ? level : null;
+}
+
 function trackerRowHtml(item, stats, isActive) {
   const lines = deriveTrackerLines(item, stats);
   const showsConcentration = hasConcentrationSpellStats(stats);
@@ -11273,14 +11433,25 @@ function spellTrackerLineHtml(item, stats, line) {
   // same class gate as Spellburn just below (Clerics get Disapproval
   // instead - see openDisapprovalModal).
   const isLost = check && check.abilityId === "int" && isSpellLostForStats(stats, atk.name);
-  if (isLost) badges.push(`<span class="weapon-badge weapon-badge-lost spell-lost-badge" data-spell-name="${escapeHtml(atk.name || "")}" title="Lost (DCC RPG core rulebook) - this spell failed its last Spell Check badly enough to lose it until you rest. Click to un-mark if this spell's own casting table says this roll shouldn't have lost it.">🔒 Lost</span>`);
+  // Regaining spells via Spellburn - see spellAttackRowHtml's own comment
+  // (Sheet-side sibling); same rule, applied here off stats instead of the
+  // live Sheet DOM.
+  const spellLevelForBurn = isLost ? spellLevelForNameForStats(stats, atk.name) : null;
+  const isRegainable = isLost && spellLevelForBurn !== null && pendingPoints >= spellLevelForBurn;
+  const rollBlocked = isLost && !isRegainable;
+  if (isLost) badges.push(`<span class="weapon-badge weapon-badge-lost spell-lost-badge" data-spell-name="${escapeHtml(atk.name || "")}" title="Lost (DCC RPG core rulebook) - this spell failed its last Spell Check badly enough to lose it until you rest. Click to un-mark if this spell's own casting table says this roll shouldn't have lost it. ${spellLevelForBurn !== null ? `Burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} via 🩸 Spellburn to cast it anyway.` : "Fill in this spell's Level on the Sheet to allow regaining it via Spellburn."}">🔒 Lost</span>`);
   // Spellburn (DCC RPG core rulebook) - Wizard/Elf only, same gate as the
   // Sheet's own spellburn-row (spellAttackRowHtml) - opens the shared
   // popup (attachTrackerRowListeners wires the click, since parentId/
   // attackId/line.slotKey are already in scope there).
+  const burnBtnTitle = isLost
+    ? (spellLevelForBurn !== null
+      ? `Regain a Lost spell via Spellburn (DCC RPG core rulebook) - burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} of Str/Agi/Sta total to cast this Lost spell anyway (${Math.min(pendingPoints, spellLevelForBurn)}/${spellLevelForBurn} so far). Extra points beyond that still add +1 each to the Spell Check.`
+      : "This spell is Lost - fill in its Level on the Sheet to regain it via Spellburn.")
+    : "Spellburn (DCC RPG core rulebook) - spend Str/Agi/Sta points for a +1 bonus per point to this roll; 20 in one go auto-succeeds as a natural 20. See the Sheet's New Day button to recover spent points over time.";
   const burnHtml = (check && check.abilityId === "int")
     ? `<div class="attack-detail-burn-row">
-        <button class="hp-btn tracker-burn-btn" title="Spellburn (DCC RPG core rulebook) - spend Str/Agi/Sta points for a +1 bonus per point to this roll; 20 in one go auto-succeeds as a natural 20. See the Sheet's New Day button to recover spent points over time.">🩸 Spellburn${pendingPoints > 0 ? ` (${pendingPoints})` : ""}</button>
+        <button class="hp-btn tracker-burn-btn" title="${escapeHtml(burnBtnTitle)}">🩸 Spellburn${pendingPoints > 0 ? ` (${pendingPoints})` : ""}</button>
       </div>`
     : "";
   return `
@@ -11290,7 +11461,7 @@ function spellTrackerLineHtml(item, stats, line) {
         <span class="attack-detail-meta">
           <span class="attack-detail-meta-part" title="${escapeHtml(bonusTooltip)}">${escapeHtml(line.label)} <b>${escapeHtml(bonusText)}</b></span>
         </span>
-        <button class="hp-btn attack-roll-btn${isLost ? " disabled" : ""}"${isLost ? " disabled" : ""} title="${isLost ? "This spell is Lost until you rest - see the 🔒 badge below (click it to un-mark), or New Day on the Sheet." : "Roll Spell Check"}">🎲</button>
+        <button class="hp-btn attack-roll-btn${rollBlocked ? " disabled" : ""}"${rollBlocked ? " disabled" : ""} title="${rollBlocked ? (spellLevelForBurn !== null ? `This spell is Lost - burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} via 🩸 Spellburn to cast it anyway, or use New Day on the Sheet." : "This spell is Lost until you rest - see the 🔒 badge below (click it to un-mark), or New Day on the Sheet.") : (isLost ? "Regaining this Lost spell via Spellburn - rolling still resolves as a normal Spell Check." : "Roll Spell Check")}">🎲</button>
       </div>
       ${burnHtml}
       ${badges.length ? `<div class="attack-detail-badges">${badges.join(" ")}</div>` : ""}
@@ -12081,6 +12252,20 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
     return;
   }
   const label = (effectiveName || "").trim() || "Spell";
+  // Regaining spells via Spellburn - same defense-in-depth guard as the
+  // Sheet's own rollSpellAttackRow; see spellAttackRowHtml's comment for
+  // the rule itself.
+  if (check.abilityId === "int" && isSpellLostForStats(stats, effectiveName)) {
+    const requiredLevel = spellLevelForNameForStats(stats, effectiveName);
+    if (requiredLevel === null || burnPoints < requiredLevel) {
+      const msg = requiredLevel !== null
+        ? `${item.name || "Token"}: ${label} is Lost - burn ${requiredLevel} point${requiredLevel === 1 ? "" : "s"} via 🩸 Spellburn first to cast it anyway.`
+        : `${item.name || "Token"}: ${label} is Lost - fill in its Level on the Sheet to regain it via Spellburn.`;
+      showTrackerStatus(msg, true);
+      showStatus(msg, true);
+      return;
+    }
+  }
   // Spellburn: spending a full 20 points in one declaration automatically
   // treats this check as a natural max, no die actually rolled - takes
   // priority over the GM's forced-die testing field, and reuses
@@ -12102,6 +12287,13 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   if (effectiveName && check.abilityId === "int" && total <= 11) {
     await setSpellLostForStats(itemId, effectiveName, true);
     if (rolled !== 1) note += ` ${markFumbleAlert("🔒 LOST")} - this spell can't be cast again until it rests (check this spell's own casting table for exceptions).`;
+  }
+  // Failed Spellburn (DCC RPG core rulebook) - see rollSpellAttackRow's own
+  // comment; openFailedSpellburnModalForStats runs against THIS token, not
+  // whatever's open on the Sheet tab.
+  if (rolled === 1 && burnPoints > 0) {
+    note += ` ${markFumbleAlert("🩸 FAILED SPELLBURN")} - an ability permanently loses 1 more point (choose which next), and this also counts toward Corruption.`;
+    openFailedSpellburnModalForStats(itemId);
   }
   const text = `${label} - Spell Check: d${check.sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(check.modifier)}${critBonus ? ` ${formatSignedNumber(critBonus)}(level)` : ""} = ${markRollTotal(total)}${note}`;
 
@@ -12172,6 +12364,85 @@ async function clearSpellburnPendingForStats(itemId, attackId, slotKey) {
       item.metadata[PC_METADATA_KEY] = data;
     });
   });
+}
+
+// Tracker-side sibling of spellburnRecoverableAbilities, sourced from a
+// token's saved stats instead of the live Sheet DOM - see
+// openFailedSpellburnModalForStats.
+function spellburnRecoverableAbilitiesForStats(stats) {
+  let maxMap = {};
+  try { maxMap = JSON.parse(stats.data.spellburnMax || "{}"); } catch (e) { maxMap = {}; }
+  return SPELLBURN_ABILITIES.filter(ability => {
+    if (maxMap[ability] === undefined) return false;
+    const current = parseAbilityScore(stats.data[ability]);
+    return current !== null && current < maxMap[ability];
+  });
+}
+
+// Tracker-side sibling of applyFailedSpellburnLoss - writes straight into
+// item.metadata like every other Tracker-side Spellburn write
+// (applySpellburnPointForStats), since the Tracker can be rolling for any
+// token, not just whatever's open on the Sheet tab. Same "permanent" model:
+// both the current score AND the spellburnMax ceiling drop by 1, so New
+// Day recovery can never restore this point.
+async function applyFailedSpellburnLossForStats(itemId, ability) {
+  let newScore = null;
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      if (mode !== "pc") return;
+      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+      const current = parseAbilityScore(data[ability]);
+      if (current === null) return;
+      let maxMap = {};
+      try { maxMap = JSON.parse(data.spellburnMax || "{}"); } catch (e) { maxMap = {}; }
+      if (maxMap[ability] === undefined) maxMap[ability] = current;
+      maxMap[ability] -= 1;
+      data.spellburnMax = JSON.stringify(maxMap);
+      newScore = current - 1;
+      data[ability] = `${newScore} (${formatSignedNumber(dccAbilityModifier(newScore))})`;
+      item.metadata[PC_METADATA_KEY] = data;
+    });
+  });
+  if (newScore !== null) {
+    const msg = `Failed Spellburn: ${spellburnAbilityLabel(ability)} permanently drops to ${newScore} (natural 1 while Spellburning).`;
+    showTrackerStatus(msg, true);
+    showStatus(msg, true);
+  }
+}
+
+// Tracker-side sibling of openFailedSpellburnModal - fetches the token's
+// own stats fresh (same "don't trust a possibly-stale value" contract
+// refreshSpellburnModal's own Tracker branch follows) rather than reading
+// live Sheet fields, since the roll that triggered this can be for any
+// token on the Tracker, not just whatever's open on the Sheet tab.
+async function openFailedSpellburnModalForStats(itemId) {
+  const [item] = await OBR.scene.items.getItems([itemId]);
+  if (!item) return;
+  const stats = getStatsForItem(item);
+  const eligible = spellburnRecoverableAbilitiesForStats(stats);
+  if (!eligible.length) return;
+  if (eligible.length === 1) {
+    await applyFailedSpellburnLossForStats(itemId, eligible[0]);
+    return;
+  }
+  const body = document.getElementById("failed-spellburn-modal-body");
+  body.innerHTML = eligible.map(ability => {
+    const current = parseAbilityScore(stats.data[ability]);
+    return `
+    <div class="spellburn-modal-row">
+      <span class="spellburn-modal-label">${spellburnAbilityLabel(ability)}</span>
+      <span class="spellburn-modal-score">${current === null ? "—" : `${current} (${formatSignedNumber(dccAbilityModifier(current))})`}</span>
+      <button type="button" class="hp-btn failed-spellburn-modal-apply" data-ability="${ability}" title="This ability permanently loses 1 more point">−1</button>
+    </div>`;
+  }).join("");
+  body.querySelectorAll(".failed-spellburn-modal-apply").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      await applyFailedSpellburnLossForStats(itemId, btn.dataset.ability);
+      closeFailedSpellburnModal();
+    });
+  });
+  document.getElementById("failed-spellburn-modal-backdrop").style.display = "flex";
 }
 
 // Tracker-side sibling of setSpellLost - sets ONE known spell's Lost flag
