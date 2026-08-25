@@ -732,7 +732,16 @@
      where a row can have several of these at once, would make that lookup
      grab whichever one happens to be first in the DOM instead. */
   .spell-effect-row { display: flex; gap: 6px; align-items: flex-start; margin-bottom: 6px; }
-  .spell-effect-range { flex: none; width: 48px; text-align: center; font-size: 11px; padding: 4px 2px; margin-top: 1px; }
+  /* Scoped under .spell-effect-row (not just the bare .spell-effect-range
+     class) so this specifically beats the global base rule's
+     "input[type=text], ... { width: 100% }" (line ~54) - that selector's
+     own attribute+type specificity otherwise outranks a single class,
+     which left this rendering at 100% width instead of 48px, in turn
+     leaving no row space for .spell-effect-text's flex:1 to grow into
+     (its own sizing was never the bug - nothing to grow into was). Same
+     specificity fix .mercurial-controls input[type=text] already relies
+     on above for its own narrow fields. */
+  .spell-effect-row .spell-effect-range { flex: none; width: 48px; text-align: center; font-size: 11px; padding: 4px 2px; margin-top: 1px; }
   .spell-effect-text { flex: 1; min-width: 0; font-size: 11px; padding: 4px 6px; min-height: 32px; margin-top: 0; resize: none; overflow-y: hidden; }
   /* The Spells fieldset's whole editor (known-spells list, free-text
      notes) lives in #spells-modal-backdrop now, not inline on the Sheet -
@@ -1387,7 +1396,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-24 17:44</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 13:43</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
