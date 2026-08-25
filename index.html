@@ -1471,7 +1471,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 18:19</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 20:48</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2130,14 +2130,18 @@
           <button type="button" class="hp-btn spellburn-modal-minus" id="luckburn-modal-minus" title="Spend 1 Luck point">−1</button>
         </div>
         <div class="spellburn-modal-total-row">
-          <span class="spellburn-modal-label">Bonus this roll</span>
-          <span class="spellburn-modal-total" id="luckburn-modal-total">+0</span>
+          <span class="spellburn-modal-label">Original total</span>
+          <span class="spellburn-modal-total" id="luckburn-modal-original-total">0</span>
+        </div>
+        <div class="spellburn-modal-total-row">
+          <span class="spellburn-modal-label">New total</span>
+          <span class="spellburn-modal-total" id="luckburn-modal-total">0</span>
         </div>
         <div class="spellburn-modal-flavor-row" id="luckburn-modal-detail-row" style="display:none">
           <span class="spellburn-modal-flavor-text" id="luckburn-modal-detail"></span>
         </div>
         <div class="spellburn-modal-actions">
-          <button type="button" class="spellburn-modal-cancel-btn" id="luckburn-modal-cancel" title="Undo every point spent since opening this popup, and close">Cancel</button>
+          <button type="button" class="spellburn-modal-cancel-btn" id="luckburn-modal-cancel" title="Undo every point spent since opening this popup, and close without posting an adjustment">Cancel</button>
           <button type="button" class="spellburn-modal-confirm-btn" id="luckburn-modal-confirm">Confirm</button>
         </div>
       </div>
@@ -4692,7 +4696,7 @@ function weaponOptionsHtml(selectedKey) {
 }
 
 function emptyAttack() {
-  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false, deedType: "", deedCustom: "", actionDieIndex: "", lineDeeds: {}, ammo: "", poisoned: false, luckBurnPending: {} };
+  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false, deedType: "", deedCustom: "", actionDieIndex: "", lineDeeds: {}, ammo: "", poisoned: false, luckLastRoll: {} };
 }
 
 // Backstab (Thief, Table 3-1) and Mighty Deed of Arms (Warrior/Dwarf,
@@ -4982,17 +4986,16 @@ function attackRowHtml(atk, mode) {
   // two-weapon role uses ("tw" for a two-weapon-configured row, otherwise
   // the Action Die index - see lineDeeds' own comment on this convention)
   // so a row with multiple Action Dice can burn independently per attack.
-  // Opens the shared Burn Luck popup (openLuckBurnModal) - see its own
-  // comment for the ctx/pending shape.
+  // Opens the shared Burn Luck popup (openLuckBurnModal), which now only
+  // ever adjusts a roll you already made (see its own comment) - clicking
+  // with nothing rolled yet just tells the player to roll first, so this
+  // button's own label/title stay static rather than showing a pending
+  // amount the way the old pre-roll design did.
   const luckSlotKey = effectiveTwRole ? "tw" : effectiveActionDieIndex;
-  const luckBurnPendingAttr = escapeHtml(JSON.stringify(atk.luckBurnPending || {}));
-  const luckPending = (atk.luckBurnPending && atk.luckBurnPending[luckSlotKey]) || null;
-  const luckBurnBtnTitle = luckPending && luckPending.bonus
-    ? `Burn Luck (DCC RPG core rulebook) - ${formatSignedNumber(luckPending.bonus)} pending for this roll (${luckPending.detail}). Click to burn more, or roll to apply and clear it.`
-    : "Burn Luck (DCC RPG core rulebook) - permanently spend Luck for a one-time bonus to this attack roll.";
+  const luckLastRollAttr = escapeHtml(JSON.stringify(atk.luckLastRoll || {}));
 
   return `
-    <div class="attack-row pc-attack-row${atk.equipped ? " equipped" : ""}" data-id="${atk.id}" data-line-deeds="${lineDeedsAttr}" data-luck-burn-pending="${luckBurnPendingAttr}">
+    <div class="attack-row pc-attack-row${atk.equipped ? " equipped" : ""}" data-id="${atk.id}" data-line-deeds="${lineDeedsAttr}" data-luck-last-roll="${luckLastRollAttr}">
       <div class="attack-weapon-line">
         <input type="checkbox" class="attack-equipped" ${atk.equipped ? "checked" : ""} title="Currently wielded - normally one weapon at a time, but a configured two-weapon Primary+Off-hand pair can both be equipped - this is what determines your Initiative Die" />
         <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
@@ -5010,7 +5013,7 @@ function attackRowHtml(atk, mode) {
         <button type="button" class="attack-remove-btn" title="Remove attack">×</button>
       </div>
       <div class="luck-burn-row">
-        <button type="button" class="hp-btn luck-burn-btn" title="${escapeHtml(luckBurnBtnTitle)}">🍀 Burn Luck${luckPending && luckPending.bonus ? ` (${formatSignedNumber(luckPending.bonus)})` : ""}</button>
+        <button type="button" class="hp-btn luck-burn-btn" title="Burn Luck (DCC RPG core rulebook) - after rolling this attack, permanently spend Luck to boost the result you got.">🍀 Burn Luck</button>
       </div>
       ${metaParts.length ? `<div class="attack-row-meta">${metaParts.join(" · ")}</div>` : ""}
       ${entry.type === "ranged" ? ammoLineHtml(atk) : ""}
@@ -5143,17 +5146,19 @@ function readAttacks(mode) {
       } catch (e) {
         base.castReversedBySlot = {};
       }
-      // Burning Luck (DCC RPG core rulebook) - pending bonus committed
-      // toward this row's next roll, per Action Die slot (same keying as
+      // Burning Luck (DCC RPG core rulebook) - cached result of this row's
+      // MOST RECENT roll, per Action Die slot (same keying as
       // spellburnPending above), applies to EITHER a weapon row or a
-      // "Cast a Spell" row alike (see openLuckBurnModal's own comment on
-      // why the pending shape is {points,bonus,rolls,sides,detail} rather
-      // than a flat number). Read here unconditionally for every pc row -
-      // harmless no-op for a row type this attribute was never set on.
+      // "Cast a Spell" row alike - the actual Burn Luck popup reads/writes
+      // this straight through OBR metadata (see attackOrSpellLuckBurnCtx),
+      // never this dataset attribute directly; this round-trip is only
+      // here so readAttacks()' full rebuild-on-every-save doesn't silently
+      // wipe out a cache a roll (or the Tracker) just wrote, the same
+      // reason lineDeeds/spellBySlot/spellburnPending above need it too.
       try {
-        base.luckBurnPending = JSON.parse(row.dataset.luckBurnPending || "{}");
+        base.luckLastRoll = JSON.parse(row.dataset.luckLastRoll || "{}");
       } catch (e) {
-        base.luckBurnPending = {};
+        base.luckLastRoll = {};
       }
     }
     return base;
@@ -5463,7 +5468,7 @@ function attachAttackRowListeners(mode) {
           // normal .attack-roll-btn handler above.
           clearTimeout(saveTimeout);
           await saveCurrent();
-          rollSpellAttackRow(row);
+          await rollSpellAttackRow(row);
         });
       }
       // Opens the shared Spellburn popup (openSpellburnModal) targeting
@@ -5526,42 +5531,24 @@ function attachAttackRowListeners(mode) {
           renderAttacks(mode, readAttacks(mode));
         });
       }
-      // Burning Luck (see openLuckBurnModal's own comment on the ctx/
-      // pending shape) - reads/writes THIS row's own data-luck-burn-pending
-      // directly, same "live DOM patch, saveCurrent() flushes it to
-      // metadata before any roll" contract Spellburn's Sheet-side ctx
-      // already follows. rollAttackFor is the ONLY place this ever
-      // actually gets applied/cleared - it's shared by the Sheet's own
-      // roll button and the Tracker's, so there's no separate Sheet-side
-      // roll math to keep in sync here.
+      // Burning Luck (see openLuckBurnModal/attackOrSpellLuckBurnCtx's own
+      // comments) - always metadata-based (currentItemId), even from the
+      // Sheet, since rollAttackFor is the ONLY place this row's roll math
+      // actually happens (shared by the Sheet's own roll button and the
+      // Tracker's) and it writes the "last roll" cache straight into the
+      // token's saved attacks array, not this row's DOM.
       const luckBurnBtn = row.querySelector(".luck-burn-btn");
       if (luckBurnBtn) {
         luckBurnBtn.addEventListener("click", () => {
+          if (!currentItemId) {
+            showStatus("Open this character/monster on a token first.", true);
+            return;
+          }
           const twRoleEl = row.querySelector(".attack-tw-role");
           const actDieEl = row.querySelector(".attack-action-die");
           const slotKey = (twRoleEl && twRoleEl.value) ? "tw" : (actDieEl ? actDieEl.value : "0");
-          const weaponSelEl = row.querySelector(".attack-weapon");
-          const customNameEl = row.querySelector(".attack-name");
-          const label = (customNameEl && customNameEl.value.trim())
-            || (weaponSelEl && weaponSelEl.options[weaponSelEl.selectedIndex] ? weaponSelEl.options[weaponSelEl.selectedIndex].text : "")
-            || "this attack";
-          openLuckBurnModal({
-            kind: "sheet",
-            label,
-            getPending: () => {
-              let byslot = {};
-              try { byslot = JSON.parse(row.dataset.luckBurnPending || "{}"); } catch (e) { byslot = {}; }
-              return byslot[slotKey] || null;
-            },
-            setPending: pending => {
-              let byslot = {};
-              try { byslot = JSON.parse(row.dataset.luckBurnPending || "{}"); } catch (e) { byslot = {}; }
-              byslot[slotKey] = pending;
-              row.dataset.luckBurnPending = JSON.stringify(byslot);
-              luckBurnBtn.textContent = `🍀 Burn Luck${pending && pending.bonus ? ` (${formatSignedNumber(pending.bonus)})` : ""}`;
-              scheduleSave();
-            },
-          });
+          const chatKind = row.classList.contains("spell-attack-row") ? "spell" : "attack";
+          openLuckBurnModal(attackOrSpellLuckBurnCtx(currentItemId, row.dataset.id, slotKey, chatKind));
         });
       }
       const twRoleSel = row.querySelector(".attack-tw-role");
@@ -6925,57 +6912,78 @@ document.getElementById("pc-luck-check-btn").addEventListener("click", () => {
 
 // Burn Luck (DCC RPG core rulebook) - a SHARED popup (#luckburn-modal-backdrop),
 // same "one piece of DOM, retargeted per open" pattern as the Spellburn
-// popup (openSpellburnModal), but generalized to work with ANY roll type
-// instead of only a Cast-a-Spell row: `ctx` carries `kind` ("sheet" or
-// "tracker", plus `itemId` for tracker) and a `getPending`/`setPending`
-// pair the CALLER supplies as closures, one per target type (weapon
-// attack, spell check, skill, initiative...) - see attachAttackRowListeners/
-// spellAttackRowHtml/skillRowHtml/etc for what each one actually does with
-// its own row/line's data. This keeps the modal itself completely
-// agnostic to WHERE a pending burn lives, so adding a new roll type never
-// needs to touch this file's modal logic, just a new ctx built at the
-// call site. Both getPending/setPending may return a value directly OR a
-// Promise (the modal always `await`s them), so a synchronous Sheet-side
-// closure and an async Tracker-side one (OBR metadata write) both work
-// through the exact same code path.
+// popup, generalized to work with ANY roll type via a `ctx` the caller
+// supplies (weapon attack, spell check, skill, initiative...). Unlike
+// Spellburn - and unlike this popup's OWN first version - this is a
+// strictly AFTER-the-roll action: "Characters can burn off Luck to
+// survive life-or-death situations" reads as reacting to a result you've
+// already seen, not pre-committing before you roll, so there's no
+// "pending, applied to your next roll" state anymore. Burning now
+// ADJUSTS the roll you already made and posts a follow-up note - the
+// original roll entry in the log is left alone.
 //
-// Pending shape: { points, bonus, rolls, sides, detail } - `bonus` is
-// what actually gets added to the eventual roll (NOT just `points`, since
-// a Thief's dice-based bonus isn't 1:1 with points spent); `rolls`/`sides`
-// are Thief-only, kept so a running declaration can extend its detail
-// text without re-rolling already-committed dice. A target with nothing
-// pending yet should have getPending() return null/undefined - the modal
-// treats that the same as {points:0, bonus:0, rolls:[], sides:null, detail:""}.
+// ctx shape:
+//   kind: "sheet" | "tracker" (+ itemId for tracker)
+//   label: optional fallback name of what's being adjusted, only used if
+//     getLastRoll()'s own result has no `label` of its own
+//   getLastRoll(): returns {total, label} for the most recent roll of
+//     THIS target, or null/undefined if nothing's been rolled yet (or it's
+//     already been adjusted once) - may return a Promise. `label` here is
+//     normally the authoritative one (e.g. the weapon/spell name AT ROLL
+//     TIME), passed straight through to applyAdjustment on Confirm.
+//   applyAdjustment(bonus, detail, newTotal, oldTotal, label): called
+//     once, on Confirm only - posts the adjustment note/log entry and
+//     clears whatever cache getLastRoll reads from (so a second burn
+//     without a fresh roll correctly refuses instead of stacking
+//     silently) - may return a Promise
 let luckBurnModalCtx = null;
-// Snapshot of the Luck score AND whichever pending value already existed
-// the moment this popup opened - same rollback-to-exact-snapshot purpose
-// spellburnModalSnapshot serves for Spellburn (see cancelLuckBurnModal).
+// The roll being adjusted (captured once at open time - see
+// openLuckBurnModal) and the running accumulation across this session's
+// "-1" clicks. Unlike the old pending-based design, accumulation now
+// lives ONLY here in memory - it's resolved (posted, or discarded on
+// Cancel) before the modal ever closes, so there's nothing left to persist
+// anywhere.
+let luckBurnModalLastRoll = null;
+let luckBurnModalAccum = null;
+// Snapshot of the Luck score the moment this popup opened, for Cancel to
+// restore exactly (same purpose spellburnModalSnapshot serves for
+// Spellburn).
 let luckBurnModalSnapshot = null;
 
-function emptyLuckBurnPending() {
+function emptyLuckBurnAccum() {
   return { points: 0, bonus: 0, rolls: [], sides: null, detail: "" };
 }
 
-function openLuckBurnModal(ctx) {
+// Refuses to open at all if there's nothing to adjust - burning Luck with
+// no roll to react to isn't a thing this app models (see the module
+// comment above).
+async function openLuckBurnModal(ctx) {
+  const lastRoll = await ctx.getLastRoll();
+  if (!lastRoll) {
+    showStatus("Roll first, then Burn Luck to boost that result.", true, 4000);
+    return;
+  }
   luckBurnModalCtx = ctx;
+  luckBurnModalLastRoll = lastRoll;
+  luckBurnModalAccum = emptyLuckBurnAccum();
   luckBurnModalSnapshot = null;
-  document.getElementById("luckburn-modal-subtitle").textContent = ctx.label
-    ? `Permanently burn Luck for a one-time bonus to ${ctx.label} (DCC RPG core rulebook) - Thief rolls their own Luck Die per point spent, Halfling doubles the flat rate, every other class gets a flat +1 per point.`
-    : "Permanently burn Luck for a one-time bonus to a roll (DCC RPG core rulebook) - Thief rolls their own Luck Die per point spent, Halfling doubles the flat rate, every other class gets a flat +1 per point.";
+  document.getElementById("luckburn-modal-subtitle").textContent =
+    `Permanently burn Luck to boost ${lastRoll.label || ctx.label || "your last roll"} - already rolled at ${lastRoll.total} (DCC RPG core rulebook). Thief rolls their own Luck Die per point spent, Halfling doubles the flat rate, every other class gets a flat +1 per point.`;
+  document.getElementById("luckburn-modal-original-total").textContent = String(lastRoll.total);
   document.getElementById("luckburn-modal-backdrop").style.display = "flex";
-  refreshLuckBurnModal();
+  await refreshLuckBurnModal();
 }
 
 function closeLuckBurnModal() {
   document.getElementById("luckburn-modal-backdrop").style.display = "none";
   luckBurnModalCtx = null;
+  luckBurnModalLastRoll = null;
+  luckBurnModalAccum = null;
   luckBurnModalSnapshot = null;
 }
 
-// Repaints the popup's Luck score and pending-bonus readout from whichever
-// target luckBurnModalCtx currently points at - called on open and after
-// every "-1" click, same "Tracker writes are async, re-read rather than
-// trust a stale local value" reasoning refreshSpellburnModal follows.
+// Repaints the popup's Luck score and running new-total preview - called
+// on open and after every "-1" click.
 async function refreshLuckBurnModal() {
   const ctx = luckBurnModalCtx;
   if (!ctx) return;
@@ -6987,16 +6995,17 @@ async function refreshLuckBurnModal() {
     if (!item || luckBurnModalCtx !== ctx) return; // popup closed/retargeted while this was in flight
     luckScore = parseAbilityScore(getStatsForItem(item).data.lck);
   }
-  const pending = (await ctx.getPending()) || emptyLuckBurnPending();
-  if (!luckBurnModalSnapshot) luckBurnModalSnapshot = { luckScore, pending };
+  if (!luckBurnModalSnapshot) luckBurnModalSnapshot = { luckScore };
   document.getElementById("luckburn-modal-score").textContent =
     luckScore === null ? "—" : `${luckScore} (${formatSignedNumber(dccAbilityModifier(luckScore))})`;
-  document.getElementById("luckburn-modal-total").textContent = formatSignedNumber(pending.bonus || 0);
+  const accum = luckBurnModalAccum || emptyLuckBurnAccum();
+  const newTotal = luckBurnModalLastRoll.total + accum.bonus;
+  document.getElementById("luckburn-modal-total").textContent = String(newTotal);
   const detailRow = document.getElementById("luckburn-modal-detail-row");
   const detailEl = document.getElementById("luckburn-modal-detail");
-  if (pending.detail) {
+  if (accum.detail) {
     detailRow.style.display = "";
-    detailEl.textContent = pending.detail;
+    detailEl.textContent = accum.detail;
   } else {
     detailRow.style.display = "none";
   }
@@ -7007,8 +7016,8 @@ async function refreshLuckBurnModal() {
 // live-effect contract as Spellburn's own "-" click), rolls THIS point's
 // own bonus via computeLuckBurnBonus(cls, level, 1) - never a lump
 // re-roll of the running total, so previously-committed Thief dice are
-// never disturbed - and folds it into the target's pending value via
-// ctx.setPending.
+// never disturbed - and folds it into luckBurnModalAccum (in-memory only
+// until Confirm).
 async function luckBurnModalMinusClick() {
   const ctx = luckBurnModalCtx;
   if (!ctx) return;
@@ -7028,24 +7037,23 @@ async function luckBurnModalMinusClick() {
     newScore = await applyLuckBurnPointForStats(ctx.itemId, 1);
   }
   if (newScore === null) return;
-  const prevPending = (await ctx.getPending()) || emptyLuckBurnPending();
+  const prev = luckBurnModalAccum || emptyLuckBurnAccum();
   const { bonus: pointBonus, rolls: pointRolls, sides } = computeLuckBurnBonus(cls, levelRaw, 1);
-  const nextPoints = prevPending.points + 1;
-  const nextRolls = pointRolls ? [...(prevPending.rolls || []), ...pointRolls] : prevPending.rolls;
-  const nextBonus = prevPending.bonus + pointBonus;
+  const nextPoints = prev.points + 1;
+  const nextRolls = pointRolls ? [...(prev.rolls || []), ...pointRolls] : prev.rolls;
+  const nextBonus = prev.bonus + pointBonus;
   const nextDetail = cls === "Thief" && nextRolls && nextRolls.length
-    ? `${nextPoints}d${sides || prevPending.sides} (${nextRolls.join("+")})`
+    ? `${nextPoints}d${sides || prev.sides} (${nextRolls.join("+")})`
     : cls === "Halfling"
       ? `${nextPoints} Luck × 2 (Halfling)`
       : `${nextPoints} Luck × 1`;
-  await ctx.setPending({ points: nextPoints, bonus: nextBonus, rolls: nextRolls, sides: sides || prevPending.sides, detail: nextDetail });
+  luckBurnModalAccum = { points: nextPoints, bonus: nextBonus, rolls: nextRolls, sides: sides || prev.sides, detail: nextDetail };
   await refreshLuckBurnModal();
 }
 
 // Undoes every point spent since this popup opened - restores the Luck
-// score AND the target's pending value straight back to
-// luckBurnModalSnapshot, same exact-rollback purpose cancelSpellburnModal
-// serves.
+// score to luckBurnModalSnapshot and discards the in-memory accumulation.
+// No adjustment note is ever posted for a cancelled burn.
 async function cancelLuckBurnModal() {
   const ctx = luckBurnModalCtx;
   const snapshot = luckBurnModalSnapshot;
@@ -7056,7 +7064,6 @@ async function cancelLuckBurnModal() {
       el.value = `${snapshot.luckScore} (${formatSignedNumber(dccAbilityModifier(snapshot.luckScore))})`;
     }
     refreshDerivedPcFields();
-    await ctx.setPending(snapshot.pending);
     scheduleSave();
     showStatus("Burn Luck cancelled - Luck restored.", false, 4000);
   } else {
@@ -7071,14 +7078,29 @@ async function cancelLuckBurnModal() {
         item.metadata[PC_METADATA_KEY] = data;
       });
     });
-    await ctx.setPending(snapshot.pending);
+  }
+  closeLuckBurnModal();
+}
+
+// Confirm = actually commit: post the adjustment note (via ctx.applyAdjustment,
+// which also clears whatever getLastRoll reads from) and close. Points
+// already spent stay spent - unlike Cancel, this never reverts the Luck
+// score.
+async function confirmLuckBurnModal() {
+  const ctx = luckBurnModalCtx;
+  const lastRoll = luckBurnModalLastRoll;
+  const accum = luckBurnModalAccum;
+  if (!ctx || !lastRoll) { closeLuckBurnModal(); return; }
+  if (accum && accum.points > 0) {
+    const newTotal = lastRoll.total + accum.bonus;
+    await ctx.applyAdjustment(accum.bonus, accum.detail, newTotal, lastRoll.total, lastRoll.label || ctx.label);
   }
   closeLuckBurnModal();
 }
 
 document.getElementById("luckburn-modal-close").addEventListener("click", closeLuckBurnModal);
 document.getElementById("luckburn-modal-cancel").addEventListener("click", cancelLuckBurnModal);
-document.getElementById("luckburn-modal-confirm").addEventListener("click", closeLuckBurnModal);
+document.getElementById("luckburn-modal-confirm").addEventListener("click", confirmLuckBurnModal);
 document.getElementById("luckburn-modal-backdrop").addEventListener("click", (e) => {
   if (e.target.id === "luckburn-modal-backdrop") closeLuckBurnModal();
 });
@@ -9234,23 +9256,20 @@ function spellAttackRowHtml(atk) {
       </div>`
     : "";
   // Burning Luck (DCC RPG core rulebook) - ANY class, unlike Spellburn
-  // (Wizard/Elf-only) - see attackRowHtml's own comment for the full
-  // ctx/pending-shape explanation. Shares the exact same .luck-burn-btn
-  // class/click-wiring as a weapon row (attachAttackRowListeners doesn't
-  // distinguish - both are just ".attack-row"), so nothing extra needs
-  // wiring here beyond rendering the button and the data attribute.
-  const luckBurnPendingAttr = escapeHtml(JSON.stringify(atk.luckBurnPending || {}));
-  const luckPendingForSpell = (atk.luckBurnPending && atk.luckBurnPending[effectiveActionDieIndex]) || null;
-  const luckBurnBtnTitle = luckPendingForSpell && luckPendingForSpell.bonus
-    ? `Burn Luck (DCC RPG core rulebook) - ${formatSignedNumber(luckPendingForSpell.bonus)} pending for this roll (${luckPendingForSpell.detail}). Click to burn more, or roll to apply and clear it.`
-    : "Burn Luck (DCC RPG core rulebook) - permanently spend Luck for a one-time bonus to this Spell Check.";
+  // (Wizard/Elf-only). Shares the exact same .luck-burn-btn class/click-
+  // wiring as a weapon row (attachAttackRowListeners doesn't distinguish -
+  // both are just ".attack-row"), so nothing extra needs wiring here.
+  // Only ever adjusts a roll already made (see openLuckBurnModal's own
+  // comment) - clicking with nothing rolled yet just tells the player to
+  // roll first, so the button's label/title stay static.
+  const luckLastRollAttr = escapeHtml(JSON.stringify(atk.luckLastRoll || {}));
   const luckBurnHtml = (check && atk.name && atk.name.trim())
     ? `<div class="luck-burn-row">
-        <button type="button" class="hp-btn luck-burn-btn" title="${escapeHtml(luckBurnBtnTitle)}">🍀 Burn Luck${luckPendingForSpell && luckPendingForSpell.bonus ? ` (${formatSignedNumber(luckPendingForSpell.bonus)})` : ""}</button>
+        <button type="button" class="hp-btn luck-burn-btn" title="Burn Luck (DCC RPG core rulebook) - after rolling this Spell Check, permanently spend Luck to boost the result you got.">🍀 Burn Luck</button>
       </div>`
     : "";
   return `
-    <div class="attack-row pc-attack-row spell-attack-row" data-id="${atk.id}" data-line-deeds="{}" data-spell-by-slot="${spellBySlotAttr}" data-spellburn-pending="${spellburnPendingAttr}" data-cast-reversed-by-slot="${castReversedBySlotAttr}" data-luck-burn-pending="${luckBurnPendingAttr}">
+    <div class="attack-row pc-attack-row spell-attack-row" data-id="${atk.id}" data-line-deeds="{}" data-spell-by-slot="${spellBySlotAttr}" data-spellburn-pending="${spellburnPendingAttr}" data-cast-reversed-by-slot="${castReversedBySlotAttr}" data-luck-last-roll="${luckLastRollAttr}">
       <div class="attack-weapon-line">
         <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
         ${actDieSelectHtml}
@@ -9344,20 +9363,8 @@ function refreshSpellAttackRows() {
         ? "Attempting this spell's reverse effect (e.g. Tear instead of Mending) - Spell Check die reduced 1 step (Reversing Spells). Click to cast normally instead."
         : "Casting normally. Click to attempt this spell's reverse effect instead (e.g. Tear instead of Mending) - costs 1 step down the dice chain (Reversing Spells).";
     }
-    // Burning Luck - keyed by the SAME Action Die slot as Spellburn above,
-    // so switching this row's Action Die picker has to re-show whichever
-    // pending burn (if any) belongs to the newly-selected slot, not
-    // whatever was on screen for the previous one.
-    const luckBurnBtn = row.querySelector(".luck-burn-btn");
-    if (luckBurnBtn) {
-      let luckBySlot = {};
-      try { luckBySlot = JSON.parse(row.dataset.luckBurnPending || "{}"); } catch (e) { luckBySlot = {}; }
-      const luckPendingForSlot = luckBySlot[slotKeyForBurn] || null;
-      luckBurnBtn.textContent = `🍀 Burn Luck${luckPendingForSlot && luckPendingForSlot.bonus ? ` (${formatSignedNumber(luckPendingForSlot.bonus)})` : ""}`;
-      luckBurnBtn.title = luckPendingForSlot && luckPendingForSlot.bonus
-        ? `Burn Luck (DCC RPG core rulebook) - ${formatSignedNumber(luckPendingForSlot.bonus)} pending for this roll (${luckPendingForSlot.detail}). Click to burn more, or roll to apply and clear it.`
-        : "Burn Luck (DCC RPG core rulebook) - permanently spend Luck for a one-time bonus to this Spell Check.";
-    }
+    // Burning Luck's own button is static now (see spellAttackRowHtml's
+    // own comment) - no passive resync needed here.
     // Die badge (see spellAttackRowHtml) can go stale between full row
     // rebuilds on its own - a class/level change can shift an EXTRA
     // Action Die's size (Table 1-12's 2nd attack: d14 at level 5, d16 at
@@ -9450,7 +9457,7 @@ function spellCheckNaturalResultText(rolled, sides, level) {
 // no roll of its own. Reads its label from this row's spell dropdown, and
 // its Action Die (and therefore die size - see pcSpellCheckModifierBreakdown)
 // from this row's own .attack-action-die.
-function rollSpellAttackRow(row) {
+async function rollSpellAttackRow(row) {
   const selectEl = row.querySelector(".spell-attack-select");
   const actDieEl = row.querySelector(".attack-action-die");
   const slotKeyForBurn = actDieEl ? actDieEl.value : "0";
@@ -9471,14 +9478,6 @@ function rollSpellAttackRow(row) {
     showStatus("Only Cleric/Wizard/Elf roll a Spell Check.", true, 4000);
     return;
   }
-  // Burning Luck - see attackRowHtml's own comment on the pending shape.
-  // A flat add to the final total, same as a weapon attack's own
-  // luckBonus - kept separate from pcSpellCheckModifierBreakdown's
-  // "standing modifiers" composition rather than folded into it.
-  let luckBySlot = {};
-  try { luckBySlot = JSON.parse(row.dataset.luckBurnPending || "{}"); } catch (e) { luckBySlot = {}; }
-  const luckPending = luckBySlot[slotKeyForBurn] || null;
-  const luckBonus = luckPending ? luckPending.bonus : 0;
   const spellName = selectEl ? selectEl.value.trim() : "";
   const label = spellName || "Spell";
   // Regaining spells via Spellburn (DCC RPG core rulebook) - a Lost spell
@@ -9507,14 +9506,7 @@ function rollSpellAttackRow(row) {
   // comment; the die itself is already reduced (check.sides), this just
   // surfaces WHY in the roll result.
   if (attemptReversed) note += ` 🔄 Reversing Spells: attempting this spell's reverse effect - Spell Check die reduced 1 step.`;
-  // Burning Luck - folded into the total exactly like Spellburn's own
-  // points already are (check.modifier), even on a natural 1: DCC RAW
-  // fails a Spell Check on a natural 1 "regardless of total" (see
-  // spellCheckNaturalResultText's own note above), so the total including
-  // this bonus is technically moot there too, same as it already is for
-  // Spellburn - the Luck is still permanently spent either way.
-  if (luckPending) note += ` 🍀 Burn Luck: ${formatSignedNumber(luckPending.bonus)} (${luckPending.detail}).`;
-  const total = rolled + check.modifier + critBonus + luckBonus;
+  const total = rolled + check.modifier + critBonus;
   // Lost (see isSpellLost/setSpellLost's own comment) - this app has no
   // per-spell casting tables to check the actual threshold against, so it
   // defaults to the generic failure band most spells share (a total of 11
@@ -9538,21 +9530,20 @@ function rollSpellAttackRow(row) {
   const text = `${label} - Spell Check: d${check.sides} (${rolled}) ${formatSignedNumber(check.modifier)}${critBonus ? ` ${formatSignedNumber(critBonus)}(level)` : ""} = ${markRollTotal(total)}${note}`;
   showStatus(text, false, note ? 8000 : 4000);
   appendChatLog({ kind: "spell", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId)) });
-  broadcastDiceRoll({ rollerName, dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier + critBonus + luckBonus, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
+  broadcastDiceRoll({ rollerName, dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier + critBonus, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
   if (burnPoints > 0) {
     delete pending[slotKeyForBurn];
     row.dataset.spellburnPending = JSON.stringify(pending);
     refreshSpellAttackRows();
     scheduleSave();
   }
-  // Burning Luck is a one-shot declaration toward THIS roll, same as
-  // Spellburn's own pendingPoints just above - clear it now that it's
-  // been applied.
-  if (luckPending) {
-    delete luckBySlot[slotKeyForBurn];
-    row.dataset.luckBurnPending = JSON.stringify(luckBySlot);
-    refreshSpellAttackRows();
-    scheduleSave();
+  // Burning Luck (post-roll) - DCC RAW fails a Spell Check on a natural 1
+  // "regardless of total" (see spellCheckNaturalResultText's own note
+  // above), the same way a natural-1 weapon fumble can't be saved by Luck
+  // either (see rollAttackFor's own comment), so this result is only
+  // cached for a later 🍀 Burn Luck adjustment when it wasn't a natural 1.
+  if (currentItemId && rolled !== 1) {
+    await setLuckLastRollForStats(currentItemId, row.dataset.id, slotKeyForBurn, total, label);
   }
 }
 
@@ -10427,14 +10418,17 @@ function skillRowHtml(row, prevOverride) {
   // Burning Luck (DCC RPG core rulebook) - ANY class, same as
   // attackRowHtml/spellAttackRowHtml. Skills roll a single flat d20 (or,
   // rarely, another die - row.isDie) with no Action Die slot to key by,
-  // so unlike Attacks/Spell Checks this is just ONE pending value per row,
-  // not a per-slot map. Skipped for a `rollable: false` row (Backstab) -
-  // nothing to burn Luck toward if there's no roll button to apply it to.
+  // so unlike Attacks/Spell Checks this is just ONE cached last-roll value
+  // per row, not a per-slot map. Only ever adjusts a roll already made
+  // (see openLuckBurnModal's own comment) - clicking with nothing rolled
+  // yet just tells the player to roll first, so this button's label/title
+  // stay static. Skipped for a `rollable: false` row (Backstab) - nothing
+  // to burn Luck toward if there's no roll button to apply it to.
   const luckBurnBtnHtml = row.rollable === false
     ? ""
-    : `<button type="button" class="skill-luck-burn-btn" data-key="${row.key}" title="Burn Luck (DCC RPG core rulebook) - permanently spend Luck for a one-time bonus to this roll.">🍀</button>`;
+    : `<button type="button" class="skill-luck-burn-btn" data-key="${row.key}" title="Burn Luck (DCC RPG core rulebook) - after rolling this, permanently spend Luck to boost the result you got.">🍀</button>`;
   return `
-    <div class="skill-row" data-key="${row.key}" data-label="${escapeHtml(row.label)}" data-ability="${row.ability || ""}" data-is-die="${row.isDie ? "1" : "0"}" data-check-penalty-applies="${row.checkPenaltyApplies ? "1" : "0"}" data-requires-tools="${row.requiresTools ? "1" : "0"}" data-luck-burn-pending="{}">
+    <div class="skill-row" data-key="${row.key}" data-label="${escapeHtml(row.label)}" data-ability="${row.ability || ""}" data-is-die="${row.isDie ? "1" : "0"}" data-check-penalty-applies="${row.checkPenaltyApplies ? "1" : "0"}" data-requires-tools="${row.requiresTools ? "1" : "0"}" data-luck-last-roll="{}">
       <div class="skill-row-label">${escapeHtml(row.label)}${note}</div>
       <input type="text" class="skill-row-value" id="pc-skill-${row.key}" data-key="${row.key}" data-auto-synced="${auto ? "1" : "0"}" value="${escapeHtml(value)}" title="${escapeHtml(skillRowTitle(row))}" />
       <button type="button" class="derived-sync-btn skill-row-sync-btn" data-key="${row.key}" title="Recompute from Level/Alignment/Ability/Armor">↻</button>
@@ -10487,33 +10481,33 @@ function attachSkillRowListeners() {
   listEl.querySelectorAll(".skill-row-roll-btn").forEach(btn => {
     btn.addEventListener("click", () => rollPcSkill(btn.dataset.key));
   });
-  // Burning Luck (DCC RPG core rulebook) - one pending value per row, no
-  // per-slot map (a skill has no Action Die to key by - see
+  // Burning Luck (DCC RPG core rulebook) - one cached last-roll value per
+  // row, no per-slot map (a skill has no Action Die to key by - see
   // skillRowHtml's own comment). Sheet-only; skills have no Tracker
-  // equivalent.
+  // equivalent, so unlike attackOrSpellLuckBurnCtx this stays purely
+  // row.dataset-based rather than routing through OBR metadata.
   listEl.querySelectorAll(".skill-luck-burn-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       const row = btn.closest(".skill-row");
       if (!row) return;
+      const label = row.dataset.label || "this roll";
       openLuckBurnModal({
         kind: "sheet",
-        label: row.dataset.label || "this roll",
-        getPending: () => {
-          // "{}" (nothing burned yet) has to resolve to null, not a
-          // truthy-but-fieldless object - refreshLuckBurnModal only
-          // falls back to its own default shape when this returns a
-          // falsy value (see its own comment).
+        label,
+        getLastRoll: () => {
           try {
-            const parsed = JSON.parse(row.dataset.luckBurnPending || "{}");
-            return parsed && parsed.points ? parsed : null;
+            const parsed = JSON.parse(row.dataset.luckLastRoll || "{}");
+            return parsed && parsed.total !== undefined ? parsed : null;
           } catch (e) {
             return null;
           }
         },
-        setPending: pending => {
-          row.dataset.luckBurnPending = JSON.stringify(pending || {});
-          btn.textContent = pending && pending.bonus ? `🍀${formatSignedNumber(pending.bonus)}` : "🍀";
+        applyAdjustment: (bonus, detail, newTotal, oldTotal, rollLabel) => {
+          row.dataset.luckLastRoll = "{}";
           scheduleSave();
+          const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
+          const gmOnly = isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId));
+          postLuckAdjustmentNote({ rollerName, kind: "skill", gmOnly, label: rollLabel || label, bonus, detail, oldTotal, newTotal });
         },
       });
     });
@@ -10645,20 +10639,14 @@ function rollPcSkill(key) {
   const label = row.dataset.label || key;
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
   const gmOnly = isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId));
-  // Burning Luck - see skillRowHtml's own comment (one flat pending value
-  // per row, no per-slot map).
-  let luckPending = null;
-  try {
-    const parsed = JSON.parse(row.dataset.luckBurnPending || "{}");
-    luckPending = parsed && parsed.points ? parsed : null;
-  } catch (e) { luckPending = null; }
-  const luckBonus = luckPending ? luckPending.bonus : 0;
-  const luckNote = luckPending ? ` 🍀 Burn Luck: ${formatSignedNumber(luckPending.bonus)} (${luckPending.detail}).` : "";
-  const clearLuckPending = () => {
-    if (!luckPending) return;
-    row.dataset.luckBurnPending = "{}";
-    const luckBtn = row.querySelector(".skill-luck-burn-btn");
-    if (luckBtn) luckBtn.textContent = "🍀";
+  // Burning Luck (post-roll) - see skillRowHtml's own comment (one cached
+  // last-roll value per row, no per-slot map). No skill here has a
+  // weapon-fumble/Spell-Check-nat-1 style "fails regardless of total"
+  // rule (Disable Trap's own natural-1 consequence is a side effect, not
+  // an automatic failure), so unlike rollAttackFor/rollSpellAttackRow this
+  // caches unconditionally.
+  const cacheLuckLastRoll = total => {
+    row.dataset.luckLastRoll = JSON.stringify({ total, label });
     scheduleSave();
   };
   if (row.dataset.isDie === "1") {
@@ -10667,17 +10655,17 @@ function rollPcSkill(key) {
     const abilityId = row.dataset.ability;
     const abilityMod = abilityId ? abilityModifierFromField(`pc-${abilityId}`) : 0;
     const penalty = row.dataset.checkPenaltyApplies === "1" ? computePcCheckPenaltyTotal() : 0;
-    const modifier = abilityMod + penalty + luckBonus;
+    const modifier = abilityMod + penalty;
     const rolled = Math.floor(Math.random() * sides) + 1;
     const total = rolled + modifier;
-    const text = `${label}: d${sides} (${rolled}) ${formatSignedNumber(modifier)} = ${markRollTotal(total)}${luckNote}`;
+    const text = `${label}: d${sides} (${rolled}) ${formatSignedNumber(modifier)} = ${markRollTotal(total)}`;
     showStatus(text, false, 4000);
     appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly });
     broadcastDiceRoll({ rollerName, dice: [{ sides, value: rolled }], modifier, notation: `d${sides}`, total, label });
-    clearLuckPending();
+    cacheLuckLastRoll(total);
     return;
   }
-  const bonus = parseModifier(input.value) + luckBonus;
+  const bonus = parseModifier(input.value);
   const rolled = Math.floor(Math.random() * 20) + 1;
   const total = rolled + bonus;
   // Disable Trap's own rule: "A natural 1 on a disable trap check triggers
@@ -10687,11 +10675,11 @@ function rollPcSkill(key) {
   // natural 1 has special text on an attack roll (Fumble) elsewhere in
   // this app.
   const trapTriggerNote = (key === "disableTrap" && rolled === 1) ? " ⚠️ Natural 1 - the trap triggers!" : "";
-  const text = `${label}: d20 (${rolled}) ${formatSignedNumber(bonus)} = ${markRollTotal(total)}${trapTriggerNote}${luckNote}`;
+  const text = `${label}: d20 (${rolled}) ${formatSignedNumber(bonus)} = ${markRollTotal(total)}${trapTriggerNote}`;
   showStatus(text, rolled === 1 && key === "disableTrap", trapTriggerNote ? 6000 : 4000);
   appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly });
   broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: bonus, notation: "d20", total, label });
-  clearLuckPending();
+  cacheLuckLastRoll(total);
 }
 
 document.getElementById("pc-tables-btn").addEventListener("click", openTablesModalForPc);
@@ -12181,30 +12169,29 @@ function attackDetailHtml(item, stats, lines) {
 // roll button (rollConcentrationSaveForTracker) is wired separately in
 // attachTrackerRowListeners rather than going through
 // rollAttackForTrackerRow, since it isn't an attackId/slotKey-keyed line.
-// Burning Luck toward this PC's NEXT Initiative roll (DCC RPG core
-// rulebook) - lives in the expanded attack panel (same access point as
-// Concentration Save above) rather than the always-visible compact
-// tracker row, since that row is a fixed-width grid shared with monster
-// tokens and has no spare room for a text button. Stored as ONE top-level
-// field (data.initLuckBurnPending) rather than attached to any attack -
-// Initiative isn't part of the attacks array at all, so it needs its own
-// small set of read/write helpers (see setInitiativeLuckBurnPendingForStats/
-// rollInitiativeFor) instead of reusing the per-attack luckBurnPending
-// machinery. PC-only: monsters have no tracked Luck score.
+// Burning Luck to retroactively boost this PC's LAST Initiative roll (DCC
+// RPG core rulebook) - lives in the expanded attack panel (same access
+// point as Concentration Save above) rather than the always-visible
+// compact tracker row, since that row is a fixed-width grid shared with
+// monster tokens and has no spare room for a text button. Stored as ONE
+// top-level field (data.initLuckLastRoll) rather than attached to any
+// attack - Initiative isn't part of the attacks array at all, so it needs
+// its own small set of read/write helpers (see
+// setInitiativeLuckLastRollForStats/rollInitiativeFor) instead of reusing
+// the per-attack luckLastRoll machinery. Only ever adjusts a roll already
+// made (see openLuckBurnModal's own comment) - clicking with nothing
+// rolled yet just tells the player to roll first, so this button's
+// label/title stay static. PC-only: monsters have no tracked Luck score.
 function initiativeLuckBurnLineHtml(item, stats) {
   if (stats.mode !== "pc") return "";
-  const pending = stats.data.initLuckBurnPending || null;
-  const title = pending && pending.bonus
-    ? `Burn Luck (DCC RPG core rulebook) - ${formatSignedNumber(pending.bonus)} pending for this token's NEXT Initiative roll (${pending.detail}). Click to burn more, or roll Initiative to apply and clear it.`
-    : "Burn Luck (DCC RPG core rulebook) - permanently spend Luck for a one-time bonus to this token's next Initiative roll.";
   return `
     <div class="attack-detail-row-wrap">
       <div class="attack-detail-row">
         <span class="attack-detail-name">🍀 Initiative Luck</span>
         <span class="attack-detail-meta">
-          <span class="attack-detail-meta-part" title="Applies to this token's NEXT Initiative roll only, then clears.">One-time bonus</span>
+          <span class="attack-detail-meta-part" title="Adjusts this token's last Initiative roll.">After-the-roll bonus</span>
         </span>
-        <button class="hp-btn init-luck-burn-btn" title="${escapeHtml(title)}">🍀 Burn Luck${pending && pending.bonus ? ` (${formatSignedNumber(pending.bonus)})` : ""}</button>
+        <button class="hp-btn init-luck-burn-btn" title="Burn Luck (DCC RPG core rulebook) - after rolling Initiative, permanently spend Luck to boost the result you got.">🍀 Burn Luck</button>
       </div>
     </div>`;
 }
@@ -12320,17 +12307,14 @@ function trackerLineHtml(item, stats, line) {
   }
   // Burning Luck (DCC RPG core rulebook) - PC-only (monsters don't have a
   // tracked Luck score/class formula), but unlike Backstab/Deed Die
-  // available for EVERY class, not just Thief/Warrior/Dwarf - see
-  // openLuckBurnModal's own comment for the ctx/pending shape. Keyed by
-  // this line's own slot exactly like Backstab/Deed Die above, so a
-  // multi-Action-Die character can burn independently per attack.
+  // available for EVERY class, not just Thief/Warrior/Dwarf. Keyed by this
+  // line's own slot exactly like Backstab/Deed Die above, so a multi-
+  // Action-Die character can burn independently per attack. Only ever
+  // adjusts a roll already made (see openLuckBurnModal's own comment) -
+  // clicking with nothing rolled yet just tells the player to roll first,
+  // so this button's label/title stay static.
   if (stats.mode === "pc") {
-    const luckSlotKeyForLine = line.slotKey || "0";
-    const luckPendingForLine = (atk.luckBurnPending && atk.luckBurnPending[luckSlotKeyForLine]) || null;
-    const luckBurnTitle = luckPendingForLine && luckPendingForLine.bonus
-      ? `Burn Luck (DCC RPG core rulebook) - ${formatSignedNumber(luckPendingForLine.bonus)} pending for this roll (${luckPendingForLine.detail}). Click to burn more, or roll to apply and clear it.`
-      : "Burn Luck (DCC RPG core rulebook) - permanently spend Luck for a one-time bonus to this attack roll.";
-    extraControls.push(`<button type="button" class="hp-btn tracker-luck-burn-btn" title="${escapeHtml(luckBurnTitle)}">🍀 Burn Luck${luckPendingForLine && luckPendingForLine.bonus ? ` (${formatSignedNumber(luckPendingForLine.bonus)})` : ""}</button>`);
+    extraControls.push(`<button type="button" class="hp-btn tracker-luck-burn-btn" title="Burn Luck (DCC RPG core rulebook) - after rolling this attack, permanently spend Luck to boost the result you got.">🍀 Burn Luck</button>`);
   }
 
   return `
@@ -12433,14 +12417,13 @@ function spellTrackerLineHtml(item, stats, line) {
   // alone (any valid Spell Check, Cleric included), not check.abilityId.
   // Shares the same .tracker-luck-burn-btn class/click-wiring as a weapon
   // line - see attachTrackerRowListeners, which doesn't distinguish
-  // between the two.
-  const luckPendingForLine = (atk.luckBurnPending && atk.luckBurnPending[line.slotKey]) || null;
-  const luckBurnTitle = luckPendingForLine && luckPendingForLine.bonus
-    ? `Burn Luck (DCC RPG core rulebook) - ${formatSignedNumber(luckPendingForLine.bonus)} pending for this roll (${luckPendingForLine.detail}). Click to burn more, or roll to apply and clear it.`
-    : "Burn Luck (DCC RPG core rulebook) - permanently spend Luck for a one-time bonus to this Spell Check.";
+  // between the two. Only ever adjusts a roll already made (see
+  // openLuckBurnModal's own comment) - clicking with nothing rolled yet
+  // just tells the player to roll first, so this button's label/title
+  // stay static.
   const luckBurnHtml = check
     ? `<div class="attack-detail-luck-burn-row">
-        <button class="hp-btn tracker-luck-burn-btn" title="${escapeHtml(luckBurnTitle)}">🍀 Burn Luck${luckPendingForLine && luckPendingForLine.bonus ? ` (${formatSignedNumber(luckPendingForLine.bonus)})` : ""}</button>
+        <button class="hp-btn tracker-luck-burn-btn" title="Burn Luck (DCC RPG core rulebook) - after rolling this Spell Check, permanently spend Luck to boost the result you got.">🍀 Burn Luck</button>
       </div>`
     : "";
   return `
@@ -12742,14 +12725,6 @@ async function rollAttackFor(itemId, attackId, slotKey) {
   // rather than the row's last-saved default.
   const atkForDie = { ...atk, actionDieIndex: effectiveSlotKey };
 
-  // Burning Luck (DCC RPG core rulebook) - already permanently spent live
-  // the moment each "-1" was clicked (openLuckBurnModal/applyLuckBurnPointForStats);
-  // all that's left here is applying the accumulated bonus to this roll
-  // and clearing the declaration afterward, same shape as Spellburn's own
-  // pendingPoints handling elsewhere in this app.
-  const luckPending = (atk.luckBurnPending && atk.luckBurnPending[effectiveSlotKey]) || null;
-  const luckBonus = luckPending ? luckPending.bonus : 0;
-
   const atkMod = parseModifier(atk.bonus);
   // Table 1-9's Backstab bonus (a flat to-hit bonus, no ability modifier -
   // see backstabAttackBonusForStats) applies to THIS roll only when the
@@ -12799,6 +12774,11 @@ async function rollAttackFor(itemId, attackId, slotKey) {
   // hand-typed (same "the field is what it is" trust the ability modifier
   // and class Attack bonus already got before this).
   let text, label;
+  // Burning Luck (DCC RPG core rulebook) - set below only on a genuine
+  // hit-or-miss-but-not-fumble result (see setLuckLastRollForStats' own
+  // call site further down); a natural 1 never gets cached at all, since
+  // Luck has no power to override an automatic miss.
+  let luckCacheTotal = null;
 
   if (isFumble) {
     // Automatic miss - no damage is rolled at all, just the Fumble Die.
@@ -12812,18 +12792,18 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     // atk.poisoned is a persistent per-weapon flag (see attackRowHtml's
     // poisonedToggleHtml), independent of the Fumble Die/table above.
     const poisonNote = atk.poisoned ? " ☠️ The poisoned blade turns on its wielder too - you're poisoned!" : "";
-    // A natural 1 is an automatic miss regardless of modifiers - any Luck
-    // already burned toward this roll doesn't change that, and it's spent
-    // permanently either way (see openLuckBurnModal's own comment), so
-    // this just notes the loss rather than applying the bonus anywhere.
-    const luckWastedNote = luckPending ? ` 🍀 ${formatModifier(luckPending.bonus)} Luck (${luckPending.detail}) was burned toward this roll but wasted - a natural 1 is always an automatic miss.` : "";
-    text = `${atk.name || "Attack"}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${wasForced ? " (GM-forced)" : ""} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}).${untrainedNote} ${rowText}${poisonNote}${luckWastedNote}`;
+    // A natural 1 is an automatic miss regardless of modifiers, and DCC
+    // RAW gives Luck no power to override that - so this roll never gets
+    // cached for a later Burn Luck adjustment at all (see setLuckLastRollForStats
+    // below, skipped entirely on this branch); the button just tells the
+    // player to roll again if clicked right after a fumble.
+    text = `${atk.name || "Attack"}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${wasForced ? " (GM-forced)" : ""} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}).${untrainedNote} ${rowText}${poisonNote}`;
     label = "💀 FUMBLE! Natural 1 — automatic miss";
   } else {
     // Fresh Deed Die roll for THIS attack - see rollDeedDieForStats (no
     // longer shared/cached across other attacks the same round).
     const deed = rollDeedDieForStats(stats);
-    const toHit = d20Roll + atkMod + backstabBonus + luckBonus + (deed ? deed.total : 0);
+    const toHit = d20Roll + atkMod + backstabBonus + (deed ? deed.total : 0);
     // A Backstab declared on this specific slot (Combat Tracker, Thief
     // only) swaps in the weapon's sneak-attack die for THIS roll instead
     // of the row's normal stored Damage text - computed fresh here rather
@@ -12889,8 +12869,7 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     }
 
     const backstabModText = backstabActive && backstabBonus ? `${formatModifier(backstabBonus)}(backstab)` : "";
-    const luckModText = luckPending ? `${formatModifier(luckPending.bonus)}(luck)` : "";
-    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${atkSides} ${d20Roll}${wasForced ? " forced" : ""}${formatModifier(atkMod)}${deedText}${backstabModText}${luckModText})${untrainedNote}`;
+    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${atkSides} ${d20Roll}${wasForced ? " forced" : ""}${formatModifier(atkMod)}${deedText}${backstabModText})${untrainedNote}`;
     const dmgText = dmg !== null
       ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${isCrit ? " +crit" : ""})`
       : "";
@@ -12898,6 +12877,7 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     label = isCrit
       ? `💥 CRITICAL HIT! ${toHit} to hit${dmg !== null ? `, ${dmgTotal} dmg` : ""}`
       : (dmg !== null ? `${toHit} to hit, ${dmgTotal} dmg` : `${toHit} to hit`);
+    luckCacheTotal = toHit;
   }
 
   // A Backstab is a one-shot sneak attack, not a standing bonus - once
@@ -12910,11 +12890,13 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     await applyTrackerLineFieldUpdate(itemId, attackId, effectiveSlotKey, "backstabActive", false);
   }
 
-  // Burning Luck is a one-shot declaration toward THIS roll, same as
-  // Spellburn's own pendingPoints - clear it now that it's been applied
-  // (or wasted on a fumble), regardless of hit/miss/crit.
-  if (luckPending) {
-    await clearLuckBurnPendingForStats(itemId, attackId, effectiveSlotKey);
+  // Burning Luck (DCC RPG core rulebook) - cache this roll's to-hit total
+  // so a follow-up Burn Luck click can retroactively boost it (see
+  // openLuckBurnModal's own comment on the after-the-roll design). Never
+  // set on a fumble (luckCacheTotal stays null - see its own declaration
+  // above).
+  if (luckCacheTotal !== null) {
+    await setLuckLastRollForStats(itemId, attackId, effectiveSlotKey, luckCacheTotal, atk.name || "Attack");
   }
 
   // This attack's Action Die has now been spent this round - hide this
@@ -13035,19 +13017,19 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
   // persisted-cleared once, after both hands are resolved below.
   const backstabRevertQueue = [];
   // Burning Luck (DCC RPG core rulebook) - each hand of a pair is its own
-  // attack object with its own luckBurnPending, so whichever row the
-  // player actually opened the popup from (see attachTrackerRowListeners'
-  // .tracker-luck-burn-btn) is where this naturally reads from - no extra
-  // bookkeeping needed to know which hand a burn belongs to. Queued here,
-  // same pattern as backstabRevertQueue, and cleared once after both hands
-  // are resolved (see below).
-  const luckClearQueue = [];
+  // attack object, so whichever row the player later opens the popup from
+  // (see attachTrackerRowListeners' .tracker-luck-burn-btn) naturally
+  // targets that hand's own cache - no extra bookkeeping needed to know
+  // which hand a later burn belongs to. Queued here (same pattern as
+  // backstabRevertQueue) whenever a hand actually resolves to a real
+  // to-hit total, written once after both hands are resolved (see below);
+  // a fumbled/plain-missed hand never gets queued at all, same "Luck
+  // can't override an automatic miss" reasoning single-weapon
+  // rollAttackFor's own luckCacheTotal follows.
+  const luckCacheQueue = [];
 
   function resolveHand(atk, roll, sides, isPrimary) {
     const lineState = getLineDeedState(atk, slotKey);
-    const luckPending = (atk.luckBurnPending && atk.luckBurnPending[slotKey]) || null;
-    const luckBonus = luckPending ? luckPending.bonus : 0;
-    if (luckPending) luckClearQueue.push(atk.id);
     // Same Backstab bonus/auto-crit override as single-weapon rollAttackFor
     // (see its comment). Each hand of a two-weapon pair has its OWN
     // lineDeeds (keyed by that hand's own attackId, not shared - see
@@ -13070,7 +13052,6 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     // since the rule is about the natural roll itself, not the fumble
     // determination - see rollAttackFor's own identical note.
     const poisonNote = (isFumble || isPlainMiss) && atk.poisoned ? " ☠️ The poisoned blade turns on its wielder too - you're poisoned!" : "";
-    const luckWastedNote = luckPending ? ` 🍀 ${formatModifier(luckPending.bonus)} Luck (${luckPending.detail}) was burned toward this hand but wasted - a natural 1 is always an automatic miss.` : "";
     if (isFumble) {
       anyFumble = true;
       const fumbleDie = fumbleDieForStats(stats);
@@ -13078,10 +13059,10 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
       const fumbleRow = fumbleRoll ? lookupTableRow(FUMBLE_TABLE, fumbleRoll.total) : null;
       if (fumbleRoll) rollDice.push(...fumbleRoll.dice);
       const rowText = fumbleRow ? fumbleRow.text : "";
-      return `${label}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${forcedNote} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}). ${rowText}${poisonNote}${luckWastedNote}`;
+      return `${label}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${forcedNote} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}). ${rowText}${poisonNote}`;
     }
     if (isPlainMiss) {
-      return `${label}: Natural 1${forcedNote} — miss (Halfling two-weapon fighting: a lone natural 1 doesn't fumble by itself).${poisonNote}${luckWastedNote}`;
+      return `${label}: Natural 1${forcedNote} — miss (Halfling two-weapon fighting: a lone natural 1 doesn't fumble by itself).${poisonNote}`;
     }
 
     // A Favorite Weapon's Luck modifier (checked per hand, since primary
@@ -13096,7 +13077,8 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     // though they're one action.
     const deed = rollDeedDieForStats(stats);
     if (deed) rollDice.push({ sides: deed.sides, value: deed.roll });
-    const toHit = roll + atkMod + backstabBonus + luckBonus + (deed ? deed.total : 0);
+    const toHit = roll + atkMod + backstabBonus + (deed ? deed.total : 0);
+    luckCacheQueue.push({ attackId: atk.id, total: toHit, label: atk.name || label });
     // Same on-the-fly Backstab swap as single-weapon rollAttackFor, per
     // hand - see its comment for why this never mutates atk.damage itself.
     const backstabNotation = backstabActive ? backstabDamageNotationForStats(stats, atk) : null;
@@ -13165,8 +13147,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     }
 
     const backstabModText = backstabActive && backstabBonus ? `${formatModifier(backstabBonus)}(backstab)` : "";
-    const luckModText = luckPending ? `${formatModifier(luckPending.bonus)}(luck)` : "";
-    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${sides} ${roll}${forcedNote}${formatModifier(atkMod)}${deedText}${backstabModText}${luckModText})${untrainedNote}`;
+    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${sides} ${roll}${forcedNote}${formatModifier(atkMod)}${deedText}${backstabModText})${untrainedNote}`;
     const dmgText = dmg !== null
       ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${critEligible ? " +crit" : ""})`
       : "";
@@ -13193,16 +13174,10 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
         : ` ☠️ ${poisonedWeapons[0].name || "Your"} poisoned blade also turns on its wielder - you're poisoned!`
       : "";
     // Neither hand goes through resolveHand on this branch (both natural
-    // 1s resolve as ONE shared Fumble Die instead), so any Luck already
-    // burned toward either hand has to be queued for clearing here too,
-    // same wasted-on-a-fumble reasoning resolveHand's own luckWastedNote
-    // follows - it's spent permanently regardless of the roll's outcome.
-    const luckWastedHands = [primaryAtk, offhandAtk].filter(a => a.luckBurnPending && a.luckBurnPending[slotKey]);
-    luckWastedHands.forEach(a => luckClearQueue.push(a.id));
-    const luckWastedNote = luckWastedHands.length
-      ? ` 🍀 Luck burned toward ${luckWastedHands.length > 1 ? "both hands" : (luckWastedHands[0] === primaryAtk ? "the primary hand" : "the off-hand")} was wasted - a natural 1 is always an automatic miss.`
-      : "";
-    fumbleNote = `${markFumbleAlert("💀 FUMBLE!")} Both hands rolled natural 1s${wasForced ? " (primary GM-forced)" : ""} — automatic miss with both weapons (Halfling two-weapon fighting; Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}). ${rowText}${poisonNote}${luckWastedNote}`;
+    // 1s resolve as ONE shared Fumble Die instead) - nothing gets queued
+    // in luckCacheQueue for either hand, same "Luck can't override an
+    // automatic miss" reasoning resolveHand's own fumble branch follows.
+    fumbleNote = `${markFumbleAlert("💀 FUMBLE!")} Both hands rolled natural 1s${wasForced ? " (primary GM-forced)" : ""} — automatic miss with both weapons (Halfling two-weapon fighting; Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}). ${rowText}${poisonNote}`;
     primaryText = `${primaryAtk.name || "Primary hand"}: natural 1`;
     offhandText = `${offhandAtk.name || "Off-hand"}: natural 1`;
   } else {
@@ -13223,11 +13198,11 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     await applyTrackerLineFieldUpdate(itemId, revertId, slotKey, "backstabActive", false);
   }
 
-  // Burning Luck is a one-shot declaration toward THIS roll, same as
-  // single-weapon rollAttackFor's own cleanup - clear whichever hand(s)
-  // actually had one pending, applied or wasted either way.
-  for (const luckAttackId of luckClearQueue) {
-    await clearLuckBurnPendingForStats(itemId, luckAttackId, slotKey);
+  // Burning Luck (DCC RPG core rulebook) - cache whichever hand(s) actually
+  // resolved to a real to-hit total, same reasoning single-weapon
+  // rollAttackFor's own luckCacheTotal follows.
+  for (const cached of luckCacheQueue) {
+    await setLuckLastRollForStats(itemId, cached.attackId, slotKey, cached.total, cached.label);
   }
 
   // This whole pair-at-this-Action-Die has now been used this round - both
@@ -13296,10 +13271,6 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
     showStatus(msg, true);
     return;
   }
-  // Burning Luck - see rollSpellAttackRow's own comment (Sheet-side
-  // sibling).
-  const luckPending = (atk.luckBurnPending && atk.luckBurnPending[slotKey]) || null;
-  const luckBonus = luckPending ? luckPending.bonus : 0;
   const label = (effectiveName || "").trim() || "Spell";
   // Regaining spells via Spellburn - same defense-in-depth guard as the
   // Sheet's own rollSpellAttackRow; see spellAttackRowHtml's comment for
@@ -13332,10 +13303,7 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   // Reversing Spells - see rollSpellAttackRow's own comment (Sheet-side
   // sibling).
   if (attemptReversed) note += ` 🔄 Reversing Spells: attempting this spell's reverse effect - Spell Check die reduced 1 step.`;
-  // Burning Luck - see rollSpellAttackRow's own comment (Sheet-side
-  // sibling) for why this always counts toward the total.
-  if (luckPending) note += ` 🍀 Burn Luck: ${formatSignedNumber(luckPending.bonus)} (${luckPending.detail}).`;
-  const total = rolled + check.modifier + critBonus + luckBonus;
+  const total = rolled + check.modifier + critBonus;
   // Lost (see isSpellLostForStats/setSpellLostForStats's own comment) -
   // same generic-failure-band default and Wizard/Elf-only gate as the
   // Sheet's own rollSpellAttackRow.
@@ -13359,13 +13327,17 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   // the round.
   await markActionSlotsUsed(itemId, [actionSlotKey(stats.mode, attackId, slotKey)]);
   if (burnPoints > 0) await clearSpellburnPendingForStats(itemId, attackId, slotKey);
-  if (luckPending) await clearLuckBurnPendingForStats(itemId, attackId, slotKey);
 
   const rollDuration = note ? 9000 : 6500;
   showTrackerStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
   showStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
   await appendChatLog({ kind: "spell", tokenName: item.name || "Token", text, gmOnly: isGmOnlyRoll(stats.mode, item) });
-  broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier + critBonus + luckBonus, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
+  broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier + critBonus, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
+  // Burning Luck (post-roll) - see rollSpellAttackRow's own comment
+  // (Sheet-side sibling) for why a natural 1 is never cached.
+  if (rolled !== 1) {
+    await setLuckLastRollForStats(itemId, attackId, slotKey, total, label);
+  }
 }
 
 // Tracker-side sibling of applySpellburnLive's single-point spend - same
@@ -13403,13 +13375,13 @@ async function applySpellburnPointForStats(itemId, attackId, slotKey, ability) {
 
 // Tracker-side sibling of applyLuckBurnLive - reduces Luck by `points` and
 // snapshots pc-luckMax's equivalent (data.luckMax) the same way, straight
-// in item.metadata. Deliberately does NOT touch any attack's pending-bonus
-// data the way applySpellburnPointForStats does above - unlike Spellburn
-// (always tied to a Cast-a-Spell row), Luck burn's pending bonus can live
-// on a weapon attack, a spell attack, a skill, or Initiative, so THAT part
-// is written separately by whichever target's own ctx.setPending
-// (openLuckBurnModal) is currently in play. Returns the new score, or null
-// if the write couldn't happen (no such PC, or Luck unparseable).
+// in item.metadata. Deliberately does NOT touch any target's own cached
+// last-roll data - unlike Spellburn (always tied to a Cast-a-Spell row),
+// a Burn Luck popup's accumulation can be adjusting a weapon attack, a
+// spell attack, a skill, or Initiative, so posting/clearing THAT is left
+// to whichever target's own ctx.applyAdjustment (openLuckBurnModal) is
+// currently in play - this just moves the score. Returns the new score,
+// or null if the write couldn't happen (no such PC, or Luck unparseable).
 async function applyLuckBurnPointForStats(itemId, points) {
   let newScore = null;
   await OBR.scene.items.updateItems([itemId], items => {
@@ -13450,38 +13422,16 @@ async function clearSpellburnPendingForStats(itemId, attackId, slotKey) {
   });
 }
 
-// Sibling of clearSpellburnPendingForStats, for a Burn Luck declaration
-// (atk.luckBurnPending) instead - shared by weapon AND spell attacks alike
-// (see emptyAttack/readAttacks' own comments), so this one function
-// covers both rollAttackFor and rollSpellAttackForTracker's post-roll
-// cleanup. Always operates via metadata (itemId), never a Sheet DOM
-// dataset, since rollAttackFor itself only ever reads an attack's saved
-// stats - see openLuckBurnModal's own comment on why the Sheet-side ctx
-// for weapon/spell rows still works correctly despite that (saveCurrent()
-// flushes the dataset into metadata before any roll fires).
-async function clearLuckBurnPendingForStats(itemId, attackId, slotKey) {
-  await OBR.scene.items.updateItems([itemId], items => {
-    items.forEach(item => {
-      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
-      if (mode !== "pc") return;
-      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
-      data.attacks = (data.attacks || []).map(a => {
-        if (a.id !== attackId || !a.luckBurnPending || !(slotKey in a.luckBurnPending)) return a;
-        const pending = { ...a.luckBurnPending };
-        delete pending[slotKey];
-        return { ...a, luckBurnPending: pending };
-      });
-      item.metadata[PC_METADATA_KEY] = data;
-    });
-  });
-}
-
-// Overwrites ONE attack/slot's whole Burn Luck pending object - the
-// Tracker-side half of the ctx.setPending pair openLuckBurnModal calls
-// (see its own comment); unlike applySpellburnPointForStats this does NOT
-// also touch the Luck score itself (that's applyLuckBurnPointForStats,
-// called separately) since the two are decoupled here on purpose.
-async function setLuckBurnPendingForStats(itemId, attackId, slotKey, pending) {
+// Caches ONE attack/slot's most recent roll (atk.luckLastRoll) - shared by
+// weapon AND spell attacks alike (see emptyAttack/readAttacks' own
+// comments), written by rollAttackFor/rollTwoWeaponAttack/
+// rollSpellAttackForTracker/rollSpellAttackRow right after computing an
+// ordinary (no-Luck) result, so a LATER Burn Luck click has something to
+// adjust (see openLuckBurnModal's own comment on the after-the-roll
+// design). Always operates via metadata (itemId) - see
+// attackOrSpellLuckBurnCtx's own comment for why this is used even for a
+// button rendered on the Sheet.
+async function setLuckLastRollForStats(itemId, attackId, slotKey, total, label) {
   await OBR.scene.items.updateItems([itemId], items => {
     items.forEach(item => {
       const mode = item.metadata[MODE_METADATA_KEY] || "monster";
@@ -13489,25 +13439,107 @@ async function setLuckBurnPendingForStats(itemId, attackId, slotKey, pending) {
       const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
       data.attacks = (data.attacks || []).map(a => {
         if (a.id !== attackId) return a;
-        const byslot = { ...(a.luckBurnPending || {}) };
-        byslot[slotKey] = pending;
-        return { ...a, luckBurnPending: byslot };
+        const byslot = { ...(a.luckLastRoll || {}) };
+        byslot[slotKey] = { total, label };
+        return { ...a, luckLastRoll: byslot };
       });
       item.metadata[PC_METADATA_KEY] = data;
     });
   });
 }
 
-// Sibling of setLuckBurnPendingForStats, for Initiative's own top-level
-// pending value instead of a per-attack one - see initiativeLuckBurnLineHtml's
-// own comment on why Initiative needs this separate, simpler field.
-async function setInitiativeLuckBurnPendingForStats(itemId, pending) {
+// Clears ONE attack/slot's cached last roll - called once a Burn Luck
+// adjustment has actually been posted for it (see
+// attackOrSpellLuckBurnCtx), so a second burn without a fresh roll
+// correctly refuses instead of silently stacking onto an already-adjusted
+// total.
+async function clearLuckLastRollForStats(itemId, attackId, slotKey) {
   await OBR.scene.items.updateItems([itemId], items => {
     items.forEach(item => {
       const mode = item.metadata[MODE_METADATA_KEY] || "monster";
       if (mode !== "pc") return;
       const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
-      data.initLuckBurnPending = pending || null;
+      data.attacks = (data.attacks || []).map(a => {
+        if (a.id !== attackId || !a.luckLastRoll || !(slotKey in a.luckLastRoll)) return a;
+        const byslot = { ...a.luckLastRoll };
+        delete byslot[slotKey];
+        return { ...a, luckLastRoll: byslot };
+      });
+      item.metadata[PC_METADATA_KEY] = data;
+    });
+  });
+}
+
+// Posts a Burn Luck adjustment note to both status areas and the chat
+// log - shared by every roll type's own ctx.applyAdjustment closure
+// (openLuckBurnModal), so the wording/formatting stays identical
+// everywhere. Not a new physical die roll, so unlike an ordinary roll
+// result this never calls broadcastDiceRoll (no tumble animation for
+// pure arithmetic).
+function postLuckAdjustmentNote({ rollerName, kind, gmOnly, label, bonus, detail, oldTotal, newTotal }) {
+  const text = `🍀 Burn Luck: ${label} ${oldTotal} → ${markRollTotal(String(newTotal))} (${formatSignedNumber(bonus)}, ${detail}).`;
+  showTrackerStatus(text, false, 6000);
+  showStatus(text, false, 6000);
+  appendChatLog({ kind, tokenName: rollerName, text, gmOnly });
+}
+
+// Builds the ctx openLuckBurnModal needs for a weapon OR spell attack's
+// Burn Luck button, on EITHER the Sheet or the Tracker - always
+// metadata-based (kind: "tracker" in the modal's own sense) regardless of
+// which tab the button lives on, since rollAttackFor/rollSpellAttackRow/
+// rollSpellAttackForTracker/rollTwoWeaponAttack all write luckLastRoll
+// straight into the token's own saved attacks array (see
+// setLuckLastRollForStats above) - there's no separate Sheet-DOM copy to
+// keep in sync, and the Sheet's own roll button already flushes any
+// unsaved edits via saveCurrent() before rolling, so metadata is always
+// current by the time there's anything to adjust. No label is needed here
+// at all - getLastRoll()'s own cached {total, label} already carries the
+// weapon/spell name AS OF THAT ROLL, which the modal passes straight
+// through to applyAdjustment on Confirm. `chatKind` is "attack" or
+// "spell", matching appendChatLog's own kind values.
+function attackOrSpellLuckBurnCtx(itemId, attackId, slotKey, chatKind) {
+  return {
+    kind: "tracker",
+    itemId,
+    getLastRoll: async () => {
+      const [item] = await OBR.scene.items.getItems([itemId]);
+      if (!item) return null;
+      const atk = getStatsForItem(item).attacks.find(a => a.id === attackId);
+      return (atk && atk.luckLastRoll && atk.luckLastRoll[slotKey]) || null;
+    },
+    applyAdjustment: async (bonus, detail, newTotal, oldTotal, label) => {
+      const [item] = await OBR.scene.items.getItems([itemId]);
+      await clearLuckLastRollForStats(itemId, attackId, slotKey);
+      const rollerName = item ? (item.name || "Token") : "Token";
+      const gmOnly = item ? isGmOnlyRoll(getStatsForItem(item).mode, item) : false;
+      postLuckAdjustmentNote({ rollerName, kind: chatKind, gmOnly, label: label || "this roll", bonus, detail, oldTotal, newTotal });
+    },
+  };
+}
+
+// Sibling of setLuckLastRollForStats, for Initiative's own top-level
+// cached-last-roll value instead of a per-attack one - see
+// initiativeLuckBurnLineHtml's own comment on why Initiative needs this
+// separate, simpler field.
+async function setInitiativeLuckLastRollForStats(itemId, total, label) {
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      if (mode !== "pc") return;
+      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+      data.initLuckLastRoll = { total, label };
+      item.metadata[PC_METADATA_KEY] = data;
+    });
+  });
+}
+
+async function clearInitiativeLuckLastRollForStats(itemId) {
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      if (mode !== "pc") return;
+      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+      data.initLuckLastRoll = null;
       item.metadata[PC_METADATA_KEY] = data;
     });
   });
@@ -13710,21 +13742,27 @@ function attachTrackerRowListeners() {
       // Initiative Luck burn (see initiativeLuckBurnLineHtml) - same
       // "standing, not tied to a specific attack/slot" shape as
       // Concentration Save just above, so it gets the same early-return
-      // treatment. Targets a top-level pending field (data.initLuckBurnPending),
-      // not any attack's own luckBurnPending.
+      // treatment. Targets a top-level cached field (data.initLuckLastRoll),
+      // not any attack's own luckLastRoll.
       const initLuckBtn = wrap.querySelector(".init-luck-burn-btn");
       if (initLuckBtn) {
         initLuckBtn.addEventListener("click", () => {
           openLuckBurnModal({
             kind: "tracker",
             itemId: parentId,
-            label: "this token's next Initiative roll",
-            getPending: async () => {
+            label: "Initiative",
+            getLastRoll: async () => {
               const [pendingItem] = await OBR.scene.items.getItems([parentId]);
               if (!pendingItem) return null;
-              return getStatsForItem(pendingItem).data.initLuckBurnPending || null;
+              return getStatsForItem(pendingItem).data.initLuckLastRoll || null;
             },
-            setPending: pending => setInitiativeLuckBurnPendingForStats(parentId, pending),
+            applyAdjustment: async (bonus, detail, newTotal, oldTotal, label) => {
+              const [pendingItem] = await OBR.scene.items.getItems([parentId]);
+              await clearInitiativeLuckLastRollForStats(parentId);
+              const rollerName = pendingItem ? (pendingItem.name || "Token") : "Token";
+              const gmOnly = pendingItem ? isGmOnlyRoll(getStatsForItem(pendingItem).mode, pendingItem) : false;
+              postLuckAdjustmentNote({ rollerName, kind: "initiative", gmOnly, label: label || "Initiative", bonus, detail, oldTotal, newTotal });
+            },
           });
         });
         return;
@@ -13809,18 +13847,8 @@ function attachTrackerRowListeners() {
       if (luckBurnBtn) {
         luckBurnBtn.addEventListener("click", () => {
           const luckSlotKey = slotKey || "0";
-          openLuckBurnModal({
-            kind: "tracker",
-            itemId: parentId,
-            label: "this roll",
-            getPending: async () => {
-              const [pendingItem] = await OBR.scene.items.getItems([parentId]);
-              if (!pendingItem) return null;
-              const pendingAtk = getStatsForItem(pendingItem).attacks.find(a => a.id === attackId);
-              return (pendingAtk && pendingAtk.luckBurnPending && pendingAtk.luckBurnPending[luckSlotKey]) || null;
-            },
-            setPending: pending => setLuckBurnPendingForStats(parentId, attackId, luckSlotKey, pending),
-          });
+          const chatKind = wrap.querySelector(".tracker-spell-select") ? "spell" : "attack";
+          openLuckBurnModal(attackOrSpellLuckBurnCtx(parentId, attackId, luckSlotKey, chatKind));
         });
       }
       // Ammo lives on the attack itself (not per-slot like lineDeeds - a
@@ -14522,43 +14550,36 @@ async function rollInitiativeFor(id) {
   const mod = parseModifier(stats.initBonus);
   const hasTwoHanded = stats.mode === "pc" && stats.attacks.some(a => a.equipped && dccWeaponEntry(a.weapon).twoHanded);
   const initDie = hasTwoHanded ? 16 : 20;
-  // Burning Luck - see initiativeLuckBurnLineHtml's own comment. PC-only,
-  // same gate as the button itself.
-  const luckPending = stats.mode === "pc" ? (stats.data.initLuckBurnPending || null) : null;
-  const luckBonus = luckPending ? luckPending.bonus : 0;
   const dieValue = Math.floor(Math.random() * initDie) + 1;
-  const roll = dieValue + mod + luckBonus;
+  const roll = dieValue + mod;
   await OBR.scene.items.updateItems([id], items => {
     items.forEach(it => {
       const combat = it.metadata[COMBAT_METADATA_KEY] || {};
       it.metadata[COMBAT_METADATA_KEY] = { ...combat, initiative: roll };
-      // One-shot declaration toward THIS roll - clear it now that it's
-      // been applied, same atomic write as the initiative itself so there's
-      // no separate round-trip.
-      if (luckPending) {
-        const data = { ...(it.metadata[PC_METADATA_KEY] || defaultData("pc")) };
-        data.initLuckBurnPending = null;
-        it.metadata[PC_METADATA_KEY] = data;
-      }
     });
   });
   await refreshTracker();
-  const luckNote = luckPending ? ` 🍀 Burn Luck: ${formatSignedNumber(luckPending.bonus)} (${luckPending.detail}).` : "";
   await appendChatLog({
     kind: "initiative",
     tokenName: item.name || "Token",
     mode: stats.mode,
-    text: `Initiative: ${markRollTotal(String(roll))}${mod ? ` (d${initDie} ${mod >= 0 ? "+" : ""}${mod})` : ` (d${initDie})`}${luckNote}`,
+    text: `Initiative: ${markRollTotal(String(roll))}${mod ? ` (d${initDie} ${mod >= 0 ? "+" : ""}${mod})` : ` (d${initDie})`}`,
     gmOnly: isGmOnlyRoll(stats.mode, item),
   });
   broadcastDiceRoll({
     rollerName: item.name || "Token",
     dice: [{ sides: initDie, value: dieValue }],
-    modifier: mod + luckBonus,
+    modifier: mod,
     notation: `d${initDie}`,
     total: roll,
     label: `Initiative ${roll}`,
   });
+  // Burning Luck (post-roll, PC-only - see initiativeLuckBurnLineHtml's own
+  // comment) - Initiative has no "fails regardless of total" rule the way
+  // a weapon fumble/Spell Check natural 1 does, so this always caches.
+  if (stats.mode === "pc") {
+    await setInitiativeLuckLastRollForStats(id, roll, "Initiative");
+  }
 }
 
 async function refreshTracker() {
