@@ -1435,7 +1435,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 15:41</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 16:01</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -3216,6 +3216,47 @@ const ACTION_DICE_TABLE = {
 // shield is actually equipped, so a Judge should rule it unavailable if
 // the character isn't carrying one.
 const DWARF_SHIELD_BASH_SIDES = 14;
+
+// Table 1-12's own Known Spells / Max Spell Level columns (DCC RPG core
+// rulebook) - independently supplied by the user from their own copy of
+// the table, same "not in the free Reference Booklet" situation as
+// Mercurial Magic/DCC_CLASS_TITLES. Wizard-only: Elves share the same
+// Intelligence-based Spell Check (pcCasterAbilityId) but progress off a
+// separate Table 1-16 this app has no data for yet, so
+// wizardSpellsKnownAllotment gates on Class === "Wizard" specifically
+// rather than the broader int-ability caster check every other spell
+// helper here uses.
+const WIZARD_SPELLS_KNOWN_TABLE = {
+  1: { known: 4, maxLevel: 1 },
+  2: { known: 5, maxLevel: 1 },
+  3: { known: 6, maxLevel: 2 },
+  4: { known: 7, maxLevel: 2 },
+  5: { known: 8, maxLevel: 3 },
+  6: { known: 9, maxLevel: 3 },
+  7: { known: 10, maxLevel: 4 },
+  8: { known: 12, maxLevel: 4 },
+  9: { known: 14, maxLevel: 5 },
+  10: { known: 16, maxLevel: 5 },
+};
+
+// This Wizard's actual Known Spells allotment and Max Spell Level for a
+// given level - Known Spells is Table 1-12's base number for this level
+// PLUS the Intelligence modifier (a flat add, no separate bonus-spells
+// table - confirmed against the user's own Core Rulebook), clamped to a
+// floor of 0 only as a defensive backstop for a homebrew low-Int wizard;
+// DCC RAW itself never produces a negative total here (Int 3's -3 modifier
+// still leaves 1st level's base 4 known positive). `intMod` is passed in
+// pre-computed (abilityModifierFromField/abilityModifierFromRaw) rather
+// than a raw score, so this same function serves both the live Sheet and
+// a token's saved stats without needing two near-identical copies.
+function wizardSpellsKnownAllotment(cls, levelRaw, intMod) {
+  if (cls !== "Wizard") return null;
+  const level = parseLevelNumber(levelRaw);
+  if (level === null || level < 1) return null;
+  const row = WIZARD_SPELLS_KNOWN_TABLE[Math.min(10, level)];
+  if (!row) return null;
+  return { known: Math.max(0, row.known + intMod), maxLevel: row.maxLevel };
+}
 
 // Looks up this PC's class/level row in ACTION_DICE_TABLE, clamped to the
 // table's 1-10 range same as classLevelEntryFor. Falls back to a single
@@ -8319,18 +8360,31 @@ function recalcPcSpellSection() {
 // Small "(N)" badge on the Open Spells button - N is how many known
 // spells actually have a name picked (a still-blank row doesn't count).
 // Non-casters (no known-spells list at all, just the free-text notes
-// field) show no count - there's nothing structured to tally.
+// field) show no count - there's nothing structured to tally. A Wizard
+// specifically shows "(N/allotted)" instead, plus a title breakdown citing
+// Table 1-12 - see wizardSpellsKnownAllotment. Elf/Cleric have no such
+// table on file, so they keep the plain "(N)" every caster used to show.
 function updateOpenSpellsCount() {
   const countEl = document.getElementById("open-spells-count");
   if (!countEl) return;
   const classEl = document.getElementById("pc-class");
-  const abilityId = pcCasterAbilityId(classEl ? classEl.value : "");
+  const cls = classEl ? classEl.value : "";
+  const abilityId = pcCasterAbilityId(cls);
   if (!abilityId) {
     countEl.textContent = "";
+    countEl.title = "";
     return;
   }
   const known = readSpellItems().filter(s => s.name && s.name.trim()).length;
-  countEl.textContent = known ? ` (${known})` : "";
+  const levelEl = document.getElementById("pc-level");
+  const allotment = wizardSpellsKnownAllotment(cls, levelEl ? levelEl.value : "", abilityModifierFromField("pc-int"));
+  if (allotment) {
+    countEl.textContent = ` (${known}/${allotment.known})`;
+    countEl.title = `Known Spells (Table 1-12: Wizard) - ${allotment.known} allowed at this Level + Intelligence modifier (${known} currently picked below). Max Spell Level you're eligible for: ${allotment.maxLevel}.`;
+  } else {
+    countEl.textContent = known ? ` (${known})` : "";
+    countEl.title = "";
+  }
 }
 
 function openSpellsModal() {
