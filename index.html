@@ -825,6 +825,17 @@
   .spellburn-modal-total-row { display: flex; align-items: center; gap: 8px; padding: 8px 0 2px; margin-top: 4px; border-top: 1px solid var(--border); font-weight: 700; }
   .spellburn-modal-total-row .spellburn-modal-label { color: var(--text); }
   .spellburn-modal-total { flex: none; color: var(--accent); font-size: 15px; font-variant-numeric: tabular-nums; }
+  /* "Still needed" counters (Regaining a Lost spell / forcing an auto-
+     success) - smaller and lighter-weight than the Points Spent total
+     above, since they're a secondary at-a-glance readout, not the main
+     number. The Lost-spell one is red (same #c97b7b every isError status
+     line in this app already uses) since it's a hard requirement blocking
+     the roll; the auto-succeed one is muted since spending 20 is optional. */
+  .spellburn-modal-needed-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 12px; }
+  .spellburn-modal-needed { flex: none; font-variant-numeric: tabular-nums; font-weight: 700; }
+  .spellburn-modal-needed-lost { color: #c97b7b; }
+  .spellburn-modal-needed-lost.met { color: var(--good); }
+  .spellburn-modal-needed-autonat { color: var(--muted); }
   .spellburn-modal-flavor-row { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(69, 57, 46, 0.5); }
   .spellburn-modal-flavor-btn { flex: none; width: auto; height: auto; padding: 4px 8px; font-size: 11px; white-space: nowrap; }
   .spellburn-modal-flavor-text { flex: 1; font-size: 11px; color: var(--muted); line-height: 1.4; padding-top: 4px; }
@@ -1435,7 +1446,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 16:01</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 16:13</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2033,6 +2044,14 @@
         <div class="spellburn-modal-total-row">
           <span class="spellburn-modal-label">Points spent this cast</span>
           <span class="spellburn-modal-total" id="spellburn-modal-total">0</span>
+        </div>
+        <div class="spellburn-modal-needed-row" id="spellburn-modal-lost-row" style="display:none">
+          <span class="spellburn-modal-label">Still needed to cast this Lost spell</span>
+          <span class="spellburn-modal-needed spellburn-modal-needed-lost" id="spellburn-modal-lost-needed">0</span>
+        </div>
+        <div class="spellburn-modal-needed-row" id="spellburn-modal-autonat-row">
+          <span class="spellburn-modal-label">Still needed to auto-succeed (natural 20)</span>
+          <span class="spellburn-modal-needed spellburn-modal-needed-autonat" id="spellburn-modal-autonat-needed">20</span>
         </div>
         <div class="spellburn-modal-actions">
           <button type="button" class="spellburn-modal-cancel-btn" id="spellburn-modal-cancel" title="Undo every point spent since opening this popup, and close">Cancel</button>
@@ -6332,6 +6351,14 @@ async function refreshSpellburnModal() {
   if (!ctx) return;
   const scores = {};
   let pendingPoints = 0;
+  // Regaining a Lost spell / forcing an auto-success both need to know
+  // WHICH spell this declaration is for and whether it's currently Lost -
+  // resolved per-kind exactly like rollSpellAttackRow/rollSpellAttackForTracker
+  // resolve the same thing for the actual roll, so the two "still needed"
+  // counters below never drift from what a roll right now would require.
+  let spellName = "";
+  let isLost = false;
+  let requiredLevel = null;
   if (ctx.kind === "sheet") {
     SPELLBURN_ABILITIES.forEach(ability => {
       const el = document.getElementById(`pc-${ability}`);
@@ -6340,6 +6367,10 @@ async function refreshSpellburnModal() {
     let pending = {};
     try { pending = JSON.parse(ctx.row.dataset.spellburnPending || "{}"); } catch (e) { pending = {}; }
     pendingPoints = pending[ctx.slotKey] || 0;
+    const selectEl = ctx.row.querySelector(".spell-attack-select");
+    spellName = selectEl ? selectEl.value.trim() : "";
+    isLost = isSpellLost(spellName);
+    if (isLost) requiredLevel = spellLevelForName(spellName);
   } else {
     const [item] = await OBR.scene.items.getItems([ctx.itemId]);
     if (!item || spellburnModalCtx !== ctx) return; // popup closed/retargeted while this was in flight
@@ -6347,6 +6378,9 @@ async function refreshSpellburnModal() {
     SPELLBURN_ABILITIES.forEach(ability => { scores[ability] = parseAbilityScore(stats.data[ability]); });
     const atk = stats.attacks.find(a => a.id === ctx.attackId);
     pendingPoints = (atk && atk.spellburnPending && atk.spellburnPending[ctx.slotKey]) || 0;
+    spellName = ((atk && atk.spellBySlot && atk.spellBySlot[ctx.slotKey]) || (atk && atk.name) || "").trim();
+    isLost = isSpellLostForStats(stats, spellName);
+    if (isLost) requiredLevel = spellLevelForNameForStats(stats, spellName);
   }
   if (!spellburnModalSnapshot) spellburnModalSnapshot = { scores: { ...scores }, pendingPoints };
   SPELLBURN_ABILITIES.forEach(ability => {
@@ -6355,6 +6389,32 @@ async function refreshSpellburnModal() {
       score === null || score === undefined ? "—" : `${score} (${formatSignedNumber(dccAbilityModifier(score))})`;
   });
   document.getElementById("spellburn-modal-total").textContent = String(pendingPoints);
+  // Regaining spells via Spellburn (DCC RPG core rulebook) - only shown
+  // when the target spell is actually Lost right now (see
+  // spellAttackRowHtml's own comment on the rule itself); the level
+  // requirement is looked up fresh, same "never trust a stale value"
+  // contract every other spell-level lookup here follows.
+  const lostRow = document.getElementById("spellburn-modal-lost-row");
+  const lostNeededEl = document.getElementById("spellburn-modal-lost-needed");
+  if (isLost) {
+    lostRow.style.display = "";
+    if (requiredLevel === null) {
+      lostNeededEl.textContent = "—";
+      lostNeededEl.title = "Fill in this spell's Level (Spells section) to see how many points are needed.";
+      lostNeededEl.classList.remove("met");
+    } else {
+      const needed = Math.max(0, requiredLevel - pendingPoints);
+      lostNeededEl.textContent = String(needed);
+      lostNeededEl.title = `${requiredLevel} point${requiredLevel === 1 ? "" : "s"} total needed (this spell's own Level) to cast it despite being Lost.`;
+      lostNeededEl.classList.toggle("met", needed === 0);
+    }
+  } else {
+    lostRow.style.display = "none";
+  }
+  // Spending 20 points in one declaration auto-succeeds as a natural 20
+  // (see rollSpellAttackRow/rollSpellAttackForTracker's own autoNat) -
+  // always relevant once the popup's open, independent of Lost.
+  document.getElementById("spellburn-modal-autonat-needed").textContent = String(Math.max(0, 20 - pendingPoints));
 }
 
 // One "-" click = spend exactly 1 point from that ability: lowers the
@@ -11269,7 +11329,13 @@ function deriveTrackerLines(item, stats) {
       // spellTrackerLineHtml) would show the wrong spell's adjustment once
       // two lines are casting two different known spells.
       const mercurial = mercurialAdjustmentForSpellStats(stats, effectiveName);
-      const dieSides = mercurial && mercurial.dieSteps ? stepDiceChain(profile.sides, mercurial.dieSteps) : profile.sides;
+      const mercurialSides = mercurial && mercurial.dieSteps ? stepDiceChain(profile.sides, mercurial.dieSteps) : profile.sides;
+      // Reversing Spells (DCC RPG core rulebook) - same per-line resolution
+      // reasoning as Mercurial Magic just above: this line's own declared
+      // Cast Reversed toggle (atk.castReversedBySlot[opt.value]), not some
+      // other line's, has to drive its own badge.
+      const attemptReversed = !!(atk.castReversedBySlot && atk.castReversedBySlot[opt.value]);
+      const dieSides = attemptReversed ? stepDiceChain(mercurialSides, -1) : mercurialSides;
       lines.push({
         atk: lineAtk, attackId: atk.id, slotKey: opt.value, isTw: false, isSpell: true,
         label: `🔮 ${opt.label.replace(/\s*\(d\d+\)$/, "")}`,
@@ -11281,7 +11347,10 @@ function deriveTrackerLines(item, stats) {
       const slotKey = actDieOptions.some(o => o.value === atk.actionDieIndex) ? atk.actionDieIndex : "0";
       const profile = actionDieProfileForAttack(stats, { actionDieIndex: slotKey });
       const mercurial = mercurialAdjustmentForSpellStats(stats, atk.name);
-      const dieSides = mercurial && mercurial.dieSteps ? stepDiceChain(profile.sides, mercurial.dieSteps) : profile.sides;
+      const mercurialSides = mercurial && mercurial.dieSteps ? stepDiceChain(profile.sides, mercurial.dieSteps) : profile.sides;
+      // Reversing Spells - see the expanded branch's own comment above.
+      const attemptReversed = !!(atk.castReversedBySlot && atk.castReversedBySlot[slotKey]);
+      const dieSides = attemptReversed ? stepDiceChain(mercurialSides, -1) : mercurialSides;
       lines.push({ atk, attackId: atk.id, slotKey, isTw: false, isSpell: true, label: "🔮 Cast a Spell", dieSides });
     });
   }
