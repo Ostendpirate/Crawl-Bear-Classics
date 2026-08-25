@@ -833,8 +833,14 @@
      the roll; the auto-succeed one is muted since spending 20 is optional. */
   .spellburn-modal-needed-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 12px; }
   .spellburn-modal-needed { flex: none; font-variant-numeric: tabular-nums; font-weight: 700; }
-  .spellburn-modal-needed-lost { color: #c97b7b; }
-  .spellburn-modal-needed-lost.met { color: var(--good); }
+  /* Whole row (label AND number) goes red while points are still needed -
+     "met" (toggled on the row itself once the requirement is satisfied)
+     flips both to green instead, same red/green duality every other
+     isError-style status in this app already uses. */
+  #spellburn-modal-lost-row .spellburn-modal-label,
+  #spellburn-modal-lost-row .spellburn-modal-needed { color: #c97b7b; }
+  #spellburn-modal-lost-row.met .spellburn-modal-label,
+  #spellburn-modal-lost-row.met .spellburn-modal-needed { color: var(--good); }
   .spellburn-modal-needed-autonat { color: var(--muted); }
   .spellburn-modal-flavor-row { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(69, 57, 46, 0.5); }
   .spellburn-modal-flavor-btn { flex: none; width: auto; height: auto; padding: 4px 8px; font-size: 11px; white-space: nowrap; }
@@ -1446,7 +1452,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 16:13</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 17:00</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2047,7 +2053,7 @@
         </div>
         <div class="spellburn-modal-needed-row" id="spellburn-modal-lost-row" style="display:none">
           <span class="spellburn-modal-label">Still needed to cast this Lost spell</span>
-          <span class="spellburn-modal-needed spellburn-modal-needed-lost" id="spellburn-modal-lost-needed">0</span>
+          <span class="spellburn-modal-needed" id="spellburn-modal-lost-needed">0</span>
         </div>
         <div class="spellburn-modal-needed-row" id="spellburn-modal-autonat-row">
           <span class="spellburn-modal-label">Still needed to auto-succeed (natural 20)</span>
@@ -6401,12 +6407,12 @@ async function refreshSpellburnModal() {
     if (requiredLevel === null) {
       lostNeededEl.textContent = "—";
       lostNeededEl.title = "Fill in this spell's Level (Spells section) to see how many points are needed.";
-      lostNeededEl.classList.remove("met");
+      lostRow.classList.remove("met");
     } else {
       const needed = Math.max(0, requiredLevel - pendingPoints);
       lostNeededEl.textContent = String(needed);
       lostNeededEl.title = `${requiredLevel} point${requiredLevel === 1 ? "" : "s"} total needed (this spell's own Level) to cast it despite being Lost.`;
-      lostNeededEl.classList.toggle("met", needed === 0);
+      lostRow.classList.toggle("met", needed === 0);
     }
   } else {
     lostRow.style.display = "none";
@@ -7326,8 +7332,13 @@ const SPELL_CUSTOM_KEY = "__custom_spell__";
 // spellSelectOptionsHtml (the Attacks-row spell picker) already uses.
 // `extraKnownNames` (e.g. patron spell names, which live outside
 // `spellList`) still count toward "is this actually known," so they
-// don't get misidentified as a stale/fallen-off pick.
-function dccSpellOptionsHtml(spellList, selectedValue, { extraKnownNames = [], extraGroupsHtml = "" } = {}) {
+// don't get misidentified as a stale/fallen-off pick. `maxLevel`
+// (Table 1-12: Wizard, see wizardSpellsKnownAllotment) greys out any
+// Level group above it - disabled, not removed, and never on whichever
+// option is CURRENTLY selected, so a spell picked before a level-down (or
+// any other stat change that lowered maxLevel) keeps showing correctly
+// instead of silently vanishing.
+function dccSpellOptionsHtml(spellList, selectedValue, { extraKnownNames = [], extraGroupsHtml = "", maxLevel = null } = {}) {
   const isCustomSelected = selectedValue === SPELL_CUSTOM_KEY;
   const knownNames = spellList.map(s => s.name).concat(extraKnownNames);
   const isStale = !isCustomSelected && selectedValue && !knownNames.includes(selectedValue);
@@ -7337,11 +7348,14 @@ function dccSpellOptionsHtml(spellList, selectedValue, { extraKnownNames = [], e
     : "";
   const levels = [...new Set(spellList.map(s => s.level))].sort((a, b) => a - b);
   const groups = levels.map(level => {
+    const aboveMax = maxLevel !== null && level > maxLevel;
     const opts = spellList.filter(s => s.level === level).map(s => {
       const label = `${s.name}${s.cleric ? "*" : ""} (p.${s.page})`;
-      return `<option value="${escapeHtml(s.name)}"${s.name === selectedValue ? " selected" : ""}>${escapeHtml(label)}</option>`;
+      const isSelected = s.name === selectedValue;
+      const disabledAttr = aboveMax && !isSelected ? ` disabled title="Above your Max Spell Level (Table 1-12: Wizard) - eligible once your Level (or Intelligence) is high enough."` : "";
+      return `<option value="${escapeHtml(s.name)}"${isSelected ? " selected" : ""}${disabledAttr}>${escapeHtml(label)}</option>`;
     }).join("");
-    return `<optgroup label="Level ${level}">${opts}</optgroup>`;
+    return `<optgroup label="Level ${level}${aboveMax ? " (above Max Spell Level)" : ""}">${opts}</optgroup>`;
   }).join("");
   const customOption = `<option value="${SPELL_CUSTOM_KEY}"${isCustomSelected ? " selected" : ""}>✎ Custom spell…</option>`;
   return `${placeholder}${staleOption}${groups}${extraGroupsHtml}<optgroup label="Other">${customOption}</optgroup>`;
@@ -7886,8 +7900,15 @@ function spellRowHtml(item) {
   const knownNames = spellList.map(s => s.name).concat(extraKnownNames);
   const isCustom = !!item.name && !knownNames.includes(item.name);
   const selectValue = isCustom ? SPELL_CUSTOM_KEY : (item.name || "");
+  // Max Spell Level (Table 1-12: Wizard) - only a Wizard has this data on
+  // file (see wizardSpellsKnownAllotment's own comment on why Elf isn't
+  // included), so this greys out (not hides - a stale pick above the
+  // current max still needs to keep showing correctly) any Level group
+  // above it for a Wizard specifically.
+  const levelElForSpells = document.getElementById("pc-level");
+  const spellAllotment = wizardSpellsKnownAllotment(cls, levelElForSpells ? levelElForSpells.value : "", abilityModifierFromField("pc-int"));
   const optionsHtml = dccSpellOptionsHtml(spellList, selectValue, isWizardOrElf
-    ? { extraKnownNames, extraGroupsHtml: dccPatronSpellOptgroupsHtml(selectValue) }
+    ? { extraKnownNames, extraGroupsHtml: dccPatronSpellOptgroupsHtml(selectValue), maxLevel: spellAllotment ? spellAllotment.maxLevel : null }
     : {});
   // Mercurial Magic (Table 5-2, DCC RPG Reference Sheets - see
   // MERCURIAL_MAGIC_TABLE above) - Wizard/Elf only, a permanent quirk
@@ -8351,6 +8372,19 @@ function clearMercurial(row) {
 }
 
 document.getElementById("add-spell-pc").addEventListener("click", () => {
+  // Known Spells allotment (Table 1-12: Wizard, see wizardSpellsKnownAllotment)
+  // - each row (named or still blank) is a reserved slot, so the CAP is on
+  // total rows, not just named ones, or a player could stack unlimited
+  // blank rows without them ever "counting." Wizard-only, same reasoning
+  // as maxLevel above; Elf/Cleric have no table on file to enforce against.
+  const classElForAdd = document.getElementById("pc-class");
+  const clsForAdd = classElForAdd ? classElForAdd.value : "";
+  const levelElForAdd = document.getElementById("pc-level");
+  const allotmentForAdd = wizardSpellsKnownAllotment(clsForAdd, levelElForAdd ? levelElForAdd.value : "", abilityModifierFromField("pc-int"));
+  if (allotmentForAdd && readSpellItems().length >= allotmentForAdd.known) {
+    showStatus(`Known Spells allotment reached (${allotmentForAdd.known}, Table 1-12: Wizard + Intelligence modifier) - remove one below before adding another, or the allotment grows with Level/Intelligence.`, true, 6000);
+    return;
+  }
   const item = emptySpellItem();
   // A freshly-added blank row starts expanded (see expandedSpellRows' own
   // comment) - nothing to collapse away yet, and the player almost
