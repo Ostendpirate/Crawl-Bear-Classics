@@ -1435,7 +1435,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 15:35</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 15:41</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -11564,7 +11564,7 @@ function spellTrackerLineHtml(item, stats, line) {
         <span class="attack-detail-meta">
           <span class="attack-detail-meta-part" title="${escapeHtml(bonusTooltip)}">${escapeHtml(line.label)} <b>${escapeHtml(bonusText)}</b></span>
         </span>
-        <button class="hp-btn attack-roll-btn${rollBlocked ? " disabled" : ""}"${rollBlocked ? " disabled" : ""} title="${rollBlocked ? (spellLevelForBurn !== null ? `This spell is Lost - burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} via 🩸 Spellburn to cast it anyway, or use New Day on the Sheet." : "This spell is Lost until you rest - see the 🔒 badge below (click it to un-mark), or New Day on the Sheet.") : (isLost ? "Regaining this Lost spell via Spellburn - rolling still resolves as a normal Spell Check." : "Roll Spell Check")}">🎲</button>
+        <button class="hp-btn attack-roll-btn${rollBlocked ? " disabled" : ""}"${rollBlocked ? " disabled" : ""} title="${rollBlocked ? (spellLevelForBurn !== null ? `This spell is Lost - burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} via 🩸 Spellburn to cast it anyway, or use New Day on the Sheet.` : "This spell is Lost until you rest - see the 🔒 badge below (click it to un-mark), or New Day on the Sheet.") : (isLost ? "Regaining this Lost spell via Spellburn - rolling still resolves as a normal Spell Check." : "Roll Spell Check")}">🎲</button>
       </div>
       ${burnHtml}
       ${reversedHtml}
