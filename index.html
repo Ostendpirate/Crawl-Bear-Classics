@@ -784,7 +784,7 @@
      auto-width/padded treatment .backstab-toggle-btn already gets for the
      same reason. */
   .spell-attack-burn-btn, .tracker-burn-btn, .newday-modal-recover, #pc-corruption-btn, #pc-disapproval-btn,
-  .spell-attack-reversed-btn, .tracker-reversed-btn, #pc-luck-check-btn, .luck-burn-btn, .tracker-luck-burn-btn {
+  .spell-attack-reversed-btn, .tracker-reversed-btn, #pc-luck-check-btn, .luck-burn-btn, .tracker-luck-burn-btn, .init-luck-burn-btn {
     width: auto;
     height: auto;
     padding: 3px 8px;
@@ -1471,7 +1471,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 18:16</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 18:19</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -12154,10 +12154,12 @@ function attackDetailHtml(item, stats, lines) {
   // for it, and could hide it entirely on a round where every OTHER line
   // happens to be used up).
   const concentrationHtml = hasConcentrationSpellStats(stats) ? concentrationSaveLineHtml(item, stats) : "";
+  const initLuckHtml = initiativeLuckBurnLineHtml(item, stats);
   if (!visibleLines.length) {
     return `
       <div class="attack-detail" data-parent-id="${item.id}">
         ${concentrationHtml}
+        ${initLuckHtml}
         <div class="attack-detail-used-up">All of this token's attacks have been used this round. They'll reappear when the round advances (Next Turn) or the tracker is reset.</div>
       </div>`;
   }
@@ -12165,6 +12167,7 @@ function attackDetailHtml(item, stats, lines) {
     <div class="attack-detail" data-parent-id="${item.id}">
       ${visibleLines.map(line => trackerLineHtml(item, stats, line)).join("")}
       ${concentrationHtml}
+      ${initLuckHtml}
     </div>`;
 }
 
@@ -12178,6 +12181,34 @@ function attackDetailHtml(item, stats, lines) {
 // roll button (rollConcentrationSaveForTracker) is wired separately in
 // attachTrackerRowListeners rather than going through
 // rollAttackForTrackerRow, since it isn't an attackId/slotKey-keyed line.
+// Burning Luck toward this PC's NEXT Initiative roll (DCC RPG core
+// rulebook) - lives in the expanded attack panel (same access point as
+// Concentration Save above) rather than the always-visible compact
+// tracker row, since that row is a fixed-width grid shared with monster
+// tokens and has no spare room for a text button. Stored as ONE top-level
+// field (data.initLuckBurnPending) rather than attached to any attack -
+// Initiative isn't part of the attacks array at all, so it needs its own
+// small set of read/write helpers (see setInitiativeLuckBurnPendingForStats/
+// rollInitiativeFor) instead of reusing the per-attack luckBurnPending
+// machinery. PC-only: monsters have no tracked Luck score.
+function initiativeLuckBurnLineHtml(item, stats) {
+  if (stats.mode !== "pc") return "";
+  const pending = stats.data.initLuckBurnPending || null;
+  const title = pending && pending.bonus
+    ? `Burn Luck (DCC RPG core rulebook) - ${formatSignedNumber(pending.bonus)} pending for this token's NEXT Initiative roll (${pending.detail}). Click to burn more, or roll Initiative to apply and clear it.`
+    : "Burn Luck (DCC RPG core rulebook) - permanently spend Luck for a one-time bonus to this token's next Initiative roll.";
+  return `
+    <div class="attack-detail-row-wrap">
+      <div class="attack-detail-row">
+        <span class="attack-detail-name">🍀 Initiative Luck</span>
+        <span class="attack-detail-meta">
+          <span class="attack-detail-meta-part" title="Applies to this token's NEXT Initiative roll only, then clears.">One-time bonus</span>
+        </span>
+        <button class="hp-btn init-luck-burn-btn" title="${escapeHtml(title)}">🍀 Burn Luck${pending && pending.bonus ? ` (${formatSignedNumber(pending.bonus)})` : ""}</button>
+      </div>
+    </div>`;
+}
+
 function concentrationSaveLineHtml(item, stats) {
   return `
     <div class="attack-detail-row-wrap">
@@ -13467,6 +13498,21 @@ async function setLuckBurnPendingForStats(itemId, attackId, slotKey, pending) {
   });
 }
 
+// Sibling of setLuckBurnPendingForStats, for Initiative's own top-level
+// pending value instead of a per-attack one - see initiativeLuckBurnLineHtml's
+// own comment on why Initiative needs this separate, simpler field.
+async function setInitiativeLuckBurnPendingForStats(itemId, pending) {
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      if (mode !== "pc") return;
+      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+      data.initLuckBurnPending = pending || null;
+      item.metadata[PC_METADATA_KEY] = data;
+    });
+  });
+}
+
 // Tracker-side sibling of spellburnRecoverableAbilities, sourced from a
 // token's saved stats instead of the live Sheet DOM - see
 // openFailedSpellburnModalForStats.
@@ -13659,6 +13705,28 @@ function attachTrackerRowListeners() {
       const concentrationBtn = wrap.querySelector(".concentration-save-btn");
       if (concentrationBtn) {
         concentrationBtn.addEventListener("click", () => rollConcentrationSaveForTracker(parentId));
+        return;
+      }
+      // Initiative Luck burn (see initiativeLuckBurnLineHtml) - same
+      // "standing, not tied to a specific attack/slot" shape as
+      // Concentration Save just above, so it gets the same early-return
+      // treatment. Targets a top-level pending field (data.initLuckBurnPending),
+      // not any attack's own luckBurnPending.
+      const initLuckBtn = wrap.querySelector(".init-luck-burn-btn");
+      if (initLuckBtn) {
+        initLuckBtn.addEventListener("click", () => {
+          openLuckBurnModal({
+            kind: "tracker",
+            itemId: parentId,
+            label: "this token's next Initiative roll",
+            getPending: async () => {
+              const [pendingItem] = await OBR.scene.items.getItems([parentId]);
+              if (!pendingItem) return null;
+              return getStatsForItem(pendingItem).data.initLuckBurnPending || null;
+            },
+            setPending: pending => setInitiativeLuckBurnPendingForStats(parentId, pending),
+          });
+        });
         return;
       }
       const row = wrap.querySelector(".attack-detail-row");
@@ -14454,26 +14522,39 @@ async function rollInitiativeFor(id) {
   const mod = parseModifier(stats.initBonus);
   const hasTwoHanded = stats.mode === "pc" && stats.attacks.some(a => a.equipped && dccWeaponEntry(a.weapon).twoHanded);
   const initDie = hasTwoHanded ? 16 : 20;
+  // Burning Luck - see initiativeLuckBurnLineHtml's own comment. PC-only,
+  // same gate as the button itself.
+  const luckPending = stats.mode === "pc" ? (stats.data.initLuckBurnPending || null) : null;
+  const luckBonus = luckPending ? luckPending.bonus : 0;
   const dieValue = Math.floor(Math.random() * initDie) + 1;
-  const roll = dieValue + mod;
+  const roll = dieValue + mod + luckBonus;
   await OBR.scene.items.updateItems([id], items => {
     items.forEach(it => {
       const combat = it.metadata[COMBAT_METADATA_KEY] || {};
       it.metadata[COMBAT_METADATA_KEY] = { ...combat, initiative: roll };
+      // One-shot declaration toward THIS roll - clear it now that it's
+      // been applied, same atomic write as the initiative itself so there's
+      // no separate round-trip.
+      if (luckPending) {
+        const data = { ...(it.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+        data.initLuckBurnPending = null;
+        it.metadata[PC_METADATA_KEY] = data;
+      }
     });
   });
   await refreshTracker();
+  const luckNote = luckPending ? ` 🍀 Burn Luck: ${formatSignedNumber(luckPending.bonus)} (${luckPending.detail}).` : "";
   await appendChatLog({
     kind: "initiative",
     tokenName: item.name || "Token",
     mode: stats.mode,
-    text: `Initiative: ${markRollTotal(String(roll))}${mod ? ` (d${initDie} ${mod >= 0 ? "+" : ""}${mod})` : ` (d${initDie})`}`,
+    text: `Initiative: ${markRollTotal(String(roll))}${mod ? ` (d${initDie} ${mod >= 0 ? "+" : ""}${mod})` : ` (d${initDie})`}${luckNote}`,
     gmOnly: isGmOnlyRoll(stats.mode, item),
   });
   broadcastDiceRoll({
     rollerName: item.name || "Token",
     dice: [{ sides: initDie, value: dieValue }],
-    modifier: mod,
+    modifier: mod + luckBonus,
     notation: `d${initDie}`,
     total: roll,
     label: `Initiative ${roll}`,
