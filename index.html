@@ -777,7 +777,7 @@
   }
   .open-spells-btn:hover { filter: brightness(1.1); }
   .open-spells-count { font-size: 11px; font-weight: 700; opacity: 0.75; }
-  .spellburn-row, .attack-detail-burn-row, .reversed-row, .attack-detail-reversed-row { margin-top: 4px; }
+  .spellburn-row, .attack-detail-burn-row, .reversed-row, .attack-detail-reversed-row, .luck-burn-row, .attack-detail-luck-burn-row { margin-top: 4px; }
   /* .hp-btn's base size (22x22px, meant for one icon glyph) squeezes any
      button that also carries a text label - both this row's own
      Spellburn button and .newday-modal-recover need the same
@@ -1452,7 +1452,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 18:00</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 18:09</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -4673,7 +4673,7 @@ function weaponOptionsHtml(selectedKey) {
 }
 
 function emptyAttack() {
-  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false, deedType: "", deedCustom: "", actionDieIndex: "", lineDeeds: {}, ammo: "", poisoned: false };
+  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false, deedType: "", deedCustom: "", actionDieIndex: "", lineDeeds: {}, ammo: "", poisoned: false, luckBurnPending: {} };
 }
 
 // Backstab (Thief, Table 3-1) and Mighty Deed of Arms (Warrior/Dwarf,
@@ -4958,9 +4958,22 @@ function attackRowHtml(atk, mode) {
         <input type="checkbox" class="attack-poisoned" ${atk.poisoned ? "checked" : ""} />☠️
       </label>`
     : "";
+  // Burning Luck (DCC RPG core rulebook) - ANY class, unlike Spellburn
+  // (Wizard/Elf-only). Keyed by the same slot the row's own Action Die/
+  // two-weapon role uses ("tw" for a two-weapon-configured row, otherwise
+  // the Action Die index - see lineDeeds' own comment on this convention)
+  // so a row with multiple Action Dice can burn independently per attack.
+  // Opens the shared Burn Luck popup (openLuckBurnModal) - see its own
+  // comment for the ctx/pending shape.
+  const luckSlotKey = effectiveTwRole ? "tw" : effectiveActionDieIndex;
+  const luckBurnPendingAttr = escapeHtml(JSON.stringify(atk.luckBurnPending || {}));
+  const luckPending = (atk.luckBurnPending && atk.luckBurnPending[luckSlotKey]) || null;
+  const luckBurnBtnTitle = luckPending && luckPending.bonus
+    ? `Burn Luck (DCC RPG core rulebook) - ${formatSignedNumber(luckPending.bonus)} pending for this roll (${luckPending.detail}). Click to burn more, or roll to apply and clear it.`
+    : "Burn Luck (DCC RPG core rulebook) - permanently spend Luck for a one-time bonus to this attack roll.";
 
   return `
-    <div class="attack-row pc-attack-row${atk.equipped ? " equipped" : ""}" data-id="${atk.id}" data-line-deeds="${lineDeedsAttr}">
+    <div class="attack-row pc-attack-row${atk.equipped ? " equipped" : ""}" data-id="${atk.id}" data-line-deeds="${lineDeedsAttr}" data-luck-burn-pending="${luckBurnPendingAttr}">
       <div class="attack-weapon-line">
         <input type="checkbox" class="attack-equipped" ${atk.equipped ? "checked" : ""} title="Currently wielded - normally one weapon at a time, but a configured two-weapon Primary+Off-hand pair can both be equipped - this is what determines your Initiative Die" />
         <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
@@ -4976,6 +4989,9 @@ function attackRowHtml(atk, mode) {
         <input type="text" class="attack-damage" placeholder="1d6" value="${escapeHtml(atk.damage)}" data-auto-synced="${atk.damageAuto ? "1" : "0"}" data-damage-base="${escapeHtml(atk.damageBase || "")}" data-damage-str-applies="${atk.damageStrApplies ? "1" : "0"}" />
         <button type="button" class="hp-btn attack-roll-btn" title="Roll this attack">🎲</button>
         <button type="button" class="attack-remove-btn" title="Remove attack">×</button>
+      </div>
+      <div class="luck-burn-row">
+        <button type="button" class="hp-btn luck-burn-btn" title="${escapeHtml(luckBurnBtnTitle)}">🍀 Burn Luck${luckPending && luckPending.bonus ? ` (${formatSignedNumber(luckPending.bonus)})` : ""}</button>
       </div>
       ${metaParts.length ? `<div class="attack-row-meta">${metaParts.join(" · ")}</div>` : ""}
       ${entry.type === "ranged" ? ammoLineHtml(atk) : ""}
@@ -5107,6 +5123,18 @@ function readAttacks(mode) {
         base.castReversedBySlot = JSON.parse(row.dataset.castReversedBySlot || "{}");
       } catch (e) {
         base.castReversedBySlot = {};
+      }
+      // Burning Luck (DCC RPG core rulebook) - pending bonus committed
+      // toward this row's next roll, per Action Die slot (same keying as
+      // spellburnPending above), applies to EITHER a weapon row or a
+      // "Cast a Spell" row alike (see openLuckBurnModal's own comment on
+      // why the pending shape is {points,bonus,rolls,sides,detail} rather
+      // than a flat number). Read here unconditionally for every pc row -
+      // harmless no-op for a row type this attribute was never set on.
+      try {
+        base.luckBurnPending = JSON.parse(row.dataset.luckBurnPending || "{}");
+      } catch (e) {
+        base.luckBurnPending = {};
       }
     }
     return base;
@@ -5477,6 +5505,44 @@ function attachAttackRowListeners(mode) {
         poisonedBox.addEventListener("change", () => {
           scheduleSave();
           renderAttacks(mode, readAttacks(mode));
+        });
+      }
+      // Burning Luck (see openLuckBurnModal's own comment on the ctx/
+      // pending shape) - reads/writes THIS row's own data-luck-burn-pending
+      // directly, same "live DOM patch, saveCurrent() flushes it to
+      // metadata before any roll" contract Spellburn's Sheet-side ctx
+      // already follows. rollAttackFor is the ONLY place this ever
+      // actually gets applied/cleared - it's shared by the Sheet's own
+      // roll button and the Tracker's, so there's no separate Sheet-side
+      // roll math to keep in sync here.
+      const luckBurnBtn = row.querySelector(".luck-burn-btn");
+      if (luckBurnBtn) {
+        luckBurnBtn.addEventListener("click", () => {
+          const twRoleEl = row.querySelector(".attack-tw-role");
+          const actDieEl = row.querySelector(".attack-action-die");
+          const slotKey = (twRoleEl && twRoleEl.value) ? "tw" : (actDieEl ? actDieEl.value : "0");
+          const weaponSelEl = row.querySelector(".attack-weapon");
+          const customNameEl = row.querySelector(".attack-name");
+          const label = (customNameEl && customNameEl.value.trim())
+            || (weaponSelEl && weaponSelEl.options[weaponSelEl.selectedIndex] ? weaponSelEl.options[weaponSelEl.selectedIndex].text : "")
+            || "this attack";
+          openLuckBurnModal({
+            kind: "sheet",
+            label,
+            getPending: () => {
+              let byslot = {};
+              try { byslot = JSON.parse(row.dataset.luckBurnPending || "{}"); } catch (e) { byslot = {}; }
+              return byslot[slotKey] || null;
+            },
+            setPending: pending => {
+              let byslot = {};
+              try { byslot = JSON.parse(row.dataset.luckBurnPending || "{}"); } catch (e) { byslot = {}; }
+              byslot[slotKey] = pending;
+              row.dataset.luckBurnPending = JSON.stringify(byslot);
+              luckBurnBtn.textContent = `🍀 Burn Luck${pending && pending.bonus ? ` (${formatSignedNumber(pending.bonus)})` : ""}`;
+              scheduleSave();
+            },
+          });
         });
       }
       const twRoleSel = row.querySelector(".attack-tw-role");
@@ -12088,6 +12154,20 @@ function trackerLineHtml(item, stats, line) {
       </div>
       <div class="attack-deed-info" hidden>${mightyDeedInfoText(lineState.deedType)}</div>`);
   }
+  // Burning Luck (DCC RPG core rulebook) - PC-only (monsters don't have a
+  // tracked Luck score/class formula), but unlike Backstab/Deed Die
+  // available for EVERY class, not just Thief/Warrior/Dwarf - see
+  // openLuckBurnModal's own comment for the ctx/pending shape. Keyed by
+  // this line's own slot exactly like Backstab/Deed Die above, so a
+  // multi-Action-Die character can burn independently per attack.
+  if (stats.mode === "pc") {
+    const luckSlotKeyForLine = line.slotKey || "0";
+    const luckPendingForLine = (atk.luckBurnPending && atk.luckBurnPending[luckSlotKeyForLine]) || null;
+    const luckBurnTitle = luckPendingForLine && luckPendingForLine.bonus
+      ? `Burn Luck (DCC RPG core rulebook) - ${formatSignedNumber(luckPendingForLine.bonus)} pending for this roll (${luckPendingForLine.detail}). Click to burn more, or roll to apply and clear it.`
+      : "Burn Luck (DCC RPG core rulebook) - permanently spend Luck for a one-time bonus to this attack roll.";
+    extraControls.push(`<button type="button" class="hp-btn tracker-luck-burn-btn" title="${escapeHtml(luckBurnTitle)}">🍀 Burn Luck${luckPendingForLine && luckPendingForLine.bonus ? ` (${formatSignedNumber(luckPendingForLine.bonus)})` : ""}</button>`);
+  }
 
   return `
     <div class="attack-detail-row-wrap">
@@ -12482,6 +12562,14 @@ async function rollAttackFor(itemId, attackId, slotKey) {
   // rather than the row's last-saved default.
   const atkForDie = { ...atk, actionDieIndex: effectiveSlotKey };
 
+  // Burning Luck (DCC RPG core rulebook) - already permanently spent live
+  // the moment each "-1" was clicked (openLuckBurnModal/applyLuckBurnPointForStats);
+  // all that's left here is applying the accumulated bonus to this roll
+  // and clearing the declaration afterward, same shape as Spellburn's own
+  // pendingPoints handling elsewhere in this app.
+  const luckPending = (atk.luckBurnPending && atk.luckBurnPending[effectiveSlotKey]) || null;
+  const luckBonus = luckPending ? luckPending.bonus : 0;
+
   const atkMod = parseModifier(atk.bonus);
   // Table 1-9's Backstab bonus (a flat to-hit bonus, no ability modifier -
   // see backstabAttackBonusForStats) applies to THIS roll only when the
@@ -12544,13 +12632,18 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     // atk.poisoned is a persistent per-weapon flag (see attackRowHtml's
     // poisonedToggleHtml), independent of the Fumble Die/table above.
     const poisonNote = atk.poisoned ? " ☠️ The poisoned blade turns on its wielder too - you're poisoned!" : "";
-    text = `${atk.name || "Attack"}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${wasForced ? " (GM-forced)" : ""} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}).${untrainedNote} ${rowText}${poisonNote}`;
+    // A natural 1 is an automatic miss regardless of modifiers - any Luck
+    // already burned toward this roll doesn't change that, and it's spent
+    // permanently either way (see openLuckBurnModal's own comment), so
+    // this just notes the loss rather than applying the bonus anywhere.
+    const luckWastedNote = luckPending ? ` 🍀 ${formatModifier(luckPending.bonus)} Luck (${luckPending.detail}) was burned toward this roll but wasted - a natural 1 is always an automatic miss.` : "";
+    text = `${atk.name || "Attack"}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${wasForced ? " (GM-forced)" : ""} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}).${untrainedNote} ${rowText}${poisonNote}${luckWastedNote}`;
     label = "💀 FUMBLE! Natural 1 — automatic miss";
   } else {
     // Fresh Deed Die roll for THIS attack - see rollDeedDieForStats (no
     // longer shared/cached across other attacks the same round).
     const deed = rollDeedDieForStats(stats);
-    const toHit = d20Roll + atkMod + backstabBonus + (deed ? deed.total : 0);
+    const toHit = d20Roll + atkMod + backstabBonus + luckBonus + (deed ? deed.total : 0);
     // A Backstab declared on this specific slot (Combat Tracker, Thief
     // only) swaps in the weapon's sneak-attack die for THIS roll instead
     // of the row's normal stored Damage text - computed fresh here rather
@@ -12616,7 +12709,8 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     }
 
     const backstabModText = backstabActive && backstabBonus ? `${formatModifier(backstabBonus)}(backstab)` : "";
-    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${atkSides} ${d20Roll}${wasForced ? " forced" : ""}${formatModifier(atkMod)}${deedText}${backstabModText})${untrainedNote}`;
+    const luckModText = luckPending ? `${formatModifier(luckPending.bonus)}(luck)` : "";
+    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${atkSides} ${d20Roll}${wasForced ? " forced" : ""}${formatModifier(atkMod)}${deedText}${backstabModText}${luckModText})${untrainedNote}`;
     const dmgText = dmg !== null
       ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${isCrit ? " +crit" : ""})`
       : "";
@@ -12634,6 +12728,13 @@ async function rollAttackFor(itemId, attackId, slotKey) {
   // state left to fall out of sync, just this one persisted flag.
   if (lineState.backstabActive) {
     await applyTrackerLineFieldUpdate(itemId, attackId, effectiveSlotKey, "backstabActive", false);
+  }
+
+  // Burning Luck is a one-shot declaration toward THIS roll, same as
+  // Spellburn's own pendingPoints - clear it now that it's been applied
+  // (or wasted on a fumble), regardless of hit/miss/crit.
+  if (luckPending) {
+    await clearLuckBurnPendingForStats(itemId, attackId, effectiveSlotKey);
   }
 
   // This attack's Action Die has now been spent this round - hide this
@@ -12753,9 +12854,20 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
   // hand that actually rolls with Backstab active gets queued here and
   // persisted-cleared once, after both hands are resolved below.
   const backstabRevertQueue = [];
+  // Burning Luck (DCC RPG core rulebook) - each hand of a pair is its own
+  // attack object with its own luckBurnPending, so whichever row the
+  // player actually opened the popup from (see attachTrackerRowListeners'
+  // .tracker-luck-burn-btn) is where this naturally reads from - no extra
+  // bookkeeping needed to know which hand a burn belongs to. Queued here,
+  // same pattern as backstabRevertQueue, and cleared once after both hands
+  // are resolved (see below).
+  const luckClearQueue = [];
 
   function resolveHand(atk, roll, sides, isPrimary) {
     const lineState = getLineDeedState(atk, slotKey);
+    const luckPending = (atk.luckBurnPending && atk.luckBurnPending[slotKey]) || null;
+    const luckBonus = luckPending ? luckPending.bonus : 0;
+    if (luckPending) luckClearQueue.push(atk.id);
     // Same Backstab bonus/auto-crit override as single-weapon rollAttackFor
     // (see its comment). Each hand of a two-weapon pair has its OWN
     // lineDeeds (keyed by that hand's own attackId, not shared - see
@@ -12778,6 +12890,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     // since the rule is about the natural roll itself, not the fumble
     // determination - see rollAttackFor's own identical note.
     const poisonNote = (isFumble || isPlainMiss) && atk.poisoned ? " ☠️ The poisoned blade turns on its wielder too - you're poisoned!" : "";
+    const luckWastedNote = luckPending ? ` 🍀 ${formatModifier(luckPending.bonus)} Luck (${luckPending.detail}) was burned toward this hand but wasted - a natural 1 is always an automatic miss.` : "";
     if (isFumble) {
       anyFumble = true;
       const fumbleDie = fumbleDieForStats(stats);
@@ -12785,10 +12898,10 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
       const fumbleRow = fumbleRoll ? lookupTableRow(FUMBLE_TABLE, fumbleRoll.total) : null;
       if (fumbleRoll) rollDice.push(...fumbleRoll.dice);
       const rowText = fumbleRow ? fumbleRow.text : "";
-      return `${label}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${forcedNote} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}). ${rowText}${poisonNote}`;
+      return `${label}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${forcedNote} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}). ${rowText}${poisonNote}${luckWastedNote}`;
     }
     if (isPlainMiss) {
-      return `${label}: Natural 1${forcedNote} — miss (Halfling two-weapon fighting: a lone natural 1 doesn't fumble by itself).${poisonNote}`;
+      return `${label}: Natural 1${forcedNote} — miss (Halfling two-weapon fighting: a lone natural 1 doesn't fumble by itself).${poisonNote}${luckWastedNote}`;
     }
 
     // A Favorite Weapon's Luck modifier (checked per hand, since primary
@@ -12803,7 +12916,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     // though they're one action.
     const deed = rollDeedDieForStats(stats);
     if (deed) rollDice.push({ sides: deed.sides, value: deed.roll });
-    const toHit = roll + atkMod + backstabBonus + (deed ? deed.total : 0);
+    const toHit = roll + atkMod + backstabBonus + luckBonus + (deed ? deed.total : 0);
     // Same on-the-fly Backstab swap as single-weapon rollAttackFor, per
     // hand - see its comment for why this never mutates atk.damage itself.
     const backstabNotation = backstabActive ? backstabDamageNotationForStats(stats, atk) : null;
@@ -12872,7 +12985,8 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     }
 
     const backstabModText = backstabActive && backstabBonus ? `${formatModifier(backstabBonus)}(backstab)` : "";
-    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${sides} ${roll}${forcedNote}${formatModifier(atkMod)}${deedText}${backstabModText})${untrainedNote}`;
+    const luckModText = luckPending ? `${formatModifier(luckPending.bonus)}(luck)` : "";
+    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${sides} ${roll}${forcedNote}${formatModifier(atkMod)}${deedText}${backstabModText}${luckModText})${untrainedNote}`;
     const dmgText = dmg !== null
       ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${critEligible ? " +crit" : ""})`
       : "";
@@ -12898,7 +13012,17 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
         ? ` ☠️ ${poisonedWeapons.map(a => a.name || "Your weapon").join(" and ")} poisoned blades also turn on their wielder - you're poisoned!`
         : ` ☠️ ${poisonedWeapons[0].name || "Your"} poisoned blade also turns on its wielder - you're poisoned!`
       : "";
-    fumbleNote = `${markFumbleAlert("💀 FUMBLE!")} Both hands rolled natural 1s${wasForced ? " (primary GM-forced)" : ""} — automatic miss with both weapons (Halfling two-weapon fighting; Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}). ${rowText}${poisonNote}`;
+    // Neither hand goes through resolveHand on this branch (both natural
+    // 1s resolve as ONE shared Fumble Die instead), so any Luck already
+    // burned toward either hand has to be queued for clearing here too,
+    // same wasted-on-a-fumble reasoning resolveHand's own luckWastedNote
+    // follows - it's spent permanently regardless of the roll's outcome.
+    const luckWastedHands = [primaryAtk, offhandAtk].filter(a => a.luckBurnPending && a.luckBurnPending[slotKey]);
+    luckWastedHands.forEach(a => luckClearQueue.push(a.id));
+    const luckWastedNote = luckWastedHands.length
+      ? ` 🍀 Luck burned toward ${luckWastedHands.length > 1 ? "both hands" : (luckWastedHands[0] === primaryAtk ? "the primary hand" : "the off-hand")} was wasted - a natural 1 is always an automatic miss.`
+      : "";
+    fumbleNote = `${markFumbleAlert("💀 FUMBLE!")} Both hands rolled natural 1s${wasForced ? " (primary GM-forced)" : ""} — automatic miss with both weapons (Halfling two-weapon fighting; Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}). ${rowText}${poisonNote}${luckWastedNote}`;
     primaryText = `${primaryAtk.name || "Primary hand"}: natural 1`;
     offhandText = `${offhandAtk.name || "Off-hand"}: natural 1`;
   } else {
@@ -12917,6 +13041,13 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
   // that actually used one.
   for (const revertId of backstabRevertQueue) {
     await applyTrackerLineFieldUpdate(itemId, revertId, slotKey, "backstabActive", false);
+  }
+
+  // Burning Luck is a one-shot declaration toward THIS roll, same as
+  // single-weapon rollAttackFor's own cleanup - clear whichever hand(s)
+  // actually had one pending, applied or wasted either way.
+  for (const luckAttackId of luckClearQueue) {
+    await clearLuckBurnPendingForStats(itemId, luckAttackId, slotKey);
   }
 
   // This whole pair-at-this-Action-Die has now been used this round - both
@@ -13125,6 +13256,54 @@ async function clearSpellburnPendingForStats(itemId, attackId, slotKey) {
         const pending = { ...a.spellburnPending };
         delete pending[slotKey];
         return { ...a, spellburnPending: pending };
+      });
+      item.metadata[PC_METADATA_KEY] = data;
+    });
+  });
+}
+
+// Sibling of clearSpellburnPendingForStats, for a Burn Luck declaration
+// (atk.luckBurnPending) instead - shared by weapon AND spell attacks alike
+// (see emptyAttack/readAttacks' own comments), so this one function
+// covers both rollAttackFor and rollSpellAttackForTracker's post-roll
+// cleanup. Always operates via metadata (itemId), never a Sheet DOM
+// dataset, since rollAttackFor itself only ever reads an attack's saved
+// stats - see openLuckBurnModal's own comment on why the Sheet-side ctx
+// for weapon/spell rows still works correctly despite that (saveCurrent()
+// flushes the dataset into metadata before any roll fires).
+async function clearLuckBurnPendingForStats(itemId, attackId, slotKey) {
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      if (mode !== "pc") return;
+      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+      data.attacks = (data.attacks || []).map(a => {
+        if (a.id !== attackId || !a.luckBurnPending || !(slotKey in a.luckBurnPending)) return a;
+        const pending = { ...a.luckBurnPending };
+        delete pending[slotKey];
+        return { ...a, luckBurnPending: pending };
+      });
+      item.metadata[PC_METADATA_KEY] = data;
+    });
+  });
+}
+
+// Overwrites ONE attack/slot's whole Burn Luck pending object - the
+// Tracker-side half of the ctx.setPending pair openLuckBurnModal calls
+// (see its own comment); unlike applySpellburnPointForStats this does NOT
+// also touch the Luck score itself (that's applyLuckBurnPointForStats,
+// called separately) since the two are decoupled here on purpose.
+async function setLuckBurnPendingForStats(itemId, attackId, slotKey, pending) {
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      if (mode !== "pc") return;
+      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+      data.attacks = (data.attacks || []).map(a => {
+        if (a.id !== attackId) return a;
+        const byslot = { ...(a.luckBurnPending || {}) };
+        byslot[slotKey] = pending;
+        return { ...a, luckBurnPending: byslot };
       });
       item.metadata[PC_METADATA_KEY] = data;
     });
@@ -13391,6 +13570,32 @@ function attachTrackerRowListeners() {
           backstabBtn.classList.toggle("on", next);
           backstabBtn.textContent = next ? "🗡️ Backstab ON" : "🗡️ Backstab";
           applyTrackerLineFieldUpdate(parentId, attackId, slotKey, "backstabActive", next);
+        });
+      }
+      // Burning Luck (DCC RPG core rulebook) - shared by weapon AND spell
+      // lines alike (trackerLineHtml/spellTrackerLineHtml both push the
+      // same .tracker-luck-burn-btn) - opens the shared popup targeting
+      // THIS line's own attack+slot, reading/writing straight through OBR
+      // metadata since the Tracker can roll for any token, not just
+      // whatever's open on the Sheet tab. Same "0" fallback trackerLineHtml
+      // itself uses for a falsy slotKey, so the read/write key always
+      // matches what was rendered.
+      const luckBurnBtn = wrap.querySelector(".tracker-luck-burn-btn");
+      if (luckBurnBtn) {
+        luckBurnBtn.addEventListener("click", () => {
+          const luckSlotKey = slotKey || "0";
+          openLuckBurnModal({
+            kind: "tracker",
+            itemId: parentId,
+            label: "this roll",
+            getPending: async () => {
+              const [pendingItem] = await OBR.scene.items.getItems([parentId]);
+              if (!pendingItem) return null;
+              const pendingAtk = getStatsForItem(pendingItem).attacks.find(a => a.id === attackId);
+              return (pendingAtk && pendingAtk.luckBurnPending && pendingAtk.luckBurnPending[luckSlotKey]) || null;
+            },
+            setPending: pending => setLuckBurnPendingForStats(parentId, attackId, luckSlotKey, pending),
+          });
         });
       }
       // Ammo lives on the attack itself (not per-slot like lineDeeds - a
