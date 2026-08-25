@@ -1396,7 +1396,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 13:43</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 13:58</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -7544,13 +7544,32 @@ function effectRowHtml(row) {
 // row per result band - a repeatable sibling of Manifestation's single
 // note, for the same "no per-spell tables in this app" reason. Always
 // rendered (the rows list itself may be empty), same "no appear-later
-// gap" contract as everything else here.
+// gap" contract as everything else here. Wrapped in .spell-effect-wrap
+// (a single element, not three loose siblings) so attachMercurialRollHandler
+// has a stable anchor to insert a freshly-rolled Mercurial row BEFORE,
+// keeping the Manifestation -> Mercurial -> Effect Table order spellRowHtml
+// itself renders even when Mercurial is added after the fact rather than
+// on a full re-render.
 function spellEffectRowsHtml(item) {
   const rows = item.effectRows || [];
-  return `<div class="spell-section-header">Effect Table <span class="spell-section-hint">optional</span></div>
+  return `<div class="spell-effect-wrap">
+    <div class="spell-section-header">Effect Table <span class="spell-section-hint">optional</span></div>
     <div class="spell-effect-rows">${rows.map(effectRowHtml).join("")}</div>
-    <button type="button" class="add-attack-btn spell-effect-add-btn" style="margin-top:2px;">+ Add Roll Range</button>`;
+    <button type="button" class="add-attack-btn spell-effect-add-btn" style="margin-top:2px;">+ Add Roll Range</button>
+  </div>`;
 }
+
+// Which spell rows currently have their collapsible body (Manifestation/
+// Mercurial Magic/Effect Table - see spellRowHtml) expanded, by item.id -
+// same transient, not-persisted-to-token-data, module-level Set pattern
+// as the Combat Tracker's own expandedAttackRows. Collapsed by default:
+// with the name row + stat block always visible, a long list of known
+// spells reads as a clean, scannable index rather than a wall of
+// manifestation/mercurial/effect-table text, and a spell's own id is
+// generated once (emptySpellItem/readSpellItems both just carry
+// whatever's already there) and stable across re-renders, so a toggle
+// sticks through incidental repaints the same way the Tracker's does.
+const expandedSpellRows = new Set();
 
 // This roster is a known-spells list, not an action - rolling a Spell
 // Check happens from a "Cast a Spell" Attacks row instead (spellAttackRowHtml/
@@ -7562,19 +7581,27 @@ function spellRowHtml(item) {
   const cls = classEl ? classEl.value : "";
   const isWizardOrElf = cls === "Wizard" || cls === "Elf";
   const isCleric = cls === "Cleric";
+  // See expandedSpellRows' own comment - the name row + stat block are
+  // always visible either way; only Manifestation/Mercurial/Effect Table
+  // toggle with this.
+  const expanded = expandedSpellRows.has(item.id);
+  const toggleBtnHtml = `<button type="button" class="hp-btn spell-row-toggle-btn" title="${expanded ? "Collapse" : "Expand"} this spell's details">${expanded ? "▾" : "▸"}</button>`;
   // Any other/no class keeps the original plain free-text field, from
   // before either dropdown existed.
   if (!isWizardOrElf && !isCleric) {
     return `
       <div class="attack-row pc-attack-row" data-id="${item.id}">
         <div class="attack-weapon-line">
+          ${toggleBtnHtml}
           <input type="text" class="attack-name spell-row-name" placeholder="Spell name" value="${escapeHtml(item.name || "")}" />
           ${concentrationCheckboxHtml(item)}
           <button type="button" class="attack-remove-btn spell-row-remove-btn" title="Remove">×</button>
         </div>
         ${spellStatblockHtml(item)}
-        ${manifestationFieldHtml(item)}
-        ${spellEffectRowsHtml(item)}
+        <div class="spell-row-collapsible"${expanded ? "" : ' style="display:none"'}>
+          ${manifestationFieldHtml(item)}
+          ${spellEffectRowsHtml(item)}
+        </div>
       </div>`;
   }
   const spellList = isWizardOrElf ? DCC_WIZARD_SPELLS : DCC_CLERIC_SPELLS;
@@ -7614,6 +7641,7 @@ function spellRowHtml(item) {
   return `
     <div class="attack-row pc-attack-row" data-id="${item.id}" data-mercurial="${item.mercurial || ""}">
       <div class="attack-weapon-line">
+        ${toggleBtnHtml}
         <select class="attack-name spell-row-select"${isCustom ? ' style="display:none"' : ""}>${optionsHtml}</select>
         <input type="text" class="attack-name spell-row-custom-name" placeholder="Custom spell name"${isCustom ? "" : ' style="display:none"'} value="${escapeHtml(isCustom ? item.name : "")}" />
         <button type="button" class="hp-btn spell-row-custom-back"${isCustom ? "" : ' style="display:none"'} title="Back to spell list">↩</button>
@@ -7623,9 +7651,11 @@ function spellRowHtml(item) {
         <button type="button" class="attack-remove-btn spell-row-remove-btn" title="Remove">×</button>
       </div>
       ${spellStatblockHtml(item)}
-      ${manifestationFieldHtml(item)}
-      ${spellEffectRowsHtml(item)}
-      ${mercurialRowHtml}
+      <div class="spell-row-collapsible"${expanded ? "" : ' style="display:none"'}>
+        ${manifestationFieldHtml(item)}
+        ${mercurialRowHtml}
+        ${spellEffectRowsHtml(item)}
+      </div>
     </div>`;
 }
 
@@ -7797,6 +7827,30 @@ function attachSpellRowListeners() {
   const listEl = spellsListEl();
   if (!listEl) return;
   listEl.querySelectorAll(".attack-row").forEach(row => {
+    // Collapse toggle (see expandedSpellRows' own comment) - the
+    // collapsible body's textareas (.manifestation-note/.mercurial-note/
+    // .spell-effect-text) all read scrollHeight as 0 while their
+    // .spell-row-collapsible ancestor is display:none (same reason
+    // openSpellsModal has to redo this for the whole popup on open), so
+    // expanding re-runs autoResizeTextarea on whichever of them exist in
+    // THIS row now that they're actually laid out - covers a note typed,
+    // or a Mercurial roll made, while the row was still collapsed.
+    const toggleBtn = row.querySelector(".spell-row-toggle-btn");
+    const collapsibleEl = row.querySelector(".spell-row-collapsible");
+    if (toggleBtn && collapsibleEl) {
+      toggleBtn.addEventListener("click", () => {
+        const nowExpanded = collapsibleEl.style.display === "none";
+        collapsibleEl.style.display = nowExpanded ? "" : "none";
+        toggleBtn.textContent = nowExpanded ? "▾" : "▸";
+        toggleBtn.title = `${nowExpanded ? "Collapse" : "Expand"} this spell's details`;
+        if (nowExpanded) {
+          expandedSpellRows.add(row.dataset.id);
+          collapsibleEl.querySelectorAll(".manifestation-note, .mercurial-note, .spell-effect-text").forEach(autoResizeTextarea);
+        } else {
+          expandedSpellRows.delete(row.dataset.id);
+        }
+      });
+    }
     const textEl = row.querySelector(".spell-row-name");
     if (textEl) textEl.addEventListener("input", scheduleSave);
     // Present on every row regardless of class (see manifestationFieldHtml).
@@ -7951,7 +8005,17 @@ function attachMercurialRollHandler(row, mercurialBtn) {
     row.dataset.mercurial = String(rolled);
     let mercurialRowEl = row.querySelector(".mercurial-row");
     if (!mercurialRowEl) {
-      row.insertAdjacentHTML("beforeend", mercurialRowMarkup(rolled, "", "", ""));
+      // Inserted right before the Effect Table section (see
+      // spellEffectRowsHtml's own comment) so a Mercurial row added here,
+      // after the row's initial render, lands in the same
+      // Manifestation -> Mercurial -> Effect Table order a full re-render
+      // would produce - not just appended wherever "beforeend" happens to
+      // land (which, now that this content lives inside
+      // .spell-row-collapsible, would be after Effect Table instead).
+      const effectWrap = row.querySelector(".spell-effect-wrap");
+      const html = mercurialRowMarkup(rolled, "", "", "");
+      if (effectWrap) effectWrap.insertAdjacentHTML("beforebegin", html);
+      else (row.querySelector(".spell-row-collapsible") || row).insertAdjacentHTML("beforeend", html);
       mercurialRowEl = row.querySelector(".mercurial-row");
       attachMercurialRowListeners(row, mercurialRowEl);
     } else {
@@ -8010,7 +8074,13 @@ function clearMercurial(row) {
 }
 
 document.getElementById("add-spell-pc").addEventListener("click", () => {
-  spellsListEl().insertAdjacentHTML("beforeend", spellRowHtml(emptySpellItem()));
+  const item = emptySpellItem();
+  // A freshly-added blank row starts expanded (see expandedSpellRows' own
+  // comment) - nothing to collapse away yet, and the player almost
+  // certainly wants to start filling it in immediately rather than
+  // clicking to expand it first.
+  expandedSpellRows.add(item.id);
+  spellsListEl().insertAdjacentHTML("beforeend", spellRowHtml(item));
   attachSpellRowListeners();
   updateOpenSpellsCount();
   scheduleSave();
