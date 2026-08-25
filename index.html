@@ -126,7 +126,11 @@
      version just pushed, not deriving that from something that could
      itself be stale (e.g. manifest.json's version, which isn't bumped on
      every fix). */
-  .build-stamp { text-align: right; font-size: 9px; color: var(--muted); margin: -6px 0 8px; letter-spacing: 0.3px; }
+  /* No negative top margin (a -6px pull was here before) - .main-nav just
+     above is position:sticky with z-index:30 and its own background, so
+     pulling this up tucked it partially behind the nav bar's bottom edge,
+     leaving only the lower half visible. */
+  .build-stamp { text-align: right; font-size: 9px; color: var(--muted); margin: 0 0 8px; letter-spacing: 0.3px; }
   .tab-btn.active {
     background: var(--accent);
     color: #1e1b18;
@@ -743,6 +747,13 @@
      on above for its own narrow fields. */
   .spell-effect-row .spell-effect-range { flex: none; width: 48px; text-align: center; font-size: 11px; padding: 4px 2px; margin-top: 1px; }
   .spell-effect-text { flex: 1; min-width: 0; font-size: 11px; padding: 4px 6px; min-height: 32px; margin-top: 0; resize: none; overflow-y: hidden; }
+  /* Accent-filled rather than .hp-btn's plain muted background - it's the
+     first thing in the row and the one control that reveals/hides
+     everything else about this spell, so it needs to read as clearly
+     different from the ✨/🧠/🔒/× icon buttons sitting right next to it,
+     not blend into that row as just another one of them. */
+  .spell-row-toggle-btn { background: var(--accent); color: #1e1b18; font-size: 15px; font-weight: 700; }
+  .spell-row-toggle-btn:hover { filter: brightness(1.1); background: var(--accent); }
   /* The Spells fieldset's whole editor (known-spells list, free-text
      notes) lives in #spells-modal-backdrop now, not inline on the Sheet -
      this is the fieldset's only remaining child, so it's sized to read as
@@ -769,16 +780,39 @@
   .spellburn-row, .attack-detail-burn-row { margin-top: 4px; }
   /* .hp-btn's base size (22x22px, meant for one icon glyph) squeezes any
      button that also carries a text label - both this row's own
-     Spellburn button and #pc-spellburn-newday-btn need the same
+     Spellburn button and .newday-modal-recover need the same
      auto-width/padded treatment .backstab-toggle-btn already gets for the
      same reason. */
-  .spell-attack-burn-btn, .tracker-burn-btn, #pc-spellburn-newday-btn, .newday-modal-recover, #pc-corruption-btn, #pc-disapproval-btn {
+  .spell-attack-burn-btn, .tracker-burn-btn, .newday-modal-recover, #pc-corruption-btn, #pc-disapproval-btn {
     width: auto;
     height: auto;
     padding: 3px 8px;
     font-size: 11px;
     white-space: nowrap;
   }
+  /* New Day is a deliberate, once-per-in-game-day action (Spellburn AND
+     Lost Spells recovery - see openNewDayModal), not a small inline
+     toggle like the buttons just above - same "big, obvious entry point"
+     treatment as .open-spells-btn rather than the shared tiny-button
+     styling it used to carry. */
+  .newday-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    margin-top: 8px;
+    padding: 10px;
+    background: var(--accent);
+    color: #1e1b18;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .newday-btn:hover { filter: brightness(1.1); }
   .spellburn-modal-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid rgba(69, 57, 46, 0.5); }
   .spellburn-modal-label { flex: 1; color: var(--text); }
   .spellburn-modal-score { flex: none; font-variant-numeric: tabular-nums; color: var(--muted); min-width: 54px; text-align: right; }
@@ -1396,7 +1430,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 14:04</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 14:20</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1628,7 +1662,7 @@
             <div class="save-box"><label>Int</label><input type="text" id="pc-int" placeholder="9 (+0)"/></div>
             <div class="save-box"><label>Lck</label><input type="text" id="pc-lck" placeholder="11 (+0)"/></div>
           </div>
-          <button type="button" id="pc-spellburn-newday-btn" class="hp-btn" style="margin-top:6px;" title="Spellburn recovery (DCC RPG core rulebook: a burned ability score recovers 1 point per day of rest) - recovers 1 point to ONE Str/Agi/Sta ability spent on Spellburn (see the Cast a Spell row), up to what it was before any Spellburn. Asks which ability if more than one is burned. Click once per in-game day that passes.">🌙 New Day</button>
+          <button type="button" id="pc-spellburn-newday-btn" class="newday-btn" title="Spellburn recovery (DCC RPG core rulebook: a burned ability score recovers 1 point per day of rest) - recovers 1 point to ONE Str/Agi/Sta ability spent on Spellburn (see the Cast a Spell row), up to what it was before any Spellburn. Also clears any Lost spells. Asks which ability if more than one is burned. Click once per in-game day that passes.">🌙 New Day</button>
           <input type="hidden" id="pc-spellburnMax" value="" />
         </fieldset>
 
@@ -1777,6 +1811,15 @@
           <div class="skills-list" id="pc-skills-list"></div>
         </fieldset>
 
+        <fieldset>
+          <legend>Spells</legend>
+          <button type="button" class="open-spells-btn" id="open-spells-btn">🔮 Open Spells<span class="open-spells-count" id="open-spells-count"></span></button>
+          <div id="pc-corruption-notes-wrap" style="display:none; margin-top:8px;">
+            <div class="spell-section-header">Corruption Effects <span class="spell-section-hint">optional</span></div>
+            <textarea id="pc-corruption-notes" class="manifestation-note" placeholder="What each Corruption roll actually did to this character - permanent and cumulative, unlike a Spell Check's other one-off results." rows="2"></textarea>
+          </div>
+        </fieldset>
+
         <fieldset class="equip-fieldset">
           <legend>Equipment</legend>
           <div class="tabs equip-tabs" id="equip-tabs">
@@ -1800,15 +1843,6 @@
           </div>
           <div class="equip-panel" data-equip-panel="treasure">
             <textarea id="pc-equip-treasure" rows="6" placeholder="15 gp, 40 sp, a small pouch of gems, an ornate silver ring..."></textarea>
-          </div>
-        </fieldset>
-
-        <fieldset>
-          <legend>Spells</legend>
-          <button type="button" class="open-spells-btn" id="open-spells-btn">🔮 Open Spells<span class="open-spells-count" id="open-spells-count"></span></button>
-          <div id="pc-corruption-notes-wrap" style="display:none; margin-top:8px;">
-            <div class="spell-section-header">Corruption Effects <span class="spell-section-hint">optional</span></div>
-            <textarea id="pc-corruption-notes" class="manifestation-note" placeholder="What each Corruption roll actually did to this character - permanent and cumulative, unlike a Spell Check's other one-off results." rows="2"></textarea>
           </div>
         </fieldset>
 
