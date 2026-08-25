@@ -1430,7 +1430,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 14:20</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 14:33</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -8768,12 +8768,16 @@ function syncArmorIntoEquipment() {
 // Explicitly excludes "Cast a Spell" rows (readAttacks' isSpell) - a known
 // spell isn't gear, and would otherwise show up here as e.g. "Fireball
 // (dmg none set)" since those rows mirror their spell's name into the
-// same hidden .attack-name field a weapon row's real name lives in.
+// same hidden .attack-name field a weapon row's real name lives in. Also
+// excludes Unarmed (weapon key "unarmed") - every character always has
+// it available regardless of what they're carrying, so it isn't
+// "equipment" either; without this exclusion it would show up as
+// "Unarmed (dmg 1d3)" the moment an Attacks row is left on that option.
 function syncWeaponsIntoEquipment() {
   const equipEl = document.getElementById("pc-equip-weapons");
   if (!equipEl) return;
 
-  const attacks = readAttacks("pc").filter(a => !a.isSpell && (a.name || a.bonus || a.damage));
+  const attacks = readAttacks("pc").filter(a => !a.isSpell && a.weapon !== "unarmed" && (a.name || a.bonus || a.damage));
   const lines = (equipEl.value || "").split("\n").filter(line => {
     return !/^.+ \(dmg .*\)( \[equipped\])?$/.test(line.trim());
   });
