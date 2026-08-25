@@ -809,11 +809,12 @@
      currently attempting the Cast Reversed direction, same on/off
      highlight treatment as .backstab-toggle-btn.on. */
   .spell-attack-reversed-btn.on, .tracker-reversed-btn.on { background: #4a6fa5; color: #fff; border-color: #4a6fa5; }
-  /* New Day is a deliberate, once-per-in-game-day action (Spellburn AND
-     Lost Spells recovery - see openNewDayModal), not a small inline
-     toggle like the buttons just above - same "big, obvious entry point"
-     treatment as .open-spells-btn rather than the shared tiny-button
-     styling it used to carry. */
+  /* New Day is a deliberate, once-per-in-game-day action for EVERY class
+     (natural HP healing, plus Wizard/Elf Spellburn recovery, Thief/
+     Halfling Luck recovery, and Lost Spells recovery - see
+     openNewDayModal), not a small inline toggle like the buttons just
+     above - same "big, obvious entry point" treatment as .open-spells-btn
+     rather than the shared tiny-button styling it used to carry. */
   .newday-btn {
     display: flex;
     align-items: center;
@@ -1485,7 +1486,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 21:10</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 21:17</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1718,7 +1719,7 @@
             <div class="save-box"><label class="roll-label" data-roll-ability="lck" title="Click to roll a Luck check: d20 + Luck modifier. For the DCC roll-under Luck Check, use the button below instead.">Lck</label><input type="text" id="pc-lck" placeholder="11 (+0)"/></div>
           </div>
           <button type="button" id="pc-luck-check-btn" class="hp-btn luck-check-btn" title="Luck Check (DCC RPG core rulebook) - roll 1d20; success on a result equal to or less than your current Luck score. For judge-adjudicated feats resolved by Luck alone.">🍀 Luck Check</button>
-          <button type="button" id="pc-spellburn-newday-btn" class="newday-btn" title="Spellburn recovery (DCC RPG core rulebook: a burned ability score recovers 1 point per day of rest) - recovers 1 point to ONE Str/Agi/Sta ability spent on Spellburn (see the Cast a Spell row), up to what it was before any Spellburn. Also clears any Lost spells. Thief/Halfling additionally recover Luck equal to their Level, up to its own natural max. Asks which to recover if more than one is eligible. Click once per in-game day that passes.">🌙 New Day</button>
+          <button type="button" id="pc-spellburn-newday-btn" class="newday-btn" title="A night's rest - every class. Heals 1 HP. Wizard/Elf: recovers 1 point to ONE Str/Agi/Sta ability spent on Spellburn (see the Cast a Spell row), up to what it was before any Spellburn - asks which to recover if more than one is eligible. Thief/Halfling: also recovers Luck equal to their Level, up to its own natural max. Also clears any Lost spells. Click once per in-game day that passes.">🌙 New Day</button>
           <input type="hidden" id="pc-spellburnMax" value="" />
           <input type="hidden" id="pc-luckMax" value="" />
         </fieldset>
@@ -6398,7 +6399,7 @@ function spellburnRecoverableAbilities() {
 // cleared once that ability is fully recovered, so a later burn
 // re-snapshots fresh (self-correcting if the true score ever changes,
 // e.g. a level-based ability increase).
-function recoverSpellburnAbility(ability) {
+function recoverSpellburnAbility(ability, extraNote = "") {
   const maxEl = document.getElementById("pc-spellburnMax");
   let maxMap = {};
   try { maxMap = JSON.parse((maxEl && maxEl.value) || "{}"); } catch (e) { maxMap = {}; }
@@ -6413,7 +6414,7 @@ function recoverSpellburnAbility(ability) {
   if (maxEl) maxEl.value = JSON.stringify(maxMap);
   refreshDerivedPcFields();
   scheduleSave();
-  showStatus(`New Day: recovered 1 point of ${spellburnAbilityLabel(ability)} (now ${next}).`, false, 5000);
+  showStatus(`New Day: recovered 1 point of ${spellburnAbilityLabel(ability)} (now ${next}).${extraNote}`, false, 5000);
 }
 
 // Luck-specific sibling of spellburnRecoverableAbilities/recoverSpellburnAbility
@@ -6440,7 +6441,7 @@ function luckRecoverable(cls) {
 // capped at pc-luckMax's snapshotted true score. Same "clear the snapshot
 // once fully healed, so a later burn re-snapshots fresh" contract
 // recoverSpellburnAbility follows.
-function recoverLuck(cls) {
+function recoverLuck(cls, extraNote = "") {
   const maxEl = document.getElementById("pc-luckMax");
   const maxVal = maxEl && maxEl.value ? parseInt(maxEl.value, 10) : NaN;
   if (!Number.isFinite(maxVal)) return;
@@ -6454,7 +6455,40 @@ function recoverLuck(cls) {
   if (next >= maxVal && maxEl) maxEl.value = "";
   refreshDerivedPcFields();
   scheduleSave();
-  showStatus(`New Day: recovered ${next - current} point${next - current === 1 ? "" : "s"} of Luck (now ${next}, ${cls}'s own Level).`, false, 5000);
+  showStatus(`New Day: recovered ${next - current} point${next - current === 1 ? "" : "s"} of Luck (now ${next}, ${cls}'s own Level).${extraNote}`, false, 5000);
+}
+
+// Natural healing - "you heal 1 HP for every night's rest," every class,
+// no eligibility check the way Spellburn/Luck recovery need (see
+// spellburnRecoverableAbilities/luckRecoverable) since there's nothing to
+// choose between: it just happens alongside whatever else New Day
+// recovers. Capped at Max HP; a silent no-op (returns 0) once already
+// there, or if the HP fields aren't parseable (e.g. blank on a
+// still-being-built character).
+function healPcHpOvernight() {
+  const curEl = document.getElementById("pc-hp-current");
+  const maxEl = document.getElementById("pc-hp-max");
+  if (!curEl || !maxEl) return 0;
+  const current = Number(curEl.value);
+  const max = Number(maxEl.value);
+  if (!Number.isFinite(current) || !Number.isFinite(max) || current >= max) return 0;
+  const next = Math.min(max, current + 1);
+  curEl.value = String(next);
+  scheduleSave();
+  return next - current;
+}
+
+// Builds the shared "also recovered X, Y" trailer New Day's own status
+// messages append after whatever headline event happened (a Spellburn/
+// Luck point, or "nothing to recover") - HP healing and Lost-spell
+// clearing happen unconditionally every click, regardless of class, so
+// they're always folded in here rather than getting their own separate
+// showStatus call (which would just overwrite whichever one lands last).
+function newDayExtraNote(hpHealed, lostCleared) {
+  const parts = [];
+  if (hpHealed > 0) parts.push(`+${hpHealed} HP`);
+  if (lostCleared > 0) parts.push(`${lostCleared} lost spell${lostCleared === 1 ? "" : "s"} recovered`);
+  return parts.length ? ` ${parts.join(", ")}.` : "";
 }
 
 // Resting also clears every known spell's Lost flag (see
@@ -6480,12 +6514,19 @@ function clearAllLostSpells() {
 // only one eligible item there's nothing to choose, so this recovers it
 // directly instead of asking. Each item is `{ ability }` for a Spellburn
 // recovery (flat +1) or `{ luck: true }` for a Luck recovery (+Level,
-// Thief/Halfling only).
+// Thief/Halfling only). Natural HP healing and clearing Lost spells both
+// run unconditionally for EVERY class, regardless of what (if anything)
+// is eligible below - see healPcHpOvernight/clearAllLostSpells' own
+// comments - so New Day is worth clicking even for a class with nothing
+// to choose from.
 function openNewDayModal() {
-  // Runs unconditionally, before the early-return below - a Wizard/Elf
-  // with a Lost spell but nothing currently burned would otherwise see
-  // "nothing to recover" and never get it back.
+  // Both run unconditionally, before the early-return below - a Warrior
+  // at full HP with no Lost spells would otherwise see "nothing to
+  // recover" even on a night that DID heal them, and a Wizard/Elf with a
+  // Lost spell but nothing currently burned would never get it back.
   const lostCleared = clearAllLostSpells();
+  const hpHealed = healPcHpOvernight();
+  const extraNote = newDayExtraNote(hpHealed, lostCleared);
   const classEl = document.getElementById("pc-class");
   const cls = classEl ? classEl.value : "";
   const recoverable = [
@@ -6493,9 +6534,9 @@ function openNewDayModal() {
     ...(luckRecoverable(cls) ? [{ luck: true }] : []),
   ];
   if (!recoverable.length) {
-    if (lostCleared > 0) {
+    if (extraNote) {
       scheduleSave();
-      showStatus(`New Day: ${lostCleared} lost spell${lostCleared === 1 ? "" : "s"} recovered. Nothing else to recover.`, false, 5000);
+      showStatus(`New Day:${extraNote}`, false, 5000);
     } else {
       showStatus("New Day: nothing to recover.", false, 4000);
     }
@@ -6503,7 +6544,7 @@ function openNewDayModal() {
   }
   if (recoverable.length === 1) {
     const only = recoverable[0];
-    if (only.luck) recoverLuck(cls); else recoverSpellburnAbility(only.ability);
+    if (only.luck) recoverLuck(cls, extraNote); else recoverSpellburnAbility(only.ability, extraNote);
     return;
   }
   const body = document.getElementById("newday-modal-body");
@@ -6530,8 +6571,8 @@ function openNewDayModal() {
   }).join("");
   body.querySelectorAll(".newday-modal-recover").forEach(btn => {
     btn.addEventListener("click", () => {
-      if (btn.dataset.luck) { recoverLuck(cls); closeNewDayModal(); return; }
-      recoverSpellburnAbility(btn.dataset.ability);
+      if (btn.dataset.luck) { recoverLuck(cls, extraNote); closeNewDayModal(); return; }
+      recoverSpellburnAbility(btn.dataset.ability, extraNote);
       closeNewDayModal();
     });
   });
@@ -9035,11 +9076,11 @@ function recalcPcSpellSection() {
   const classEl = document.getElementById("pc-class");
   const cls = classEl ? classEl.value : "";
   const abilityId = pcCasterAbilityId(cls);
-  // Spellburn is a Wizard/Elf-only mechanic in DCC RAW (Clerics pray to
-  // their deity rather than spellburn), same Int-based-caster gate the
-  // Cast-a-Spell row's own Spellburn controls use (spellAttackRowHtml).
-  const newDayBtn = document.getElementById("pc-spellburn-newday-btn");
-  if (newDayBtn) newDayBtn.style.display = abilityId === "int" ? "" : "none";
+  // New Day is EVERY class's button now - natural healing (1 HP/night)
+  // applies to everyone, not just Wizard/Elf's own Spellburn recovery or
+  // Thief/Halfling's own Luck recovery (see openNewDayModal's own
+  // comment), so unlike Corruption/Disapproval below this is never hidden
+  // by class.
   // Corruption (Tables 5-3/5-4/5-5) is a Wizard/Elf-only consequence;
   // Disapproval (Table 5-7) is Cleric's equivalent - see
   // openCorruptionModal/openDisapprovalModal.
