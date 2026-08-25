@@ -777,19 +777,24 @@
   }
   .open-spells-btn:hover { filter: brightness(1.1); }
   .open-spells-count { font-size: 11px; font-weight: 700; opacity: 0.75; }
-  .spellburn-row, .attack-detail-burn-row { margin-top: 4px; }
+  .spellburn-row, .attack-detail-burn-row, .reversed-row, .attack-detail-reversed-row { margin-top: 4px; }
   /* .hp-btn's base size (22x22px, meant for one icon glyph) squeezes any
      button that also carries a text label - both this row's own
      Spellburn button and .newday-modal-recover need the same
      auto-width/padded treatment .backstab-toggle-btn already gets for the
      same reason. */
-  .spell-attack-burn-btn, .tracker-burn-btn, .newday-modal-recover, #pc-corruption-btn, #pc-disapproval-btn {
+  .spell-attack-burn-btn, .tracker-burn-btn, .newday-modal-recover, #pc-corruption-btn, #pc-disapproval-btn,
+  .spell-attack-reversed-btn, .tracker-reversed-btn {
     width: auto;
     height: auto;
     padding: 3px 8px;
     font-size: 11px;
     white-space: nowrap;
   }
+  /* Reversing Spells (DCC RPG core rulebook) - "on" means this row is
+     currently attempting the Cast Reversed direction, same on/off
+     highlight treatment as .backstab-toggle-btn.on. */
+  .spell-attack-reversed-btn.on, .tracker-reversed-btn.on { background: #4a6fa5; color: #fff; border-color: #4a6fa5; }
   /* New Day is a deliberate, once-per-in-game-day action (Spellburn AND
      Lost Spells recovery - see openNewDayModal), not a small inline
      toggle like the buttons just above - same "big, obvious entry point"
@@ -1430,7 +1435,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 15:11</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 15:26</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -4938,6 +4943,18 @@ function readAttacks(mode) {
       } catch (e) {
         base.spellburnPending = {};
       }
+      // Reversing Spells (DCC RPG core rulebook) - which direction this
+      // row is currently attempting per Action Die slot, same "declared/
+      // edited elsewhere, just carried forward here unchanged" contract as
+      // lineDeeds/spellBySlot/spellburnPending above, via the matching
+      // data-cast-reversed-by-slot attribute. Unlike spellburnPending this
+      // ISN'T cleared after a roll - it's a standing declaration (like the
+      // Poisoned checkbox on a weapon row), not a one-shot spend.
+      try {
+        base.castReversedBySlot = JSON.parse(row.dataset.castReversedBySlot || "{}");
+      } catch (e) {
+        base.castReversedBySlot = {};
+      }
     }
     return base;
   });
@@ -5259,6 +5276,24 @@ function attachAttackRowListeners(mode) {
         spellBurnBtn.addEventListener("click", () => {
           const actDieEl = row.querySelector(".attack-action-die");
           openSpellburnModal({ kind: "sheet", row, slotKey: actDieEl ? actDieEl.value : "0" });
+        });
+      }
+      // Reversing Spells (DCC RPG core rulebook) - flips THIS row's own
+      // per-slot standing declaration (data-cast-reversed-by-slot, same
+      // shape as data-spellburn-pending) and re-renders just this row's
+      // passive fields, same "live toggle, no full row rebuild" contract
+      // the ability-toggle-btn above already follows.
+      const reversedBtn = row.querySelector(".spell-attack-reversed-btn");
+      if (reversedBtn) {
+        reversedBtn.addEventListener("click", () => {
+          const actDieEl = row.querySelector(".attack-action-die");
+          const slotKey = actDieEl ? actDieEl.value : "0";
+          let byslot = {};
+          try { byslot = JSON.parse(row.dataset.castReversedBySlot || "{}"); } catch (e) { byslot = {}; }
+          byslot[slotKey] = !byslot[slotKey];
+          row.dataset.castReversedBySlot = JSON.stringify(byslot);
+          refreshSpellAttackRows();
+          scheduleSave();
         });
       }
       const equippedBox = row.querySelector(".attack-equipped");
@@ -7496,6 +7531,17 @@ function isSpellLost(name) {
   return !!(item && item.lost);
 }
 
+// Same lookup as isSpellLost, but for the roster item's own Learned
+// Reversed flag (see reversedCheckboxHtml) - used to detect a mismatch
+// against the Cast-a-Spell row's own 🔄 Cast Reversed toggle (see
+// pcSpellCheckModifierBreakdown).
+function isSpellReversedLearned(name) {
+  const trimmed = (name || "").trim();
+  if (!trimmed) return false;
+  const item = readSpellItems().find(s => (s.name || "").trim() === trimmed);
+  return !!(item && item.reversed);
+}
+
 // Same lookup as isSpellLost, but for the roster item's own Level field -
 // used to gate "regaining spells via spellburn" (DCC RPG core rulebook: a
 // wizard may cast a spell they've Lost for the day by burning that spell's
@@ -7543,7 +7589,7 @@ function setSpellLost(name, lost) {
 // die further along the dice chain and/or adds a flat bonus/penalty on
 // top - Table 5-2 has many results shaped exactly like that (e.g. "die
 // improved by one step" or "-4 penalty to spell checks").
-function pcSpellCheckModifierBreakdown(atk, spellburnPoints = 0) {
+function pcSpellCheckModifierBreakdown(atk, spellburnPoints = 0, reversedMismatch = false) {
   const classEl = document.getElementById("pc-class");
   const cls = classEl ? classEl.value : "";
   const abilityId = pcCasterAbilityId(cls);
@@ -7555,7 +7601,13 @@ function pcSpellCheckModifierBreakdown(atk, spellburnPoints = 0) {
   const penalty = hinderedByArmor ? computePcCheckPenaltyTotal() : 0;
   const baseSides = actionDieProfileForAttackLive(atk).sides;
   const mercurial = mercurialAdjustmentForSpell(atk && atk.name);
-  const sides = mercurial && mercurial.dieSteps ? stepDiceChain(baseSides, mercurial.dieSteps) : baseSides;
+  const mercurialSides = mercurial && mercurial.dieSteps ? stepDiceChain(baseSides, mercurial.dieSteps) : baseSides;
+  // Reversing Spells (DCC RPG core rulebook) - attempting the direction
+  // that doesn't match this spell's own Learned Reversed flag (see
+  // isSpellReversedLearned/reversedCheckboxHtml) costs one MORE step down
+  // the dice chain, stacked on top of Mercurial Magic's own adjustment
+  // above rather than replacing it.
+  const sides = reversedMismatch ? stepDiceChain(mercurialSides, -1) : mercurialSides;
   const mercurialBonus = mercurial ? mercurial.bonus : 0;
   const modifier = level + abilityMod + penalty + mercurialBonus + spellburnPoints;
   const abilityLabel = abilityId === "per" ? "Personality" : "Intelligence";
@@ -7563,8 +7615,8 @@ function pcSpellCheckModifierBreakdown(atk, spellburnPoints = 0) {
   if (hinderedByArmor && penalty) parts.push(`Armor Check Penalty ${formatSignedNumber(penalty)}`);
   if (mercurialBonus) parts.push(`Mercurial Magic ${formatSignedNumber(mercurialBonus)}`);
   if (spellburnPoints) parts.push(`Spellburn ${formatSignedNumber(spellburnPoints)}`);
-  const breakdown = `Spell Check = d${sides} ${parts.join(" + ")} = ${formatSignedNumber(modifier)}.${hinderedByArmor ? "" : " Not hindered by armor (Cleric)."}`;
-  return { cls, abilityId, level, abilityMod, penalty, sides, modifier, breakdown, spellburnPoints };
+  const breakdown = `Spell Check = d${sides}${reversedMismatch ? " (Reversing Spells: -1 die step)" : ""} ${parts.join(" + ")} = ${formatSignedNumber(modifier)}.${hinderedByArmor ? "" : " Not hindered by armor (Cleric)."}`;
+  return { cls, abilityId, level, abilityMod, penalty, sides, modifier, breakdown, spellburnPoints, reversedMismatch };
 }
 
 // Same math as pcSpellCheckModifierBreakdown, but sourced from a token's
@@ -7576,7 +7628,7 @@ function pcSpellCheckModifierBreakdown(atk, spellburnPoints = 0) {
 // carries whichever Action Die this particular roll/line is spending AND
 // the spell's name - see pcSpellCheckModifierBreakdown's own comment on
 // why both matter.
-function pcSpellCheckModifierBreakdownForStats(stats, atk, spellburnPoints = 0) {
+function pcSpellCheckModifierBreakdownForStats(stats, atk, spellburnPoints = 0, reversedMismatch = false) {
   const cls = (stats.data.class || "").trim();
   const abilityId = pcCasterAbilityId(cls);
   if (!abilityId) return null;
@@ -7587,7 +7639,9 @@ function pcSpellCheckModifierBreakdownForStats(stats, atk, spellburnPoints = 0) 
   const penalty = hinderedByArmor ? equippedItems.reduce((sum, item) => sum + (parseInt(item.checkPenalty, 10) || 0), 0) : 0;
   const baseSides = actionDieProfileForAttack(stats, atk || {}).sides;
   const mercurial = mercurialAdjustmentForSpellStats(stats, atk && atk.name);
-  const sides = mercurial && mercurial.dieSteps ? stepDiceChain(baseSides, mercurial.dieSteps) : baseSides;
+  const mercurialSides = mercurial && mercurial.dieSteps ? stepDiceChain(baseSides, mercurial.dieSteps) : baseSides;
+  // Reversing Spells - see pcSpellCheckModifierBreakdown's own comment.
+  const sides = reversedMismatch ? stepDiceChain(mercurialSides, -1) : mercurialSides;
   const mercurialBonus = mercurial ? mercurial.bonus : 0;
   const modifier = level + abilityMod + penalty + mercurialBonus + spellburnPoints;
   const abilityLabel = abilityId === "per" ? "Personality" : "Intelligence";
@@ -7595,12 +7649,12 @@ function pcSpellCheckModifierBreakdownForStats(stats, atk, spellburnPoints = 0) 
   if (hinderedByArmor && penalty) parts.push(`Armor Check Penalty ${formatSignedNumber(penalty)}`);
   if (mercurialBonus) parts.push(`Mercurial Magic ${formatSignedNumber(mercurialBonus)}`);
   if (spellburnPoints) parts.push(`Spellburn ${formatSignedNumber(spellburnPoints)}`);
-  const breakdown = `Spell Check = d${sides} ${parts.join(" + ")} = ${formatSignedNumber(modifier)}.${hinderedByArmor ? "" : " Not hindered by armor (Cleric)."}`;
-  return { cls, abilityId, level, abilityMod, penalty, sides, modifier, breakdown, spellburnPoints };
+  const breakdown = `Spell Check = d${sides}${reversedMismatch ? " (Reversing Spells: -1 die step)" : ""} ${parts.join(" + ")} = ${formatSignedNumber(modifier)}.${hinderedByArmor ? "" : " Not hindered by armor (Cleric)."}`;
+  return { cls, abilityId, level, abilityMod, penalty, sides, modifier, breakdown, spellburnPoints, reversedMismatch };
 }
 
 function emptySpellItem() {
-  return { id: "g" + Math.random().toString(36).slice(2, 9), name: "", mercurial: null, mercurialNote: "", mercurialBonus: "", mercurialDieSteps: "", manifestation: "", concentration: false, lost: false, level: "", range: "", duration: "", castingTime: "", save: "", effectRows: [] };
+  return { id: "g" + Math.random().toString(36).slice(2, 9), name: "", mercurial: null, mercurialNote: "", mercurialBonus: "", mercurialDieSteps: "", manifestation: "", concentration: false, lost: false, reversed: false, level: "", range: "", duration: "", castingTime: "", save: "", effectRows: [] };
 }
 
 function emptySpellEffectRow() {
@@ -7755,6 +7809,8 @@ function spellRowHtml(item) {
   // Lost (see lostCheckboxHtml) - Wizard/Elf only, same gate as Mercurial
   // Magic/Spellburn above; Clerics get Disapproval instead.
   const lostCheckboxHtmlValue = isWizardOrElf && hasSpell ? lostCheckboxHtml(item) : "";
+  // Reversing Spells (see reversedCheckboxHtml) - same gate as Lost above.
+  const reversedCheckboxHtmlValue = isWizardOrElf && hasSpell ? reversedCheckboxHtml(item) : "";
   // Auto-fills note/bonus/die-step from the table for a roll that doesn't
   // have them saved yet (e.g. one rolled before this feature existed, or
   // the roll number was just edited elsewhere) - but never overwrites
@@ -7779,6 +7835,7 @@ function spellRowHtml(item) {
         ${mercurialBtnHtml}
         ${concentrationCheckboxHtml(item)}
         ${lostCheckboxHtmlValue}
+        ${reversedCheckboxHtmlValue}
         <button type="button" class="attack-remove-btn spell-row-remove-btn" title="Remove">×</button>
       </div>
       ${spellStatblockHtml(item)}
@@ -7822,6 +7879,22 @@ function concentrationCheckboxHtml(item) {
 function lostCheckboxHtml(item) {
   return `<label class="spell-lost-wrap" title="Lost (DCC RPG core rulebook) - a failed Spell Check loses this spell until you rest. This app defaults to flagging any total of 11 or under (see the Cast-a-Spell row's own 🔒 badge) - check this spell's own casting table for exceptions and correct it here if needed.">
     <input type="checkbox" class="spell-lost" ${item.lost ? "checked" : ""} />🔒
+  </label>`;
+}
+
+// Reversing Spells (DCC RPG core rulebook): a wizard learns EITHER a
+// spell's normal or reversed version as their known slot (e.g. Mending vs
+// Tear, Enlarge vs Shrink) - the spell list here only has one entry per
+// pair (there's no separate "Tear" to pick instead of "Mending"), so this
+// checkbox is what actually records which version THIS known spell is.
+// Attempting the direction that does NOT match this flag costs a step down
+// the dice chain - see the Cast-a-Spell row's own 🔄 toggle
+// (spellAttackRowHtml/pcSpellCheckModifierBreakdown) for where that
+// mismatch is actually detected and applied. Wizard/Elf only, same gate as
+// Mercurial Magic/Lost above (Clerics don't reverse spells in DCC RAW).
+function reversedCheckboxHtml(item) {
+  return `<label class="spell-reversed-wrap" title="Learned Reversed (DCC RPG core rulebook) - check this if the spell slot is actually known in its REVERSED form (e.g. Tear instead of Mending). Casting the direction that doesn't match this costs a step down the dice chain - see the 🔄 Cast Reversed toggle on the Cast-a-Spell row.">
+    <input type="checkbox" class="spell-reversed" ${item.reversed ? "checked" : ""} />🔄
   </label>`;
 }
 
@@ -7902,6 +7975,10 @@ function readSpellItems() {
     // gap" contract as Concentration, just Wizard/Elf-gated at render time.
     const lostEl = row.querySelector(".spell-lost");
     const lost = lostEl ? lostEl.checked : false;
+    // Reversing Spells (see reversedCheckboxHtml) - same "always there, no
+    // appear-later gap" contract as Lost/Concentration.
+    const reversedEl = row.querySelector(".spell-reversed");
+    const reversed = reversedEl ? reversedEl.checked : false;
     // Stat-block (see spellStatblockHtml) - plain persistent fields, same
     // "always there, no appear-later gap" contract as Manifestation.
     const levelEl = row.querySelector(".spell-level");
@@ -7925,7 +8002,7 @@ function readSpellItems() {
       const textEl = effectRow.querySelector(".spell-effect-text");
       return { id: effectRow.dataset.id, range: rangeInputEl ? rangeInputEl.value : "", text: textEl ? textEl.value : "" };
     });
-    return { id: row.dataset.id, name, mercurial, mercurialNote, mercurialBonus, mercurialDieSteps, manifestation, concentration, lost, level, range, duration, castingTime, save, effectRows };
+    return { id: row.dataset.id, name, mercurial, mercurialNote, mercurialBonus, mercurialDieSteps, manifestation, concentration, lost, reversed, level, range, duration, castingTime, save, effectRows };
   });
 }
 
@@ -8032,6 +8109,16 @@ function attachSpellRowListeners() {
     const lostEl = row.querySelector(".spell-lost");
     if (lostEl) {
       lostEl.addEventListener("change", () => {
+        scheduleSave();
+        refreshSpellAttackRows();
+      });
+    }
+    // Wizard/Elf only, once a spell's named (see reversedCheckboxHtml) -
+    // also refreshes the Cast-a-Spell row(s) so their Bonus/🔄 toggle
+    // titles immediately reflect the new Learned Reversed state.
+    const reversedEl = row.querySelector(".spell-reversed");
+    if (reversedEl) {
+      reversedEl.addEventListener("change", () => {
         scheduleSave();
         refreshSpellAttackRows();
       });
@@ -8418,7 +8505,17 @@ function spellAttackRowHtml(atk) {
   // shows the correct boosted total rather than resetting to 0.
   const spellburnPending = atk.spellburnPending || {};
   const pendingPoints = spellburnPending[effectiveActionDieIndex] || 0;
-  const check = pcSpellCheckModifierBreakdown({ ...atk, actionDieIndex: effectiveActionDieIndex }, pendingPoints);
+  // Reversing Spells (DCC RPG core rulebook) - whether THIS Action Die
+  // slot is currently attempting the direction that doesn't match this
+  // spell's own Learned Reversed flag (see isSpellReversedLearned/
+  // reversedCheckboxHtml). Folded into the bonus preview here exactly like
+  // Spellburn/Mercurial Magic above, so the die shown always matches what
+  // rollSpellAttackRow will actually roll.
+  const castReversedBySlot = atk.castReversedBySlot || {};
+  const attemptReversed = !!castReversedBySlot[effectiveActionDieIndex];
+  const learnedReversed = isSpellReversedLearned(atk.name);
+  const reversedMismatch = attemptReversed !== learnedReversed;
+  const check = pcSpellCheckModifierBreakdown({ ...atk, actionDieIndex: effectiveActionDieIndex }, pendingPoints, reversedMismatch);
   const bonusText = check ? formatSignedNumber(check.modifier) : "";
   const bonusTitle = check ? check.breakdown : "Only Cleric/Wizard/Elf have a Spell Check - pick a caster Class above.";
   // Same die badge weapon rows show (attackRowHtml's weapon-badge-die) -
@@ -8443,6 +8540,7 @@ function spellAttackRowHtml(atk) {
   const dieBadgeHtml = (check || isLost) ? `<div class="attack-row-badges">${check ? `<span class="weapon-badge weapon-badge-die" title="Spell Check die this row rolls">d${check.sides}</span>` : ""}${lostBadgeHtml}</div>` : "";
   const spellBySlotAttr = escapeHtml(JSON.stringify(atk.spellBySlot || {}));
   const spellburnPendingAttr = escapeHtml(JSON.stringify(spellburnPending));
+  const castReversedBySlotAttr = escapeHtml(JSON.stringify(castReversedBySlot));
   // Spellburn (DCC RPG core rulebook) - Wizard/Elf only (check.abilityId
   // === "int"; Clerics pray to their deity, no spellburn in DCC RAW), and
   // only once a spell's actually picked, same gating Mercurial Magic's own
@@ -8461,8 +8559,26 @@ function spellAttackRowHtml(atk) {
         <button type="button" class="hp-btn spell-attack-burn-btn" title="${escapeHtml(spellburnBtnTitle)}">🩸 Spellburn${pendingPoints > 0 ? ` (${pendingPoints})` : ""}</button>
       </div>`
     : "";
+  // Reversing Spells (DCC RPG core rulebook) - Wizard/Elf only, same gate
+  // as Spellburn just above. A standing per-slot toggle (like the Poisoned
+  // checkbox on a weapon row), not a one-shot declaration - stays as
+  // clicked until the player changes it, since which direction a wizard is
+  // attempting doesn't reset itself after one cast the way spent Spellburn
+  // points do.
+  const reversedBtnTitle = learnedReversed
+    ? (attemptReversed
+      ? "Casting Reversed - matches how this spell was learned, no penalty."
+      : "Casting Normal - this spell was learned in its REVERSED form, so this costs 1 step down the dice chain (Reversing Spells). Click to switch to Reversed and avoid the penalty.")
+    : (attemptReversed
+      ? "Casting Reversed - this spell was learned in its NORMAL form, so this costs 1 step down the dice chain (Reversing Spells). Click to switch back to Normal and avoid the penalty."
+      : "Casting Normal - matches how this spell was learned, no penalty. Click to attempt casting it Reversed instead (costs 1 step down the dice chain).");
+  const reversedHtml = (check && check.abilityId === "int" && atk.name && atk.name.trim())
+    ? `<div class="reversed-row">
+        <button type="button" class="hp-btn spell-attack-reversed-btn${attemptReversed ? " on" : ""}" title="${escapeHtml(reversedBtnTitle)}">🔄 Cast ${attemptReversed ? "Reversed" : "Normal"}</button>
+      </div>`
+    : "";
   return `
-    <div class="attack-row pc-attack-row spell-attack-row" data-id="${atk.id}" data-line-deeds="{}" data-spell-by-slot="${spellBySlotAttr}" data-spellburn-pending="${spellburnPendingAttr}">
+    <div class="attack-row pc-attack-row spell-attack-row" data-id="${atk.id}" data-line-deeds="{}" data-spell-by-slot="${spellBySlotAttr}" data-spellburn-pending="${spellburnPendingAttr}" data-cast-reversed-by-slot="${castReversedBySlotAttr}">
       <div class="attack-weapon-line">
         <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
         ${actDieSelectHtml}
@@ -8477,12 +8593,13 @@ function spellAttackRowHtml(atk) {
         <button type="button" class="attack-remove-btn" title="Remove">×</button>
       </div>
       ${spellburnHtml}
+      ${reversedHtml}
       ${check ? "" : `<div class="attack-row-meta">Only Cleric/Wizard/Elf have a Spell Check - pick a caster Class above to roll this row.</div>`}
     </div>`;
 }
 
 function emptySpellAttack() {
-  return { ...emptyAttack(), weapon: SPELL_ATTACK_KEY, spellBySlot: {}, spellburnPending: {} };
+  return { ...emptyAttack(), weapon: SPELL_ATTACK_KEY, spellBySlot: {}, spellburnPending: {}, castReversedBySlot: {} };
 }
 
 // Casters get exactly one "Cast a Spell" Attacks row, added automatically
@@ -8537,11 +8654,29 @@ function refreshSpellAttackRows() {
     let pending = {};
     try { pending = JSON.parse(row.dataset.spellburnPending || "{}"); } catch (e) { pending = {}; }
     const pendingPoints = pending[slotKeyForBurn] || 0;
-    const check = pcSpellCheckModifierBreakdown({ actionDieIndex: actDieEl ? actDieEl.value : "", name: nameEl2 ? nameEl2.value : "" }, pendingPoints);
+    // Reversing Spells - see spellAttackRowHtml's own comment.
+    let castReversedBySlot = {};
+    try { castReversedBySlot = JSON.parse(row.dataset.castReversedBySlot || "{}"); } catch (e) { castReversedBySlot = {}; }
+    const attemptReversed = !!castReversedBySlot[slotKeyForBurn];
+    const learnedReversed = isSpellReversedLearned(nameEl2 ? nameEl2.value : "");
+    const reversedMismatch = attemptReversed !== learnedReversed;
+    const check = pcSpellCheckModifierBreakdown({ actionDieIndex: actDieEl ? actDieEl.value : "", name: nameEl2 ? nameEl2.value : "" }, pendingPoints, reversedMismatch);
     bonusInput.value = check ? formatSignedNumber(check.modifier) : "";
     bonusInput.title = check ? check.breakdown : "Only Cleric/Wizard/Elf have a Spell Check - pick a caster Class above.";
     const burnBtn = row.querySelector(".spell-attack-burn-btn");
     if (burnBtn) burnBtn.textContent = `🩸 Spellburn${pendingPoints > 0 ? ` (${pendingPoints})` : ""}`;
+    const reversedBtn = row.querySelector(".spell-attack-reversed-btn");
+    if (reversedBtn) {
+      reversedBtn.classList.toggle("on", attemptReversed);
+      reversedBtn.textContent = `🔄 Cast ${attemptReversed ? "Reversed" : "Normal"}`;
+      reversedBtn.title = learnedReversed
+        ? (attemptReversed
+          ? "Casting Reversed - matches how this spell was learned, no penalty."
+          : "Casting Normal - this spell was learned in its REVERSED form, so this costs 1 step down the dice chain (Reversing Spells). Click to switch to Reversed and avoid the penalty.")
+        : (attemptReversed
+          ? "Casting Reversed - this spell was learned in its NORMAL form, so this costs 1 step down the dice chain (Reversing Spells). Click to switch back to Normal and avoid the penalty."
+          : "Casting Normal - matches how this spell was learned, no penalty. Click to attempt casting it Reversed instead (costs 1 step down the dice chain).");
+    }
     // Die badge (see spellAttackRowHtml) can go stale between full row
     // rebuilds on its own - a class/level change can shift an EXTRA
     // Action Die's size (Table 1-12's 2nd attack: d14 at level 5, d16 at
@@ -8646,7 +8781,13 @@ function rollSpellAttackRow(row) {
   let pending = {};
   try { pending = JSON.parse(row.dataset.spellburnPending || "{}"); } catch (e) { pending = {}; }
   const burnPoints = pending[slotKeyForBurn] || 0;
-  const check = pcSpellCheckModifierBreakdown({ actionDieIndex: actDieEl ? actDieEl.value : "", name: selectEl ? selectEl.value : "" }, burnPoints);
+  // Reversing Spells - see spellAttackRowHtml's own comment.
+  let castReversedBySlot = {};
+  try { castReversedBySlot = JSON.parse(row.dataset.castReversedBySlot || "{}"); } catch (e) { castReversedBySlot = {}; }
+  const attemptReversed = !!castReversedBySlot[slotKeyForBurn];
+  const learnedReversed = isSpellReversedLearned(selectEl ? selectEl.value : "");
+  const reversedMismatch = attemptReversed !== learnedReversed;
+  const check = pcSpellCheckModifierBreakdown({ actionDieIndex: actDieEl ? actDieEl.value : "", name: selectEl ? selectEl.value : "" }, burnPoints, reversedMismatch);
   if (!check) {
     showStatus("Only Cleric/Wizard/Elf roll a Spell Check.", true, 4000);
     return;
@@ -8675,6 +8816,10 @@ function rollSpellAttackRow(row) {
   const rolled = autoNat ? check.sides : (Math.floor(Math.random() * check.sides) + 1);
   const { critBonus, note: baseNote } = spellCheckNaturalResultText(rolled, check.sides, check.level);
   let note = autoNat ? `${baseNote} (forced by Spellburn - ${burnPoints} points spent)` : baseNote;
+  // Reversing Spells (DCC RPG core rulebook) - see spellAttackRowHtml's own
+  // comment; the die itself is already reduced (check.sides), this just
+  // surfaces WHY in the roll result.
+  if (reversedMismatch) note += ` 🔄 Reversing Spells: cast in the direction this spell wasn't learned in - Spell Check die reduced 1 step.`;
   const total = rolled + check.modifier + critBonus;
   // Lost (see isSpellLost/setSpellLost's own comment) - this app has no
   // per-spell casting tables to check the actual threshold against, so it
@@ -11180,6 +11325,14 @@ function isSpellLostForStats(stats, name) {
   return !!(spellItem && spellItem.lost);
 }
 
+// Stats-based sibling of isSpellReversedLearned - see its own comment.
+function isSpellReversedLearnedForStats(stats, name) {
+  const trimmed = (name || "").trim();
+  if (!trimmed) return false;
+  const spellItem = (stats.data.pcSpells || []).find(s => (s.name || "").trim() === trimmed);
+  return !!(spellItem && spellItem.reversed);
+}
+
 // Stats-based sibling of spellLevelForName - see its own comment.
 function spellLevelForNameForStats(stats, name) {
   const trimmed = (name || "").trim();
@@ -11415,7 +11568,13 @@ function spellTrackerLineHtml(item, stats, line) {
   // repaint mid-declaration (every "-" click writes to metadata and rides
   // the normal onChange repaint, same as any other Tracker write here).
   const pendingPoints = (atk.spellburnPending && atk.spellburnPending[line.slotKey]) || 0;
-  const check = pcSpellCheckModifierBreakdownForStats(stats, { ...atk, actionDieIndex: line.slotKey }, pendingPoints);
+  // Reversing Spells - see spellAttackRowHtml's own comment (Sheet-side
+  // sibling); same rule, applied here off stats/metadata instead of the
+  // live Sheet DOM.
+  const attemptReversed = !!(atk.castReversedBySlot && atk.castReversedBySlot[line.slotKey]);
+  const learnedReversed = isSpellReversedLearnedForStats(stats, atk.name);
+  const reversedMismatch = attemptReversed !== learnedReversed;
+  const check = pcSpellCheckModifierBreakdownForStats(stats, { ...atk, actionDieIndex: line.slotKey }, pendingPoints, reversedMismatch);
   const bonusText = check ? formatSignedNumber(check.modifier) : "+0";
   const bonusTooltip = check ? check.breakdown : "Only Cleric/Wizard/Elf have a Spell Check.";
   // Reminder badge (same 🧠 icon as the Spells section's own checkbox -
@@ -11450,6 +11609,23 @@ function spellTrackerLineHtml(item, stats, line) {
         <button class="hp-btn tracker-burn-btn" title="${escapeHtml(burnBtnTitle)}">🩸 Spellburn${pendingPoints > 0 ? ` (${pendingPoints})` : ""}</button>
       </div>`
     : "";
+  // Reversing Spells (DCC RPG core rulebook) - Wizard/Elf only, same gate
+  // as Spellburn just above and same "standing per-slot toggle, not a
+  // one-shot spend" contract as the Sheet's own spell-attack-reversed-btn.
+  // Persisted via applyTrackerCastReversedToggle, wired in
+  // attachTrackerRowListeners.
+  const reversedBtnTitle = learnedReversed
+    ? (attemptReversed
+      ? "Casting Reversed - matches how this spell was learned, no penalty."
+      : "Casting Normal - this spell was learned in its REVERSED form, so this costs 1 step down the dice chain (Reversing Spells). Click to switch to Reversed and avoid the penalty.")
+    : (attemptReversed
+      ? "Casting Reversed - this spell was learned in its NORMAL form, so this costs 1 step down the dice chain (Reversing Spells). Click to switch back to Normal and avoid the penalty."
+      : "Casting Normal - matches how this spell was learned, no penalty. Click to attempt casting it Reversed instead (costs 1 step down the dice chain).");
+  const reversedHtml = (check && check.abilityId === "int")
+    ? `<div class="attack-detail-reversed-row">
+        <button class="hp-btn tracker-reversed-btn${attemptReversed ? " on" : ""}" title="${escapeHtml(reversedBtnTitle)}">🔄 Cast ${attemptReversed ? "Reversed" : "Normal"}</button>
+      </div>`
+    : "";
   return `
     <div class="attack-detail-row-wrap">
       <div class="attack-detail-row" data-attack-id="${line.attackId}" data-slot-key="${line.slotKey || ""}">
@@ -11460,6 +11636,7 @@ function spellTrackerLineHtml(item, stats, line) {
         <button class="hp-btn attack-roll-btn${rollBlocked ? " disabled" : ""}"${rollBlocked ? " disabled" : ""} title="${rollBlocked ? (spellLevelForBurn !== null ? `This spell is Lost - burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} via 🩸 Spellburn to cast it anyway, or use New Day on the Sheet." : "This spell is Lost until you rest - see the 🔒 badge below (click it to un-mark), or New Day on the Sheet.") : (isLost ? "Regaining this Lost spell via Spellburn - rolling still resolves as a normal Spell Check." : "Roll Spell Check")}">🎲</button>
       </div>
       ${burnHtml}
+      ${reversedHtml}
       ${badges.length ? `<div class="attack-detail-badges">${badges.join(" ")}</div>` : ""}
     </div>`;
 }
@@ -12240,7 +12417,12 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   // was clicked, so all that's left here is applying the accumulated
   // total as this roll's bonus and clearing it afterward.
   const burnPoints = (atk.spellburnPending && atk.spellburnPending[slotKey]) || 0;
-  const check = pcSpellCheckModifierBreakdownForStats(stats, { ...atk, name: effectiveName, actionDieIndex: slotKey }, burnPoints);
+  // Reversing Spells - see spellAttackRowHtml's own comment (Sheet-side
+  // sibling); same rule, resolved off this token's own saved stats.
+  const attemptReversed = !!(atk.castReversedBySlot && atk.castReversedBySlot[slotKey]);
+  const learnedReversed = isSpellReversedLearnedForStats(stats, effectiveName);
+  const reversedMismatch = attemptReversed !== learnedReversed;
+  const check = pcSpellCheckModifierBreakdownForStats(stats, { ...atk, name: effectiveName, actionDieIndex: slotKey }, burnPoints, reversedMismatch);
   if (!check) {
     const msg = `${item.name || "Token"}: Only Cleric/Wizard/Elf roll a Spell Check.`;
     showTrackerStatus(msg, true);
@@ -12276,6 +12458,9 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   // rollAttackFor's own crit/fumble handling already follows.
   const { critBonus, note: baseNote } = spellCheckNaturalResultText(rolled, check.sides, check.level);
   let note = autoNat ? `${baseNote} (forced by Spellburn - ${burnPoints} points spent)` : baseNote;
+  // Reversing Spells - see rollSpellAttackRow's own comment (Sheet-side
+  // sibling).
+  if (reversedMismatch) note += ` 🔄 Reversing Spells: cast in the direction this spell wasn't learned in - Spell Check die reduced 1 step.`;
   const total = rolled + check.modifier + critBonus;
   // Lost (see isSpellLostForStats/setSpellLostForStats's own comment) -
   // same generic-failure-band default and Wizard/Elf-only gate as the
@@ -12573,6 +12758,17 @@ function attachTrackerRowListeners() {
         });
       }
 
+      // Reversing Spells (see applyTrackerCastReversedToggle) - flips this
+      // line's own standing declaration, same "persist then let the normal
+      // items.onChange repaint pick it up" contract as every other Tracker
+      // toggle write here.
+      const reversedBtn = wrap.querySelector(".tracker-reversed-btn");
+      if (reversedBtn) {
+        reversedBtn.addEventListener("click", () => {
+          applyTrackerCastReversedToggle(parentId, attackId, slotKey);
+        });
+      }
+
       // Picking a spell here persists it via applyTrackerSpellSelection,
       // which writes straight to the attack's `name` field (kept in sync
       // with the Sheet's own .spell-attack-select) UNLESS this row has
@@ -12821,6 +13017,29 @@ async function applyTrackerSpellSelection(itemId, attackId, slotKey, name) {
         if (a.id !== attackId) return a;
         if (expanded) return { ...a, spellBySlot: { ...(a.spellBySlot || {}), [slotKey]: name } };
         return { ...a, name };
+      });
+      item.metadata[PC_METADATA_KEY] = data;
+    });
+  });
+  await refreshTracker();
+}
+
+// Tracker-side sibling of the Sheet's own spell-attack-reversed-btn click
+// handler (attachAttackRowListeners) - flips ONE attack's
+// castReversedBySlot[slotKey] straight in item.metadata, same shape as
+// applyTrackerSpellSelection's spellBySlot write above. PC-only, same
+// no-op-for-monsters guard as every other per-attack Tracker write.
+async function applyTrackerCastReversedToggle(itemId, attackId, slotKey) {
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      if (mode !== "pc") return;
+      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+      data.attacks = (data.attacks || []).map(a => {
+        if (a.id !== attackId) return a;
+        const byslot = { ...(a.castReversedBySlot || {}) };
+        byslot[slotKey] = !byslot[slotKey];
+        return { ...a, castReversedBySlot: byslot };
       });
       item.metadata[PC_METADATA_KEY] = data;
     });
