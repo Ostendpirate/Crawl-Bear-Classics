@@ -1430,7 +1430,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 15:01</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 15:11</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1644,7 +1644,7 @@
           <div>
             <label>Title</label>
             <div class="field-sync-row">
-              <input type="text" id="pc-title" placeholder="e.g. Squire, Wildling, Bandit…" title="This class/level/alignment's Title. Auto-fills for levels 1-5 (independently verified against Goodman Games' own free Quick Start Rules and the user's own Core Rulebook) - levels 6-10 aren't confirmed yet, so they're left blank for you to fill in from your own Core Rulebook rather than guess. Type over this any time; a manual entry is never overwritten except by clicking ↻." />
+              <input type="text" id="pc-title" placeholder="e.g. Squire, Wildling, Bandit…" title="This class/level/alignment's Title (independently verified against Goodman Games' own free Quick Start Rules and the user's own Core Rulebook). Auto-fills for levels 1-5; level 6 and up reuse the 5th-level title, since the Core Rulebook has no separate title past 5th. Type over this any time; a manual entry is never overwritten except by clicking ↻." />
               <button type="button" class="derived-sync-btn" id="pc-title-sync-btn" title="Set to this Class/Level/Alignment's Title, if known">↻</button>
             </div>
           </div>
@@ -3091,12 +3091,11 @@ function thiefSkillsData(cls, levelRaw, alignmentRaw) {
 // Titles, Table 1-11 Warrior Titles, Table 1-13 Wizard Titles, Table 1-15
 // Dwarf Titles, Table 1-17 Elf Titles, Table 1-19 Halfling Titles), and
 // match the levels 1-2 data already on file exactly, confirming both
-// sources. Levels 6-10 remain undocumented - not fabricated - since no
-// legitimately accessible source (free or otherwise) has been provided or
-// found for them yet. dccClassTitle()'s "not documented" status (see below)
-// is what drives the Sheet into leaving the Title field for the player to
-// fill in by hand once they've checked their own Core Rulebook, instead of
-// silently showing nothing with no explanation.
+// sources. Every class's Title table stops at level 5 in the Core
+// Rulebook itself - there's no separate title for 6th level and up, so
+// dccClassTitle() clamps any higher level down to 5 and reuses that same
+// title for the rest of the character's career, rather than leaving the
+// Title field blank past 5th.
 // Elf and Halfling titles do NOT vary by alignment (a single title per
 // level covers all three) - Cleric/Thief/Warrior/Wizard/Dwarf all do,
 // keyed by the same "L"/"N"/"C" values pc-alignment's <select> already
@@ -3156,20 +3155,21 @@ const DCC_CLASS_TITLES = {
 // Resolves a Title for a given class/level/alignment against
 // DCC_CLASS_TITLES, returning a {title, status} pair rather than just a
 // string - the Sheet needs to tell "no title at this level" (0-level/no
-// class/"Other") apart from "needs an Alignment picked first" and from
-// "this level just isn't documented yet" (see the table's own comment),
-// since each of those gets different placeholder text rather than one
-// generic blank.
+// class/"Other") apart from "needs an Alignment picked first", since each
+// of those gets different placeholder text rather than one generic blank.
+// Level is clamped to 5 before lookup (see DCC_CLASS_TITLES' own comment) -
+// there's no level 6+ entry to be missing, so "not-documented" below is
+// only a defensive fallback for a future gap in the table, not a status
+// any current class/level combo can actually produce.
 // status: "ok" (title is set), "no-class" (0-level/unset/Other),
 // "needs-alignment" (class+level found, but this class's titles vary by
-// alignment and none is picked), or "not-documented" (class found, but no
-// entry for this level - i.e. level 6+ for every class right now).
+// alignment and none is picked), or "not-documented" (defensive only).
 function dccClassTitle(cls, levelRaw, alignmentRaw) {
   const classData = DCC_CLASS_TITLES[cls];
   if (!classData) return { title: "", status: "no-class" };
   const level = parseLevelNumber(levelRaw);
   if (level === null || level < 1) return { title: "", status: "no-class" };
-  const entry = classData[level];
+  const entry = classData[Math.min(5, level)];
   if (!entry) return { title: "", status: "not-documented" };
   if (entry.any) return { title: entry.any, status: "ok" };
   const align = String(alignmentRaw || "").trim();
@@ -3951,13 +3951,12 @@ function recalcPcDeedDie(force) {
 }
 
 // What the Title field SHOULD read for the current Class + Level +
-// Alignment (see DCC_CLASS_TITLES/dccClassTitle for the data and why
-// levels 3-10 are absent from it). Returns "" whenever there's nothing to
-// auto-fill (0-level/no class, an undocumented level, or a class whose
-// titles vary by alignment with none picked yet) - recalcPcTitlePlaceholder
-// below is what explains WHY to the player in that case, since a blank
-// auto-filled field and a genuinely-blank-because-nothing-typed field
-// would otherwise look identical.
+// Alignment (see DCC_CLASS_TITLES/dccClassTitle - level 6+ reuses the
+// level 5 title). Returns "" whenever there's nothing to auto-fill
+// (0-level/no class, or a class whose titles vary by alignment with none
+// picked yet) - recalcPcTitlePlaceholder below is what explains WHY to the
+// player in that case, since a blank auto-filled field and a genuinely-
+// blank-because-nothing-typed field would otherwise look identical.
 function computePcTitleText() {
   const classEl = document.getElementById("pc-class");
   const levelEl = document.getElementById("pc-level");
@@ -3968,10 +3967,9 @@ function computePcTitleText() {
 
 // Keeps the Title field's placeholder text explaining the CURRENT reason
 // it's blank (when it is) - distinct from computePcTitleText's actual
-// auto-fill value, since "nothing to show yet" has three different causes
-// a player would otherwise have no way to tell apart: no class/level yet,
-// this class needs an Alignment picked first, or (levels 3+ right now)
-// this app simply doesn't have that level's title on file at all.
+// auto-fill value, since "nothing to show yet" has two different causes a
+// player would otherwise have no way to tell apart: no class/level yet, or
+// this class needs an Alignment picked first.
 function refreshPcTitlePlaceholder() {
   const el = document.getElementById("pc-title");
   if (!el) return;
@@ -3982,8 +3980,6 @@ function refreshPcTitlePlaceholder() {
   if (el.value.trim()) return; // player already has something typed/filled - no placeholder needed
   if (result.status === "needs-alignment") {
     el.placeholder = "Pick an Alignment above to auto-fill this class's Title";
-  } else if (result.status === "not-documented") {
-    el.placeholder = "Not on file for this level (only Lvl 1-5 are verified) - check your Core Rulebook";
   } else {
     el.placeholder = "e.g. Squire, Wildling, Bandit…";
   }
