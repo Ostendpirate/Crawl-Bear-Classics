@@ -1490,7 +1490,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 16:45</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 17:02</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2274,7 +2274,7 @@
       <div class="tables-modal-header">
         <div>
           <div class="tables-modal-title">Lay on Hands</div>
-          <div class="tables-modal-subtitle">Result depends on the Spell Check total and the healed creature's alignment relative to this cleric's own. Heals lost hit points as a number of dice matching the target's own Hit Die (a warrior's d12, say) - cannot heal undead, animated objects, extraplanar creatures, or constructs.</div>
+          <div class="tables-modal-subtitle">Result depends on the Spell Check total and the healed creature's alignment relative to this cleric's own. Heals lost hit points as a number of dice matching the target's own Hit Die (a warrior's d12, say), capped by the target's own Hit Dice or class level - cannot heal undead, animated objects, extraplanar creatures, or constructs. A cleric may instead elect to heal a specific Condition (no HD/Level cap on that path, but a short roll cures nothing at all).</div>
         </div>
         <button type="button" class="tables-modal-close" id="lay-on-hands-modal-close" title="Close">×</button>
       </div>
@@ -2293,6 +2293,15 @@
             </select>
           </label>
           <label class="roll-modal-field">
+            <span class="roll-modal-field-label">Healing</span>
+            <select id="lay-on-hands-modal-mode-select">
+              <option value="hp">Hit Points</option>
+              <option value="condition">A Condition</option>
+            </select>
+          </label>
+        </div>
+        <div class="roll-modal-inputs" id="lay-on-hands-modal-hp-fields">
+          <label class="roll-modal-field">
             <span class="roll-modal-field-label">Target's Hit Die</span>
             <select id="lay-on-hands-modal-hd-select">
               <option value="4">d4</option>
@@ -2302,11 +2311,27 @@
               <option value="12">d12</option>
             </select>
           </label>
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">Target's Hit Dice or Level (caps healing)</span>
+            <input type="number" id="lay-on-hands-modal-cap-input" min="0" placeholder="e.g. 3" />
+          </label>
+        </div>
+        <div class="roll-modal-inputs" id="lay-on-hands-modal-condition-fields" style="display:none">
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">Condition</span>
+            <select id="lay-on-hands-modal-condition-select">
+              <option value="broken-limbs">Broken Limbs (1 die)</option>
+              <option value="organ-damage">Organ Damage (2 dice)</option>
+              <option value="disease">Disease (2 dice)</option>
+              <option value="paralysis">Paralysis (3 dice)</option>
+              <option value="poison">Poison (3 dice)</option>
+              <option value="blindness-deafness">Blindness or Deafness (4 dice)</option>
+            </select>
+          </label>
         </div>
         <div class="roll-modal-result" id="lay-on-hands-modal-result"></div>
         <button type="button" class="btn-next" id="lay-on-hands-modal-roll-effect-btn" style="margin-top:8px; display:none;">🎲 Roll Result</button>
         <div class="roll-modal-result" id="lay-on-hands-modal-roll-result"></div>
-        <div class="roll-modal-result" style="margin-top:10px; font-size:12px;"><strong>Condition Healing</strong> (spend that many of the rolled dice on one condition instead of hit points): Broken Limbs 1 die · Organ Damage 2 dice · Disease 2 dice · Paralysis or Poison 3 dice · Blindness or Deafness 4 dice.</div>
       </div>
     </div>
   </div>
@@ -7300,6 +7325,23 @@ const LAY_ON_HANDS_TABLE = {
   ],
 };
 
+// Condition Healing (DCC RPG core rulebook) - a cleric may elect, BEFORE
+// making the spell check, to heal a specific condition instead of hit
+// points. The dice rolled from LAY_ON_HANDS_TABLE above are compared
+// against the condition's own cost here rather than summed for HP: the
+// target's Hit Dice/Level cap does NOT apply to this path (unlike normal
+// HP healing, see layOnHandsRowHtml's/renderLayOnHandsModalResult's own
+// comments), but a roll that comes up short cures nothing at all -
+// "overflow" dice don't fall back to ordinary HP healing either.
+const LAY_ON_HANDS_CONDITIONS = [
+  { value: "broken-limbs", label: "Broken Limbs", dice: 1 },
+  { value: "organ-damage", label: "Organ Damage", dice: 2 },
+  { value: "disease", label: "Disease", dice: 2 },
+  { value: "paralysis", label: "Paralysis", dice: 3 },
+  { value: "poison", label: "Poison", dice: 3 },
+  { value: "blindness-deafness", label: "Blindness or Deafness", dice: 4 },
+];
+
 // Cause Wounds (DCC RPG core rulebook, Chaotic Cleric only) reuses
 // LAY_ON_HANDS_TABLE's own rows outright rather than duplicating them -
 // the rule is explicitly "as lay on hands, but a Chaotic cleric uses this
@@ -7943,14 +7985,24 @@ function rollLayOnHandsRow() {
 }
 
 // Lay on Hands lookup modal - takes a Spell Check total (pre-filled from
-// the roll above, but freely re-editable), the healed creature's alignment
-// relationship to this cleric (Same/Adjacent/Opposed - LAY_ON_HANDS_TABLE's
-// own three columns), and the healed creature's Hit Die type (the actual
-// die rolled - a warrior's d12, a thief's d8, etc.), and describes how many
-// dice that is in plain language, live as any field changes. The actual
-// hit points healed are rolled separately, on demand, via the Roll Result
-// button - same "don't re-roll the real number just from comparing two
-// possible targets" reasoning openTurnUnholyModal's own comment gives.
+// the roll above, but freely re-editable) and the healed creature's
+// alignment relationship to this cleric (Same/Adjacent/Opposed -
+// LAY_ON_HANDS_TABLE's own three columns) to get the RAW dice count off
+// the table, then branches on the DCC RPG core rulebook's two healing
+// paths for that same raw count:
+//   - "Hit Points" (the default): capped at the target's own Hit Dice or
+//     class level (a 1st-level ally never gets more than 1 die of
+//     healing, however well the check rolled) - the die TYPE also matches
+//     the target's own Hit Die (a warrior's d12, say).
+//   - "A Condition" (LAY_ON_HANDS_CONDITIONS): no HD/Level cap at all, but
+//     it's a threshold check against the raw dice count, not a roll - if
+//     the count doesn't meet the condition's own cost, nothing happens
+//     ("overflow" dice don't fall back to HP healing either).
+// Live as any field changes; the actual hit points healed (HP path only -
+// the Condition path is a yes/no threshold, nothing to roll) are rolled
+// separately, on demand, via the Roll Result button - same "don't re-roll
+// the real number just from comparing two possible targets" reasoning
+// openTurnUnholyModal's own comment gives.
 let layOnHandsModalDiceCount = 0;
 function openLayOnHandsModal(prefillTotal) {
   const inputEl = document.getElementById("lay-on-hands-modal-total-input");
@@ -7964,7 +8016,11 @@ function closeLayOnHandsModal() {
 function renderLayOnHandsModalResult() {
   const total = Math.max(0, parseInt(document.getElementById("lay-on-hands-modal-total-input").value, 10) || 0);
   const relationship = document.getElementById("lay-on-hands-modal-relationship-select").value;
-  const hd = document.getElementById("lay-on-hands-modal-hd-select").value;
+  const mode = document.getElementById("lay-on-hands-modal-mode-select").value;
+  const hpFieldsEl = document.getElementById("lay-on-hands-modal-hp-fields");
+  const conditionFieldsEl = document.getElementById("lay-on-hands-modal-condition-fields");
+  if (hpFieldsEl) hpFieldsEl.style.display = mode === "hp" ? "" : "none";
+  if (conditionFieldsEl) conditionFieldsEl.style.display = mode === "condition" ? "" : "none";
   const row = lookupTableRow(LAY_ON_HANDS_TABLE, total);
   const resultEl = document.getElementById("lay-on-hands-modal-result");
   const rollBtn = document.getElementById("lay-on-hands-modal-roll-effect-btn");
@@ -7973,26 +8029,46 @@ function renderLayOnHandsModalResult() {
   // for" reasoning as renderTurnUnholyModalResult's own comment.
   if (rollResultEl) rollResultEl.innerHTML = "";
   if (!resultEl) return;
-  const dice = row ? (row.dice[relationship] || 0) : 0;
-  layOnHandsModalDiceCount = dice;
-  if (rollBtn) rollBtn.style.display = dice > 0 ? "" : "none";
-  if (!dice) {
-    resultEl.innerHTML = `<span class="roll-modal-result-roll">Check ${total}</span><br>No hit points are healed at this Spell Check total.`;
+  const rawDice = row ? (row.dice[relationship] || 0) : 0;
+  layOnHandsModalDiceCount = 0;
+  if (rollBtn) rollBtn.style.display = "none";
+  if (!rawDice) {
+    resultEl.innerHTML = `<span class="roll-modal-result-roll">Check ${total}</span><br>No healing is available at this Spell Check total.`;
     return;
   }
   const relationshipLabel = relationship === "same" ? "same alignment as this cleric" : relationship === "adjacent" ? "an adjacent alignment" : "an opposed alignment";
-  resultEl.innerHTML = `<span class="roll-modal-result-roll">Check ${total}, ${escapeHtml(relationshipLabel)}</span><br>Heals ${dice}d${escapeHtml(hd)} lost hit points to the target (its own Hit Die type). Cannot heal undead, animated objects, extraplanar creatures, or constructs.`;
+  if (mode === "condition") {
+    const conditionKey = document.getElementById("lay-on-hands-modal-condition-select").value;
+    const condition = LAY_ON_HANDS_CONDITIONS.find(c => c.value === conditionKey);
+    const cured = condition && rawDice >= condition.dice;
+    resultEl.innerHTML = `<span class="roll-modal-result-roll">Check ${total}, ${escapeHtml(relationshipLabel)}</span><br>${rawDice} healing dice available, ${escapeHtml(condition ? condition.label : "")} needs ${condition ? condition.dice : "?"} - ${cured ? "condition cured!" : "not enough dice, no effect (the shortfall does not fall back to hit point healing)."}`;
+    return;
+  }
+  const capInput = document.getElementById("lay-on-hands-modal-cap-input");
+  const capRaw = capInput ? capInput.value.trim() : "";
+  const cap = capRaw === "" ? null : Math.max(0, parseInt(capRaw, 10) || 0);
+  const dice = cap !== null ? Math.min(rawDice, cap) : rawDice;
+  const cappedNote = cap !== null && cap < rawDice ? ` (capped from ${rawDice} by the target's own Hit Dice/Level)` : "";
+  const hd = document.getElementById("lay-on-hands-modal-hd-select").value;
+  layOnHandsModalDiceCount = dice;
+  if (rollBtn) rollBtn.style.display = dice > 0 ? "" : "none";
+  resultEl.innerHTML = `<span class="roll-modal-result-roll">Check ${total}, ${escapeHtml(relationshipLabel)}</span><br>Heals ${dice}d${escapeHtml(hd)} lost hit points to the target${escapeHtml(cappedNote)} (its own Hit Die type). Cannot heal undead, animated objects, extraplanar creatures, or constructs.`;
 }
 document.getElementById("lay-on-hands-modal-close").addEventListener("click", closeLayOnHandsModal);
 document.getElementById("lay-on-hands-modal-backdrop").addEventListener("click", (e) => {
   if (e.target.id === "lay-on-hands-modal-backdrop") closeLayOnHandsModal();
 });
 document.getElementById("lay-on-hands-modal-relationship-select").addEventListener("change", renderLayOnHandsModalResult);
+document.getElementById("lay-on-hands-modal-mode-select").addEventListener("change", renderLayOnHandsModalResult);
 document.getElementById("lay-on-hands-modal-hd-select").addEventListener("change", renderLayOnHandsModalResult);
+document.getElementById("lay-on-hands-modal-cap-input").addEventListener("input", renderLayOnHandsModalResult);
+document.getElementById("lay-on-hands-modal-condition-select").addEventListener("change", renderLayOnHandsModalResult);
 document.getElementById("lay-on-hands-modal-total-input").addEventListener("input", renderLayOnHandsModalResult);
 // Actually rolls the healing dice using whichever count/die type
 // renderLayOnHandsModalResult most recently computed - same on-demand,
 // not-on-every-keystroke contract as Turn Unholy's own Roll Result button.
+// Only ever shown for the Hit Points path - the Condition path is a
+// yes/no threshold check against the raw dice count, nothing to roll.
 document.getElementById("lay-on-hands-modal-roll-effect-btn").addEventListener("click", () => {
   if (!layOnHandsModalDiceCount) return;
   const hd = document.getElementById("lay-on-hands-modal-hd-select").value;
