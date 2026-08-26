@@ -1467,7 +1467,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 10:46</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 10:56</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -9898,22 +9898,38 @@ function syncThievesCantIntoLanguages() {
 // languages ("commonly known include those of centaurs, giants, gnomes,
 // goblins, and kobolds... Wizards may know magical languages and the
 // animal tongues") is the player's/Judge's own pick, per Appendix L.
-function computePcLanguagesText(cls, intScore, intMod) {
+function computePcLanguagesText(cls, intScore, intMod, level) {
   if (intScore === null) return "";
   const isDemihuman = cls === "Dwarf" || cls === "Elf" || cls === "Halfling";
+  // Whether this character has actually ADVANCED to 1st level yet, not
+  // just whether Class is filled in - this app tracks Class/Level as two
+  // independent fields, so "Dwarf" at Level 0 is a real, distinct state
+  // (a 0-level demi-human, still funnel-eligible) from "Dwarf" at Level 1+
+  // (a classed Dwarf) - see the racial-language note below for why this
+  // distinction matters.
+  const isClassed = level !== null && level >= 1;
   const zeroLevelBonus = Math.max(0, intMod);
   let firstLevelBonus = 0;
   let firstLevelNote = "";
-  if (cls === "Wizard" && intMod > 0) {
+  if (isClassed && cls === "Wizard" && intMod > 0) {
     firstLevelBonus = intMod;
     firstLevelNote = `, +${firstLevelBonus} more at 1st level (Wizard: 1 per Int modifier point)`;
-  } else if (isDemihuman) {
+  } else if (isClassed && isDemihuman) {
     firstLevelBonus = 1;
     firstLevelNote = ", +1 more at 1st level (Demi-human)";
   }
   const total = 1 + zeroLevelBonus + firstLevelBonus;
-  const racialNote = isDemihuman && intScore >= 8
-    ? " Also automatically knows their own racial language (Int 8+)."
+  // Racial language (DCC RPG core rulebook, Dwarf's own class description:
+  // "At 1st level, a dwarf automatically knows Common, the dwarven racial
+  // language, plus one additional randomly determined language") - per
+  // the user's own ruling, unconditional once actually Level 1+ with
+  // Dwarf/Elf/Halfling selected; only gated on Int 8+ for a 0-level
+  // demi-human (the Occupation list's own condition, matching the general
+  // ability-score rule text - a 0-level character hasn't advanced to
+  // "classed Dwarf" yet, just has demi-human blood).
+  const racialNote = !isDemihuman ? ""
+    : isClassed ? " Also automatically knows their own racial language."
+    : intScore >= 8 ? " Also automatically knows their own racial language (Int 8+, 0-level)."
     : "";
   return `Languages known: Common${zeroLevelBonus ? ` + ${zeroLevelBonus} bonus (Int modifier, 0-level)` : ""}${firstLevelNote} = ${total} total.${racialNote} Click 🎲 Roll Language below to fill in the rest from Appendix L.`;
 }
@@ -9922,9 +9938,11 @@ function refreshPcLanguagesNote() {
   const el = document.getElementById("pc-languages-note");
   if (!el) return;
   const classEl = document.getElementById("pc-class");
+  const levelEl = document.getElementById("pc-level");
   const intScore = parseAbilityScore(document.getElementById("pc-int").value);
   const intMod = abilityModifierFromField("pc-int");
-  const text = computePcLanguagesText(classEl ? classEl.value : "", intScore, intMod);
+  const level = parseLevelNumber(levelEl ? levelEl.value : "");
+  const text = computePcLanguagesText(classEl ? classEl.value : "", intScore, intMod, level);
   el.textContent = text;
   el.style.display = text ? "" : "none";
 }
