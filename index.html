@@ -1008,7 +1008,7 @@
      same "computed value" chip look weapon-badge-die/.hp-btn already use
      elsewhere (var(--border) background) makes it read as a distinct,
      intentional readout instead of blending into the row. */
-  .attack-row .spell-attack-bonus, .attack-row .turn-unholy-bonus { background: var(--border); border-color: var(--border); }
+  .attack-row .spell-attack-bonus, .attack-row .turn-unholy-bonus, .attack-row .lay-on-hands-bonus { background: var(--border); border-color: var(--border); }
   .attack-quick-btn {
     flex: none;
     width: 22px;
@@ -1177,7 +1177,7 @@
      making the Corruption/Disapproval modal open but be completely
      invisible/unclickable behind it. Bumped above the shared 500 so a
      modal opened from within another modal always stacks on top of it. */
-  #corruption-modal-backdrop, #disapproval-modal-backdrop, #turn-unholy-modal-backdrop { z-index: 510; }
+  #corruption-modal-backdrop, #disapproval-modal-backdrop, #turn-unholy-modal-backdrop, #lay-on-hands-modal-backdrop { z-index: 510; }
   .tables-modal {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -1490,7 +1490,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 16:18</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 16:29</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1862,7 +1862,7 @@
           <div class="fumble-die-line">Fumble Die: <span id="pc-fumble-die">d4</span> <span class="fumble-die-note">(based on equipped armor/shield)</span> <button type="button" class="tables-btn" id="pc-tables-btn" title="View this character's Crit and Fumble tables">📖 Crit/Fumble Tables</button></div>
           <div class="attack-list" id="attack-list-pc"></div>
           <button type="button" class="add-attack-btn" id="add-attack-pc">+ Add Action</button>
-          <div class="fumble-die-note" id="pc-tw-note" style="margin-top:6px;">Mark one attack "Primary" and another "Off-hand" to fight with two weapons (Table 4-3). A row can also be switched to "🔮 Cast a Spell" or "🛡️ Turn Unholy" from its own dropdown.</div>
+          <div class="fumble-die-note" id="pc-tw-note" style="margin-top:6px;">Mark one attack "Primary" and another "Off-hand" to fight with two weapons (Table 4-3). A row can also be switched to "🔮 Cast a Spell", "🛡️ Turn Unholy", or "🩹 Lay on Hands" from its own dropdown.</div>
         </fieldset>
 
         <fieldset id="pc-skills-fieldset" style="display:none">
@@ -2265,6 +2265,48 @@
         <div class="roll-modal-result" id="turn-unholy-modal-result"></div>
         <button type="button" class="btn-next" id="turn-unholy-modal-roll-effect-btn" style="margin-top:8px; display:none;">🎲 Roll Result</button>
         <div class="roll-modal-result" id="turn-unholy-modal-roll-result"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="lay-on-hands-modal-backdrop" class="tables-modal-backdrop" style="display:none">
+    <div class="tables-modal">
+      <div class="tables-modal-header">
+        <div>
+          <div class="tables-modal-title">Lay on Hands</div>
+          <div class="tables-modal-subtitle">Result depends on the Spell Check total and the healed creature's alignment relative to this cleric's own. Heals lost hit points as a number of dice matching the target's own Hit Die (a warrior's d12, say) - cannot heal undead, animated objects, extraplanar creatures, or constructs.</div>
+        </div>
+        <button type="button" class="tables-modal-close" id="lay-on-hands-modal-close" title="Close">×</button>
+      </div>
+      <div class="tables-modal-body">
+        <div class="roll-modal-inputs">
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">Spell Check Total</span>
+            <input type="number" id="lay-on-hands-modal-total-input" min="0" value="1" />
+          </label>
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">Target's Alignment</span>
+            <select id="lay-on-hands-modal-relationship-select">
+              <option value="same">Same as this cleric</option>
+              <option value="adjacent">Adjacent to this cleric's</option>
+              <option value="opposed">Opposed to this cleric's</option>
+            </select>
+          </label>
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">Target's Hit Die</span>
+            <select id="lay-on-hands-modal-hd-select">
+              <option value="4">d4</option>
+              <option value="6">d6</option>
+              <option value="8" selected>d8</option>
+              <option value="10">d10</option>
+              <option value="12">d12</option>
+            </select>
+          </label>
+        </div>
+        <div class="roll-modal-result" id="lay-on-hands-modal-result"></div>
+        <button type="button" class="btn-next" id="lay-on-hands-modal-roll-effect-btn" style="margin-top:8px; display:none;">🎲 Roll Result</button>
+        <div class="roll-modal-result" id="lay-on-hands-modal-roll-result"></div>
+        <div class="roll-modal-result" style="margin-top:10px; font-size:12px;"><strong>Condition Healing</strong> (spend that many of the rolled dice on one condition instead of hit points): Broken Limbs 1 die · Organ Damage 2 dice · Disease 2 dice · Paralysis or Poison 3 dice · Blindness or Deafness 4 dice.</div>
       </div>
     </div>
   </div>
@@ -2797,6 +2839,11 @@ const SPELL_ATTACK_KEY = "__spell__";
 // comment - and turnUnholyRowHtml deliberately has no Equipped checkbox
 // at all), so it's Sheet-only for now.
 const TURN_UNHOLY_KEY = "__turn_unholy__";
+
+// Lay on Hands (DCC RPG core rulebook, Cleric only) - same "kept OUT of
+// DCC_WEAPONS, checked for first in attackRowHtml, own simplified
+// template, Sheet-only" contract as TURN_UNHOLY_KEY above.
+const LAY_ON_HANDS_KEY = "__lay_on_hands__";
 
 // Mighty Deeds of Arms (Reference Booklet p.25-31) - the seven named deed
 // types the book gives worked examples for, each with escalating flavor
@@ -4782,7 +4829,11 @@ function weaponOptionsHtml(selectedKey) {
   // explains it for a non-Cleric, rather than the option disappearing out
   // from under an already-selected row.
   const turnUnholyOption = `<option value="${TURN_UNHOLY_KEY}"${selectedKey === TURN_UNHOLY_KEY ? " selected" : ""}>🛡️ Turn Unholy</option>`;
-  return spellOption + turnUnholyOption + DCC_WEAPONS.map(w =>
+  // Same "offered regardless of Class" reasoning as the two options above -
+  // layOnHandsRowHtml's own "Only Cleric has Lay on Hands" note explains it
+  // for a non-Cleric.
+  const layOnHandsOption = `<option value="${LAY_ON_HANDS_KEY}"${selectedKey === LAY_ON_HANDS_KEY ? " selected" : ""}>🩹 Lay on Hands</option>`;
+  return spellOption + turnUnholyOption + layOnHandsOption + DCC_WEAPONS.map(w =>
     `<option value="${w.key}"${w.key === selectedKey ? " selected" : ""}>${escapeHtml(w.label)}</option>`
   ).join("");
 }
@@ -4911,6 +4962,10 @@ function attackRowHtml(atk, mode) {
   // Same short-circuit for Turn Unholy - see TURN_UNHOLY_KEY's own comment.
   if (atk.weapon === TURN_UNHOLY_KEY) {
     return turnUnholyRowHtml(atk);
+  }
+  // Same short-circuit for Lay on Hands - see LAY_ON_HANDS_KEY's own comment.
+  if (atk.weapon === LAY_ON_HANDS_KEY) {
+    return layOnHandsRowHtml(atk);
   }
 
   const entry = dccWeaponEntry(atk.weapon);
@@ -5161,6 +5216,8 @@ function readAttacks(mode) {
       // would otherwise fall through dccWeaponEntry's own "unrecognized
       // key" fallback and get listed as some arbitrary real weapon.
       isTurnUnholy: row.classList.contains("turn-unholy-row"),
+      // Same reasoning again for a Lay on Hands row (layOnHandsRowHtml).
+      isLayOnHands: row.classList.contains("lay-on-hands-row"),
     };
     if (mode === "pc") {
       const weaponEl = row.querySelector(".attack-weapon");
@@ -5299,6 +5356,10 @@ function applyWeaponSelection(row) {
   // sets the name field itself (a fixed "Turn Unholy", never editable), so
   // there's nothing to clear here the way the spell branch above does.
   if (weaponSel.value === TURN_UNHOLY_KEY) return;
+  // Same short-circuit for Lay on Hands - layOnHandsRowHtml's own template
+  // also sets its name field itself (a fixed "Lay on Hands", never
+  // editable).
+  if (weaponSel.value === LAY_ON_HANDS_KEY) return;
   const entry = dccWeaponEntry(weaponSel.value);
 
   // Switching AWAY from "Cast a Spell" to a real weapon: the name field
@@ -5309,7 +5370,7 @@ function applyWeaponSelection(row) {
   // showing a leftover spell name as if it were the weapon's name. Same
   // reasoning switching away from Turn Unholy - its own fixed "Turn
   // Unholy" name wouldn't match a DCC_WEAPONS label either.
-  if (row.classList.contains("spell-attack-row") || row.classList.contains("turn-unholy-row")) nameInput.value = "";
+  if (row.classList.contains("spell-attack-row") || row.classList.contains("turn-unholy-row") || row.classList.contains("lay-on-hands-row")) nameInput.value = "";
 
   if (isAutoGeneratedWeaponName(nameInput.value)) {
     nameInput.value = entry.label.replace(/\s*\([^)]*\)\s*/g, "").trim();
@@ -5580,6 +5641,18 @@ function attachAttackRowListeners(mode) {
           clearTimeout(saveTimeout);
           await saveCurrent();
           rollTurnUnholyRow();
+        });
+      }
+      const layOnHandsRollBtn = row.querySelector(".lay-on-hands-roll-btn");
+      if (layOnHandsRollBtn) {
+        layOnHandsRollBtn.addEventListener("click", async () => {
+          if (!currentItemId) {
+            showStatus("Open this character/monster on a token first to roll its attack.", true);
+            return;
+          }
+          clearTimeout(saveTimeout);
+          await saveCurrent();
+          rollLayOnHandsRow();
         });
       }
       // Opens the shared Spellburn popup (openSpellburnModal) targeting
@@ -5939,6 +6012,9 @@ function renderPcStatline(d) {
   // Same passive recompute, for any Turn Unholy Actions row's Bonus - see
   // refreshTurnUnholyRows's own comment for its narrower dependency set.
   refreshTurnUnholyRows();
+  // Same passive recompute, for any Lay on Hands Actions row's Bonus - see
+  // refreshLayOnHandsRows's own comment.
+  refreshLayOnHandsRows();
   // Same passive, auto-synced-only recompute, for the Action Dice field -
   // used below instead of the possibly-stale `d.actdice` snapshot, same
   // reasoning as liveCrit above.
@@ -7128,6 +7204,28 @@ const TURN_UNHOLY_TABLE = {
   ],
 };
 
+// LAY ON HANDS table (DCC RPG Reference Booklet, free PDF - same page 9 as
+// TURN_UNHOLY_TABLE above, directly below it, verified the same way (see
+// TURN_UNHOLY_TABLE's own comment for the source/verification method).
+// Rows are keyed by the Spell Check TOTAL, same "ascending max" convention
+// as every other lookupTableRow-based table in this app. `dice` is how
+// many dice of the healed creature's own Hit Die type are rolled to heal
+// lost hit points, split by the healed creature's alignment relative to
+// this cleric's own ("same" = same alignment, "adjacent" = one step away
+// on the Law-Neutral-Chaos axis, "opposed" = Law vs Chaos) - 0 means the
+// check simply failed to heal anything at this total (the table's own
+// 1-11 row, same universal-failure break point Table 4-4 uses).
+const LAY_ON_HANDS_TABLE = {
+  label: "Lay on Hands — Healing Lost Hit Points",
+  rows: [
+    { max: 11, dice: { same: 0, adjacent: 0, opposed: 0 } },
+    { max: 13, dice: { same: 2, adjacent: 1, opposed: 1 } },
+    { max: 19, dice: { same: 3, adjacent: 2, opposed: 1 } },
+    { max: 21, dice: { same: 4, adjacent: 3, opposed: 2 } },
+    { max: Infinity, dice: { same: 5, adjacent: 4, opposed: 3 } },
+  ],
+};
+
 // Both Corruption and Disapproval need the caster's current Luck
 // modifier - reads straight off pc-lck live, same as everything else on
 // the Sheet.
@@ -7565,9 +7663,10 @@ function rollTurnUnholyRow() {
 }
 
 // Rolls one dice spec like "1d6" (roll 1d6) or a bare flat number like "1"
-// (no "d" - just that many, nothing to roll) - shared by the creature-
-// count and damage rolls below.
-function rollTurnUnholyDiceSpec(spec) {
+// (no "d" - just that many, nothing to roll) - shared by the Turn Unholy
+// creature-count/duration/damage rolls below, and by the Lay on Hands
+// healing roll further down.
+function rollSimpleDiceSpec(spec) {
   const m = spec && spec.match(/^(\d+)(?:d(\d+))?$/);
   if (!m) return 0;
   const count = parseInt(m[1], 10);
@@ -7702,20 +7801,115 @@ document.getElementById("turn-unholy-modal-roll-effect-btn").addEventListener("c
   if (!parsed || parsed.type === "none") return;
   const levelEl = document.getElementById("pc-level");
   const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
-  const count = rollTurnUnholyDiceSpec(parsed.countSpec) + (parsed.plusCasterLevel ? level : 0);
+  const count = rollSimpleDiceSpec(parsed.countSpec) + (parsed.plusCasterLevel ? level : 0);
   const creatureWord = count === 1 ? "creature" : "creatures";
   let text = parsed.type === "kill"
     ? `Rolled result: ${count} ${creatureWord} destroyed outright.`
     : `Rolled result: ${count} ${creatureWord} turned.`;
   if (parsed.durationSpec) {
-    const duration = rollTurnUnholyDiceSpec(parsed.durationSpec);
+    const duration = rollSimpleDiceSpec(parsed.durationSpec);
     text += ` Flees for ${duration} minutes.`;
   }
   if (parsed.damageSpec) {
-    const damage = rollTurnUnholyDiceSpec(parsed.damageSpec);
+    const damage = rollSimpleDiceSpec(parsed.damageSpec);
     text += ` Each also takes ${damage} damage.`;
   }
   const rollResultEl = document.getElementById("turn-unholy-modal-roll-result");
+  if (rollResultEl) rollResultEl.innerHTML = `<span class="roll-modal-result-roll">${escapeHtml(text)}</span>`;
+});
+
+// Lay on Hands (DCC RPG core rulebook, Cleric only) - "as with all spell
+// checks": 1d20 + Personality modifier + caster Level, same formula and
+// same disapproval-trigger rules as rollTurnUnholyRow above (including its
+// own EXTRA class rule: LAY_ON_HANDS_TABLE's own 1-11 row heals nothing
+// regardless of alignment, so a total that low always widens Disapproval
+// even without landing in the natural-roll range). Opens the Lay on Hands
+// modal (its own healing table) pre-filled with this total.
+function rollLayOnHandsRow() {
+  const classEl = document.getElementById("pc-class");
+  if (!classEl || classEl.value !== "Cleric") {
+    showStatus("Only Cleric has Lay on Hands - pick Cleric above.", true, 4000);
+    return;
+  }
+  const levelEl = document.getElementById("pc-level");
+  const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
+  const perMod = abilityModifierFromField("pc-per");
+  const forcedD20 = consumeForcedD20();
+  const rolled = forcedD20 !== null ? forcedD20 : (Math.floor(Math.random() * 20) + 1);
+  const total = rolled + level + perMod;
+  let note = rolled === 1 ? ` ${markFumbleAlert("💀 FAILURE")} Natural 1 always fails.` : "";
+  const disapprovalRange = checkPcDisapprovalTrigger(rolled, "per");
+  if (disapprovalRange !== null) {
+    note += ` ${markFumbleAlert("😇 DISAPPROVAL")} - natural ${rolled} fell within this cleric's Disapproval Range (1${disapprovalRange > 1 ? `-${disapprovalRange}` : ""}) - roll on Table 5-7 (😇 Disapproval button near Spells). Range now widens to 1-${disapprovalRange + 1} for the rest of the day.`;
+  } else if (total <= 11) {
+    const widenedFrom = widenPcDisapprovalRangeOnce();
+    note += ` ${markFumbleAlert("😇 DISAPPROVAL")} - the check failed (${total} ≤ 11, no healing) - roll on Table 5-7. Range now widens to 1-${widenedFrom + 1} for the rest of the day.`;
+  }
+  const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
+  const text = `Lay on Hands: d20 (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(level)}(level) ${formatSignedNumber(perMod)}(Per) = ${markRollTotal(total)}${note}`;
+  showStatus(text, false, note ? 9000 : 4000);
+  appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId)) });
+  broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: level + perMod, notation: "d20", total, label: "Lay on Hands" });
+  openLayOnHandsModal(total);
+}
+
+// Lay on Hands lookup modal - takes a Spell Check total (pre-filled from
+// the roll above, but freely re-editable), the healed creature's alignment
+// relationship to this cleric (Same/Adjacent/Opposed - LAY_ON_HANDS_TABLE's
+// own three columns), and the healed creature's Hit Die type (the actual
+// die rolled - a warrior's d12, a thief's d8, etc.), and describes how many
+// dice that is in plain language, live as any field changes. The actual
+// hit points healed are rolled separately, on demand, via the Roll Result
+// button - same "don't re-roll the real number just from comparing two
+// possible targets" reasoning openTurnUnholyModal's own comment gives.
+let layOnHandsModalDiceCount = 0;
+function openLayOnHandsModal(prefillTotal) {
+  const inputEl = document.getElementById("lay-on-hands-modal-total-input");
+  if (inputEl && typeof prefillTotal === "number") inputEl.value = String(prefillTotal);
+  renderLayOnHandsModalResult();
+  document.getElementById("lay-on-hands-modal-backdrop").style.display = "flex";
+}
+function closeLayOnHandsModal() {
+  document.getElementById("lay-on-hands-modal-backdrop").style.display = "none";
+}
+function renderLayOnHandsModalResult() {
+  const total = Math.max(0, parseInt(document.getElementById("lay-on-hands-modal-total-input").value, 10) || 0);
+  const relationship = document.getElementById("lay-on-hands-modal-relationship-select").value;
+  const hd = document.getElementById("lay-on-hands-modal-hd-select").value;
+  const row = lookupTableRow(LAY_ON_HANDS_TABLE, total);
+  const resultEl = document.getElementById("lay-on-hands-modal-result");
+  const rollBtn = document.getElementById("lay-on-hands-modal-roll-effect-btn");
+  const rollResultEl = document.getElementById("lay-on-hands-modal-roll-result");
+  // Same "a previously-rolled result belongs to whatever it was rolled
+  // for" reasoning as renderTurnUnholyModalResult's own comment.
+  if (rollResultEl) rollResultEl.innerHTML = "";
+  if (!resultEl) return;
+  const dice = row ? (row.dice[relationship] || 0) : 0;
+  layOnHandsModalDiceCount = dice;
+  if (rollBtn) rollBtn.style.display = dice > 0 ? "" : "none";
+  if (!dice) {
+    resultEl.innerHTML = `<span class="roll-modal-result-roll">Check ${total}</span><br>No hit points are healed at this Spell Check total.`;
+    return;
+  }
+  const relationshipLabel = relationship === "same" ? "same alignment as this cleric" : relationship === "adjacent" ? "an adjacent alignment" : "an opposed alignment";
+  resultEl.innerHTML = `<span class="roll-modal-result-roll">Check ${total}, ${escapeHtml(relationshipLabel)}</span><br>Heals ${dice}d${escapeHtml(hd)} lost hit points to the target (its own Hit Die type). Cannot heal undead, animated objects, extraplanar creatures, or constructs.`;
+}
+document.getElementById("lay-on-hands-modal-close").addEventListener("click", closeLayOnHandsModal);
+document.getElementById("lay-on-hands-modal-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "lay-on-hands-modal-backdrop") closeLayOnHandsModal();
+});
+document.getElementById("lay-on-hands-modal-relationship-select").addEventListener("change", renderLayOnHandsModalResult);
+document.getElementById("lay-on-hands-modal-hd-select").addEventListener("change", renderLayOnHandsModalResult);
+document.getElementById("lay-on-hands-modal-total-input").addEventListener("input", renderLayOnHandsModalResult);
+// Actually rolls the healing dice using whichever count/die type
+// renderLayOnHandsModalResult most recently computed - same on-demand,
+// not-on-every-keystroke contract as Turn Unholy's own Roll Result button.
+document.getElementById("lay-on-hands-modal-roll-effect-btn").addEventListener("click", () => {
+  if (!layOnHandsModalDiceCount) return;
+  const hd = document.getElementById("lay-on-hands-modal-hd-select").value;
+  const healed = rollSimpleDiceSpec(`${layOnHandsModalDiceCount}d${hd}`);
+  const text = `Rolled result: ${healed} hit points healed (${layOnHandsModalDiceCount}d${hd}).`;
+  const rollResultEl = document.getElementById("lay-on-hands-modal-roll-result");
   if (rollResultEl) rollResultEl.innerHTML = `<span class="roll-modal-result-roll">${escapeHtml(text)}</span>`;
 });
 
@@ -7829,6 +8023,9 @@ function refreshDerivedPcFields() {
   // every Turn Unholy Actions row's Bonus too - same passive, every-render
   // recompute as the spell-row call just above.
   refreshTurnUnholyRows();
+  // Same passive recompute, for any Lay on Hands Actions row's Bonus - see
+  // refreshLayOnHandsRows's own comment.
+  refreshLayOnHandsRows();
   recalcPcAC();
   // An ability-score edit (Agility/Intelligence/Personality) can change any
   // still-auto Skills row's total too - same passive, auto-synced-only
@@ -7869,7 +8066,7 @@ function refreshAutoSyncedAttackBonuses() {
     // its own Bonus field entirely (see refreshSpellAttackRows, called
     // right alongside this function everywhere it's called from). Same
     // reasoning for a Turn Unholy row (refreshTurnUnholyRows).
-    if (row.classList.contains("spell-attack-row") || row.classList.contains("turn-unholy-row")) return;
+    if (row.classList.contains("spell-attack-row") || row.classList.contains("turn-unholy-row") || row.classList.contains("lay-on-hands-row")) return;
     const bonusInput = row.querySelector(".attack-bonus");
     if (!bonusInput) return;
     const weaponSel = row.querySelector(".attack-weapon");
@@ -7911,7 +8108,7 @@ function refreshAutoSyncedAttackDamages() {
     // input on either row exists only so readAttacks()/applyWeaponSelection
     // don't choke on a missing one, never anything for this function to
     // auto-fill.
-    if (row.classList.contains("spell-attack-row") || row.classList.contains("turn-unholy-row")) return;
+    if (row.classList.contains("spell-attack-row") || row.classList.contains("turn-unholy-row") || row.classList.contains("lay-on-hands-row")) return;
     const damageInput = row.querySelector(".attack-damage");
     if (!damageInput) return;
     const isBlank = damageInput.value.trim() === "";
@@ -9927,6 +10124,46 @@ function turnUnholyRowHtml(atk) {
     </div>`;
 }
 
+// Lay on Hands' own Actions row template (LAY_ON_HANDS_KEY) - same shape
+// and same reasoning as turnUnholyRowHtml just above (no known-spell
+// dropdown, no Spellburn/Reversing Spells/Lost mechanics, Bonus is always
+// a straight d20 + Level + Personality modifier - "as with all spell
+// checks" per the DCC RPG core rulebook - never stepped by a smaller
+// Action Die).
+function layOnHandsRowHtml(atk) {
+  const classEl = document.getElementById("pc-class");
+  const cls = classEl ? classEl.value : "";
+  const isCleric = cls === "Cleric";
+  const levelEl = document.getElementById("pc-level");
+  const actDieOptions = actionDieSelectOptions(cls, levelEl ? levelEl.value : "");
+  const effectiveActionDieIndex = actDieOptions.some(o => o.value === atk.actionDieIndex) ? atk.actionDieIndex : "0";
+  const actDieSelectHtml = actDieOptions.length ? `<select class="attack-action-die" title="Which of this character's Action Dice this Lay on Hands attempt uses - shares the same one-action-per-die pool as this character's weapon attacks/spells (see the Combat Tracker). Doesn't change the roll itself - Lay on Hands is always a straight d20.">${actDieOptions.map(o =>
+    `<option value="${o.value}"${o.value === effectiveActionDieIndex ? " selected" : ""}>${escapeHtml(o.label)}</option>`
+  ).join("")}</select>` : "";
+  const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
+  const perMod = abilityModifierFromField("pc-per");
+  const bonusText = isCleric ? formatSignedNumber(level + perMod) : "";
+  const bonusTitle = isCleric
+    ? `Lay on Hands = d20 + Level ${formatSignedNumber(level)} + Personality ${formatSignedNumber(perMod)}.`
+    : "Only Cleric has Lay on Hands - pick Cleric above.";
+  const luckLastRollAttr = escapeHtml(JSON.stringify(atk.luckLastRoll || {}));
+  return `
+    <div class="attack-row pc-attack-row lay-on-hands-row" data-id="${atk.id}" data-line-deeds="{}" data-luck-last-roll="${luckLastRollAttr}">
+      <div class="attack-weapon-line">
+        <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
+        ${actDieSelectHtml}
+      </div>
+      <div class="attack-row-fields">
+        <input type="hidden" class="attack-name" value="Lay on Hands" />
+        <input type="text" class="attack-bonus lay-on-hands-bonus" readonly value="${escapeHtml(bonusText)}" title="${escapeHtml(bonusTitle)}" />
+        <input type="hidden" class="attack-damage" value="" />
+        <button type="button" class="hp-btn lay-on-hands-roll-btn" title="Roll Lay on Hands - opens the healing lookup modal pre-filled with the total.">🎲</button>
+        <button type="button" class="attack-remove-btn" title="Remove">×</button>
+      </div>
+      ${isCleric ? "" : `<div class="attack-row-meta">Only Cleric has Lay on Hands - pick Cleric above to roll this row.</div>`}
+    </div>`;
+}
+
 // Casters get exactly one "Cast a Spell" Attacks row, added automatically
 // the moment their Class can cast (pcCasterAbilityId) rather than the
 // player having to add one by hand via "+ Add Attack" + picking it from
@@ -10079,6 +10316,35 @@ function refreshTurnUnholyRows() {
       metaEl = document.createElement("div");
       metaEl.className = "attack-row-meta";
       metaEl.textContent = "Only Cleric has Turn Unholy - pick Cleric above to roll this row.";
+      row.appendChild(metaEl);
+    }
+  });
+}
+
+// Same passive resync as refreshTurnUnholyRows just above, for Lay on
+// Hands rows - same narrow Level/Personality-only dependency set.
+function refreshLayOnHandsRows() {
+  const listEl = attackListEl("pc");
+  if (!listEl) return;
+  const classEl = document.getElementById("pc-class");
+  const isCleric = classEl && classEl.value === "Cleric";
+  const levelEl = document.getElementById("pc-level");
+  const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
+  const perMod = abilityModifierFromField("pc-per");
+  listEl.querySelectorAll(".lay-on-hands-row").forEach(row => {
+    const bonusInput = row.querySelector(".attack-bonus");
+    if (!bonusInput) return;
+    bonusInput.value = isCleric ? formatSignedNumber(level + perMod) : "";
+    bonusInput.title = isCleric
+      ? `Lay on Hands = d20 + Level ${formatSignedNumber(level)} + Personality ${formatSignedNumber(perMod)}.`
+      : "Only Cleric has Lay on Hands - pick Cleric above.";
+    let metaEl = row.querySelector(".attack-row-meta");
+    if (isCleric) {
+      if (metaEl) metaEl.remove();
+    } else if (!metaEl) {
+      metaEl = document.createElement("div");
+      metaEl.className = "attack-row-meta";
+      metaEl.textContent = "Only Cleric has Lay on Hands - pick Cleric above to roll this row.";
       row.appendChild(metaEl);
     }
   });
@@ -10462,7 +10728,7 @@ function syncWeaponsIntoEquipment() {
   const equipEl = document.getElementById("pc-equip-weapons");
   if (!equipEl) return;
 
-  const attacks = readAttacks("pc").filter(a => !a.isSpell && !a.isTurnUnholy && a.weapon !== "unarmed" && (a.name || a.bonus || a.damage));
+  const attacks = readAttacks("pc").filter(a => !a.isSpell && !a.isTurnUnholy && !a.isLayOnHands && a.weapon !== "unarmed" && (a.name || a.bonus || a.damage));
   const lines = (equipEl.value || "").split("\n").filter(line => {
     return !/^.+ \(dmg .*\)( \[equipped\])?$/.test(line.trim());
   });
@@ -11027,32 +11293,42 @@ document.getElementById("pc-class").addEventListener("change", () => {
   // - switching to any other class removes it outright rather than
   // leaving an un-castable row behind, same "switching OUT of a class
   // that has a thing should visibly clear it" contract Deed Die/Action
-  // Dice above already follow. A Turn Unholy row (TURN_UNHOLY_KEY) gets
-  // the same treatment for the same reason - Cleric only.
+  // Dice above already follow. A Turn Unholy row (TURN_UNHOLY_KEY) and a
+  // Lay on Hands row (LAY_ON_HANDS_KEY) get the same treatment for the
+  // same reason - both Cleric only.
   const attacksForClassChange = readAttacks("pc");
   const newCls = document.getElementById("pc-class").value;
   const staysCaster = !!pcCasterAbilityId(newCls);
   const staysCleric = newCls === "Cleric";
   const attacksAfterCasterCheck = attacksForClassChange.filter(a =>
-    (staysCaster || a.weapon !== SPELL_ATTACK_KEY) && (staysCleric || a.weapon !== TURN_UNHOLY_KEY)
+    (staysCaster || a.weapon !== SPELL_ATTACK_KEY) && (staysCleric || (a.weapon !== TURN_UNHOLY_KEY && a.weapon !== LAY_ON_HANDS_KEY))
   );
   const spellRowsRemoved = attacksForClassChange.filter(a => a.weapon === SPELL_ATTACK_KEY).length - attacksAfterCasterCheck.filter(a => a.weapon === SPELL_ATTACK_KEY).length;
   const turnUnholyRowsRemoved = attacksForClassChange.filter(a => a.weapon === TURN_UNHOLY_KEY).length - attacksAfterCasterCheck.filter(a => a.weapon === TURN_UNHOLY_KEY).length;
-  // Switching INTO Cleric should hand the player their Turn Unholy row
-  // right away rather than making them add it manually via + Add Action -
-  // every Cleric has this ability, same as every Warrior/Dwarf always has
-  // a Deed Die row. Only adds one if the class change just removed the
-  // last one (or there was never one) - never duplicates an existing row
-  // a player already added themselves.
+  const layOnHandsRowsRemoved = attacksForClassChange.filter(a => a.weapon === LAY_ON_HANDS_KEY).length - attacksAfterCasterCheck.filter(a => a.weapon === LAY_ON_HANDS_KEY).length;
+  // Switching INTO Cleric should hand the player their Turn Unholy AND
+  // Lay on Hands rows right away rather than making them add either
+  // manually via + Add Action - every Cleric has both abilities, same as
+  // every Warrior/Dwarf always has a Deed Die row. Only adds one if the
+  // class change just removed the last one (or there was never one) -
+  // never duplicates an existing row a player already added themselves.
   const turnUnholyRowAdded = staysCleric && !attacksAfterCasterCheck.some(a => a.weapon === TURN_UNHOLY_KEY);
   if (turnUnholyRowAdded) attacksAfterCasterCheck.push({ ...emptyAttack(), weapon: TURN_UNHOLY_KEY });
+  const layOnHandsRowAdded = staysCleric && !attacksAfterCasterCheck.some(a => a.weapon === LAY_ON_HANDS_KEY);
+  if (layOnHandsRowAdded) attacksAfterCasterCheck.push({ ...emptyAttack(), weapon: LAY_ON_HANDS_KEY });
   renderAttacks("pc", attacksAfterCasterCheck);
+  const rowsRemoved = [];
+  if (turnUnholyRowsRemoved > 0) rowsRemoved.push(turnUnholyRowsRemoved === 1 ? "its Turn Unholy row" : `${turnUnholyRowsRemoved} Turn Unholy rows`);
+  if (layOnHandsRowsRemoved > 0) rowsRemoved.push(layOnHandsRowsRemoved === 1 ? "its Lay on Hands row" : `${layOnHandsRowsRemoved} Lay on Hands rows`);
+  const rowsAdded = [];
+  if (turnUnholyRowAdded) rowsAdded.push("Turn Unholy");
+  if (layOnHandsRowAdded) rowsAdded.push("Lay on Hands");
   if (spellRowsRemoved > 0) {
     showStatus(`${spellRowsRemoved === 1 ? "Removed its Cast a Spell row" : `Removed ${spellRowsRemoved} Cast a Spell rows`} - this class doesn't cast spells.`, false, 5000);
-  } else if (turnUnholyRowsRemoved > 0) {
-    showStatus(`${turnUnholyRowsRemoved === 1 ? "Removed its Turn Unholy row" : `Removed ${turnUnholyRowsRemoved} Turn Unholy rows`} - this class doesn't have Turn Unholy.`, false, 5000);
-  } else if (turnUnholyRowAdded) {
-    showStatus("Added a Turn Unholy row - Clerics can turn unholy creatures (Table 4-4).", false, 5000);
+  } else if (rowsRemoved.length) {
+    showStatus(`Removed ${rowsRemoved.join(" and ")} - this class doesn't have ${rowsRemoved.length > 1 ? "those abilities" : "that ability"}.`, false, 5000);
+  } else if (rowsAdded.length) {
+    showStatus(`Added a ${rowsAdded.join(" and ")} row - Clerics have ${rowsAdded.length > 1 ? "both abilities" : "this ability"}.`, false, 5000);
   }
   // A new Class can also mean the Spells section's spell-name field
   // switches between Table 5-8's dropdown (Wizard/Elf), Table 5-9's
