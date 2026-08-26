@@ -798,7 +798,7 @@
      auto-width/padded treatment .backstab-toggle-btn already gets for the
      same reason. */
   .spell-attack-burn-btn, .tracker-burn-btn, .newday-modal-recover, #pc-corruption-btn, #pc-disapproval-btn,
-  .spell-attack-reversed-btn, .tracker-reversed-btn, .roll-language-btn {
+  .spell-attack-reversed-btn, .tracker-reversed-btn, .roll-language-btn, #pc-turn-unholy-btn, .disapproval-range-btn {
     width: auto;
     height: auto;
     padding: 3px 8px;
@@ -1467,7 +1467,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 12:59</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 13:08</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1860,6 +1860,8 @@
           <div id="pc-disapproval-range-wrap" style="display:none; margin-top:8px;">
             <div class="spell-section-header">Disapproval Range</div>
             <div class="fumble-die-note" id="pc-disapproval-range-note"></div>
+            <button type="button" class="hp-btn disapproval-range-btn" id="pc-disapproval-range-minus" title="Manually narrow the Disapproval Range by 1 (minimum natural 1 only) - e.g. correcting a mistaken widen.">−1 Range</button>
+            <button type="button" class="hp-btn disapproval-range-btn" id="pc-disapproval-range-plus" title="Manually widen the Disapproval Range by 1 - e.g. a failed Turn Unholy check (DCC RPG core rulebook: 'Failure increases disapproval range'), which this app can't auto-detect since it doesn't resolve the turning table itself.">+1 Range</button>
           </div>
           <input type="hidden" id="pc-disapprovalRange" value="" />
         </fieldset>
@@ -2223,6 +2225,7 @@
           <div style="margin-bottom:8px;">
             <button type="button" id="pc-corruption-btn" class="hp-btn" style="display:none;" title="Roll Corruption (Tables 5-3/5-4/5-5) - Wizard/Elf only.">☣ Corruption</button>
             <button type="button" id="pc-disapproval-btn" class="hp-btn" style="display:none;" title="Roll Disapproval (Table 5-7) - Cleric only.">😇 Disapproval</button>
+            <button type="button" id="pc-turn-unholy-btn" class="hp-btn" style="display:none;" title="Turn Unholy (DCC RPG core rulebook, Cleric only) - 1d20 + Personality modifier + caster Level, to deter undead/demons/devils. This app doesn't resolve the turning table's effect by HD - compare the total yourself. A FAILED check widens the Disapproval Range by 1 even if the roll itself didn't land in it - use the −1/+1 Range buttons near Spells.">🛡️ Turn Unholy</button>
           </div>
           <div class="attack-list" id="pc-spells-list"></div>
           <button type="button" class="add-attack-btn" id="add-spell-pc">+ Add Spell</button>
@@ -7298,6 +7301,26 @@ function resetPcDisapprovalRange() {
   return true;
 }
 
+// Manual +1/-1 for the Disapproval Range (Spells section) - covers
+// whatever checkPcDisapprovalTrigger's automatic widening can't: a failed
+// Turn Unholy check (see pc-turn-unholy-btn's own listener below - a
+// FAILURE widens the range even on a roll that didn't land in it, and
+// this app has no turning table to resolve pass/fail itself), a Judge's
+// house rule, or correcting a mistaken widen. Floored at 1 (blank field -
+// same "still just 1" contract pcDisapprovalRangeLive already follows),
+// never negative or zero.
+function adjustPcDisapprovalRange(delta) {
+  const range = pcDisapprovalRangeLive();
+  const next = Math.max(1, range + delta);
+  const el = document.getElementById("pc-disapprovalRange");
+  if (el) el.value = next > 1 ? String(next) : "";
+  refreshPcDisapprovalRangeNote();
+  scheduleSave();
+  showStatus(`Disapproval Range ${delta > 0 ? "widened" : "narrowed"} to ${next > 1 ? `natural 1-${next}` : "natural 1 only"}.`, false, 4000);
+}
+document.getElementById("pc-disapproval-range-minus").addEventListener("click", () => adjustPcDisapprovalRange(-1));
+document.getElementById("pc-disapproval-range-plus").addEventListener("click", () => adjustPcDisapprovalRange(1));
+
 function openDisapprovalModal() {
   document.getElementById("disapproval-modal-luck").textContent = formatSignedNumber(pcLuckModifierLive());
   document.getElementById("disapproval-modal-result").innerHTML = "";
@@ -7326,6 +7349,39 @@ document.getElementById("disapproval-modal-roll-btn").addEventListener("click", 
   document.getElementById("disapproval-modal-result").innerHTML = row
     ? `<span class="roll-modal-result-roll">${checkResult}d4 (${rolls.join("+") || 0}) − ${luckMod} = ${total}</span> — ${escapeHtml(row.text)}`
     : "";
+});
+
+// Turn Unholy (DCC RPG core rulebook, Cleric only) - "as with all spell
+// checks": 1d20 + Personality modifier + caster Level. ALWAYS a straight
+// d20 - unlike a "Cast a Spell" row, Turn Unholy isn't tied to an Action
+// Die slot, so none of that row's Spellburn/Mercurial Magic/Reversing
+// Spells machinery applies. This app has no per-monster-HD turning table
+// to resolve the actual effect, so it just reports the total for the
+// Judge to compare - same "flag it, don't resolve it further" contract
+// Manifestation/spell effects already follow. A roll that lands within
+// the current Disapproval Range still auto-widens it exactly like a
+// normal Spell Check (checkPcDisapprovalTrigger) - but per the class's
+// own extra rule, a FAILED Turn Unholy check widens the range too even
+// when it didn't land in it, and this app can't tell pass from fail on
+// its own, so that part's flagged as a reminder toward the manual
+// +1 Range button (adjustPcDisapprovalRange) instead of applied here.
+document.getElementById("pc-turn-unholy-btn").addEventListener("click", () => {
+  const levelEl = document.getElementById("pc-level");
+  const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
+  const perMod = abilityModifierFromField("pc-per");
+  const rolled = Math.floor(Math.random() * 20) + 1;
+  const total = rolled + level + perMod;
+  let note = rolled === 1 ? ` ${markFumbleAlert("💀 FAILURE")} Natural 1 always fails.` : "";
+  const disapprovalRange = checkPcDisapprovalTrigger(rolled, "per");
+  if (disapprovalRange !== null) {
+    note += ` ${markFumbleAlert("😇 DISAPPROVAL")} - natural ${rolled} fell within this cleric's Disapproval Range (1${disapprovalRange > 1 ? `-${disapprovalRange}` : ""}) - roll on Table 5-7 (😇 Disapproval button above). Range now widens to 1-${disapprovalRange + 1} for the rest of the day.`;
+  }
+  note += ` Compare ${total} to your turning table for the effect - if it FAILS (even without triggering Disapproval above), widen the Disapproval Range 1 more yourself (−1/+1 Range buttons near Spells).`;
+  const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
+  const text = `Turn Unholy: d20 (${rolled}) ${formatSignedNumber(level)}(level) ${formatSignedNumber(perMod)}(Per) = ${markRollTotal(total)}${note}`;
+  showStatus(text, false, note ? 9000 : 4000);
+  appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId)) });
+  broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: level + perMod, notation: "d20", total, label: "Turn Unholy" });
 });
 
 // Maps each derived field to the ability field that feeds it, and (for
@@ -9156,6 +9212,10 @@ function recalcPcSpellSection() {
   if (corruptionBtn) corruptionBtn.style.display = abilityId === "int" ? "" : "none";
   const disapprovalBtn = document.getElementById("pc-disapproval-btn");
   if (disapprovalBtn) disapprovalBtn.style.display = abilityId === "per" ? "" : "none";
+  // Turn Unholy (DCC RPG core rulebook) - same Cleric-only gate, since
+  // it's a Personality-based class ability only a Cleric has.
+  const turnUnholyBtn = document.getElementById("pc-turn-unholy-btn");
+  if (turnUnholyBtn) turnUnholyBtn.style.display = abilityId === "per" ? "" : "none";
   // Persistent record of what past Corruption rolls actually did to this
   // character (see the ☣ button's own CORRUPTION_TABLES flavor text,
   // which only ever shows transiently in the roll modal) - same
