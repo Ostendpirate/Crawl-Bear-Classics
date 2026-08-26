@@ -1467,7 +1467,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-25 21:51</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 10:17</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1887,6 +1887,7 @@
 
         <fieldset>
           <legend>Languages</legend>
+          <div class="fumble-die-note" id="pc-languages-note" style="margin-bottom:6px;"></div>
           <textarea id="pc-languages" placeholder="Common, Elvish"></textarea>
         </fieldset>
 
@@ -5786,6 +5787,12 @@ function renderPcStatline(d) {
   // matching the current Class/Level on every render, same as the note
   // below the Attacks list (updateTwoWeaponNote).
   refreshPcRacialTraitsNote();
+  // Keeps the Languages bonus-count note matching the current
+  // Class/Intelligence on every render - same passive contract, though
+  // it also needs its own hook in refreshDerivedPcFields below since
+  // (unlike Racial Traits) it depends on Int, which can change without
+  // Class ever touching this render pass.
+  refreshPcLanguagesNote();
   // Keeps the Thief/Halfling Skills section (Table 1-9/Table 1-18)
   // matching the current Class/Level/Alignment/Ability scores/armor Check
   // Penalty on every render - passive pass (force=false), so an
@@ -7343,6 +7350,9 @@ function refreshDerivedPcFields() {
   // still-auto Skills row's total too - same passive, auto-synced-only
   // recompute as everything else in this function.
   recalcPcSkillsSection(false);
+  // An Intelligence edit changes the Languages bonus count too - see
+  // refreshPcLanguagesNote's own comment.
+  refreshPcLanguagesNote();
   updateTwoWeaponNote();
   scheduleSave();
 }
@@ -9871,6 +9881,51 @@ function syncThievesCantIntoLanguages() {
     ? (lines.length ? ["Thieves' Cant", "", ...lines].join("\n") : "Thieves' Cant")
     : lines.join("\n");
   scheduleSave();
+}
+
+// Bonus Languages (DCC RPG core rulebook): every character knows Common,
+// plus one additional language per point of Intelligence modifier -
+// established at 0-level, "associated with the circumstances of their
+// upbringing." A Dwarf/Elf/Halfling with Int 8+ ALSO automatically knows
+// their own racial language, on top of that. Upon advancing to 1st level,
+// a Wizard learns one MORE language per point of Int modifier, and any
+// OTHER demi-human (Dwarf/Elf/Halfling) learns one more, flat - gated on
+// `cls` being classed at all (0-level/"None" gets none of this, only the
+// Int-modifier base). A Thief instead learns Thieves' Cant (already
+// auto-added to the field by syncThievesCantIntoLanguages, so it's not
+// counted in this total). Only computes the COUNT - which specific
+// languages ("commonly known include those of centaurs, giants, gnomes,
+// goblins, and kobolds... Wizards may know magical languages and the
+// animal tongues") is the player's/Judge's own pick, per Appendix L.
+function computePcLanguagesText(cls, intScore, intMod) {
+  if (intScore === null) return "";
+  const isDemihuman = cls === "Dwarf" || cls === "Elf" || cls === "Halfling";
+  const zeroLevelBonus = Math.max(0, intMod);
+  let firstLevelBonus = 0;
+  let firstLevelNote = "";
+  if (cls === "Wizard" && intMod > 0) {
+    firstLevelBonus = intMod;
+    firstLevelNote = `, +${firstLevelBonus} more at 1st level (Wizard: 1 per Int modifier point)`;
+  } else if (isDemihuman) {
+    firstLevelBonus = 1;
+    firstLevelNote = ", +1 more at 1st level (Demi-human)";
+  }
+  const total = 1 + zeroLevelBonus + firstLevelBonus;
+  const racialNote = isDemihuman && intScore >= 8
+    ? " Also automatically knows their own racial language (Int 8+)."
+    : "";
+  return `Languages known: Common${zeroLevelBonus ? ` + ${zeroLevelBonus} bonus (Int modifier, 0-level)` : ""}${firstLevelNote} = ${total} total.${racialNote} Pick specific languages from Appendix L (centaur, giant, gnome, goblin, kobold are common; Wizards may also know magical languages/animal tongues).`;
+}
+
+function refreshPcLanguagesNote() {
+  const el = document.getElementById("pc-languages-note");
+  if (!el) return;
+  const classEl = document.getElementById("pc-class");
+  const intScore = parseAbilityScore(document.getElementById("pc-int").value);
+  const intMod = abilityModifierFromField("pc-int");
+  const text = computePcLanguagesText(classEl ? classEl.value : "", intScore, intMod);
+  el.textContent = text;
+  el.style.display = text ? "" : "none";
 }
 
 // Occupation dropdown (Table 1-3) + hover tooltip with suggested skill
