@@ -711,6 +711,7 @@
   .spell-section-header .spell-section-icon { font-size: 11px; }
   .spell-section-hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
   .mercurial-row { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+  .familiar-fields { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
   .mercurial-row > .spell-section-header { margin-top: 0; }
   .mercurial-controls { display: flex; align-items: flex-end; gap: 6px; flex-wrap: wrap; }
   .mercurial-roll { flex: none; width: 40px; font-size: 11px; font-weight: 700; color: var(--accent); padding: 4px 2px; background: var(--border); border: none; border-radius: 5px; text-align: center; }
@@ -1490,7 +1491,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 21:02</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 21:19</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1883,6 +1884,16 @@
           <div id="pc-patron-wrap" style="display:none; margin-top:8px;">
             <div class="spell-section-header">Patron <span class="spell-section-hint">optional</span></div>
             <input type="text" id="pc-patron" placeholder="e.g. a lord of a hidden fey court" title="Free text - which patron this Wizard/Elf is bonded to (DCC RPG core rulebook - specific patron names/write-ups are paid content, so this is player-filled like the Cleric Deity field). Knowing/casting Invoke Patron or Patron Bond (pick either from the spell list below - Table 5-8's own ** footnote: rolling either one grants BOTH, but they only cost one spell slot together) lets that patron's own three personal spells be picked too, grouped by name in the spell-name dropdown." />
+          </div>
+          <div id="pc-familiar-wrap" style="display:none; margin-top:8px;">
+            <div class="spell-section-header">Familiar <span class="spell-section-hint">optional</span></div>
+            <div class="familiar-fields">
+              <input type="text" id="pc-familiar-name" placeholder="Familiar's name" title="This Wizard's familiar (DCC RPG core rulebook) - the actual Familiar Type/Bonus tables are paid content, so Type and Bonus below are free text, player-filled from your own book, same as the Patron field above." />
+              <input type="text" id="pc-familiar-type" placeholder="Type (e.g. black cat, raven, toad)" />
+              <input type="text" id="pc-familiar-bonus" placeholder="Bonus (e.g. +2 to Fort saves while within 30')" />
+            </div>
+            <button type="button" class="hp-btn" id="add-familiar-token-btn" title="Adds a small linked creature token for this familiar near your own token on the map, with a starter HP/AC you can adjust on its own sheet - it then shows up in the Combat Tracker like any other creature.">🐾 Add Familiar Token</button>
+            <input type="hidden" id="pc-familiar-token-id" value="" />
           </div>
           <div id="pc-corruption-notes-wrap" style="display:none; margin-top:8px;">
             <div class="spell-section-header">Corruption Effects <span class="spell-section-hint">optional</span></div>
@@ -2444,7 +2455,7 @@ const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al", "montype"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-deity","pc-patron","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto"];
+const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-deity","pc-patron","pc-familiar-name","pc-familiar-type","pc-familiar-bonus","pc-familiar-token-id","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
 const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
@@ -7959,6 +7970,104 @@ function adjustPcDisapprovalRange(delta) {
 document.getElementById("pc-disapproval-range-minus").addEventListener("click", () => adjustPcDisapprovalRange(-1));
 document.getElementById("pc-disapproval-range-plus").addEventListener("click", () => adjustPcDisapprovalRange(1));
 
+// Spawns a small linked creature token for this Wizard's familiar (see
+// pc-familiar-wrap/recalcPcSpellSection) - a real Monster-mode token, not
+// just a decorative marker, since a familiar can take damage and die by
+// DCC RAW and should show up in the Combat Tracker like anything else.
+// Built from scratch with buildShape (no player-supplied image to clone -
+// contrast cloneItemForTemplate, which only ever copies an EXISTING
+// token's own image) - a small colored circle is the only token art this
+// extension can generate without relying on an external image URL.
+// pc-familiar-token-id remembers the spawned item's id so a second click
+// doesn't drop a duplicate; re-verified against the live scene every time
+// (not just trusted) since the token could have been deleted, or this
+// character's data could have been cloned onto a different token that
+// never actually got its own familiar spawned yet.
+async function addFamiliarToken() {
+  if (!currentItemId) {
+    showStatus("Open this character on a token first to add a familiar token.", true);
+    return;
+  }
+  const nameEl2 = document.getElementById("pc-familiar-name");
+  const familiarName = (nameEl2.value || "").trim() || "Familiar";
+  const tokenIdEl = document.getElementById("pc-familiar-token-id");
+  const existingId = (tokenIdEl.value || "").trim();
+  if (existingId) {
+    const [existing] = await OBR.scene.items.getItems([existingId]);
+    if (existing) {
+      showStatus(`${familiarName}'s token is already on the map.`, false, 4000);
+      return;
+    }
+    // Stale id - that token was deleted (e.g. the familiar died) - fall
+    // through and spawn a fresh one instead of silently doing nothing.
+  }
+  const [pcItem] = await OBR.scene.items.getItems([currentItemId]);
+  if (!pcItem) {
+    showStatus("Couldn't find this character's own token in the scene.", true);
+    return;
+  }
+  // Bounds can come back in either shape depending on SDK version - see
+  // setTokenDimmed's own comment for the same fallback.
+  const bounds = await OBR.scene.items.getItemBounds([currentItemId]);
+  let boundsMinX = pcItem.position.x, boundsMinY = pcItem.position.y, width = 150, height = 150;
+  if (bounds && bounds.min && bounds.max) {
+    boundsMinX = bounds.min.x;
+    boundsMinY = bounds.min.y;
+    width = bounds.max.x - bounds.min.x;
+    height = bounds.max.y - bounds.min.y;
+  } else if (bounds && typeof bounds.width === "number") {
+    boundsMinX = bounds.x;
+    boundsMinY = bounds.y;
+    width = bounds.width;
+    height = bounds.height;
+  }
+  const size = Math.max(30, Math.min(width, height) * 0.6);
+  const position = { x: boundsMinX + width + size * 0.5, y: boundsMinY };
+  const typeEl = document.getElementById("pc-familiar-type");
+  const bonusEl = document.getElementById("pc-familiar-bonus");
+  const familiarType = (typeEl.value || "").trim();
+  const familiarBonus = (bonusEl.value || "").trim();
+  const noteParts = [`Familiar of ${pcItem.name || "a Wizard"}.`];
+  if (familiarType) noteParts.push(`Type: ${familiarType}.`);
+  if (familiarBonus) noteParts.push(`Bonus: ${familiarBonus}.`);
+  const alignmentEl = document.getElementById("pc-alignment");
+  const monsterData = {
+    ...defaultData("monster"),
+    hpCurrent: "2",
+    hpMax: "2",
+    hd: "1d4",
+    ac: "12",
+    al: alignmentEl ? alignmentEl.value : "",
+    sp: noteParts.join(" "),
+  };
+  const shape = buildShape()
+    .width(size)
+    .height(size)
+    .shapeType("CIRCLE")
+    .position(position)
+    .fillColor("#8a5cf6")
+    .fillOpacity(0.85)
+    .strokeColor("#3a2a5c")
+    .strokeWidth(Math.max(2, size * 0.06))
+    .name(familiarName)
+    .layer("CHARACTER")
+    .metadata({
+      [MODE_METADATA_KEY]: "monster",
+      [MONSTER_METADATA_KEY]: monsterData,
+    })
+    .build();
+  try {
+    await OBR.scene.items.addItems([shape]);
+  } catch (err) {
+    showStatus("Couldn't add the familiar's token: " + (err && err.message ? err.message : String(err)), true);
+    return;
+  }
+  tokenIdEl.value = shape.id;
+  scheduleSave();
+  showStatus(`Added ${familiarName}'s token to the map - open it to fill in its own HP/AC/attacks.`, false, 6000);
+}
+document.getElementById("add-familiar-token-btn").addEventListener("click", addFamiliarToken);
+
 function openDisapprovalModal() {
   document.getElementById("disapproval-modal-luck").textContent = formatSignedNumber(pcLuckModifierLive());
   document.getElementById("disapproval-modal-result").innerHTML = "";
@@ -10427,6 +10536,14 @@ function recalcPcSpellSection() {
   // of whether this field is filled in.
   const patronWrap = document.getElementById("pc-patron-wrap");
   if (patronWrap) patronWrap.style.display = abilityId === "int" ? "" : "none";
+  // Familiar (DCC RPG core rulebook) - Wizard-only, NOT Elf (unlike
+  // Patron/Corruption above, which are shared by both Int casters) - the
+  // "may begin play with a familiar" class feature is written into the
+  // Wizard chapter specifically. Same free-text reasoning as Patron: the
+  // actual Familiar Type/Bonus tables are paid content, so Type/Bonus are
+  // player-filled rather than a dropdown built off them.
+  const familiarWrap = document.getElementById("pc-familiar-wrap");
+  if (familiarWrap) familiarWrap.style.display = cls === "Wizard" ? "" : "none";
   // Disapproval Range (see refreshPcDisapprovalRangeNote's own comment) -
   // same Cleric-only gate as the button itself, same passive every-render
   // refresh as Corruption Effects above (a range widened via a Tracker-tab
