@@ -1490,7 +1490,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 14:35</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 15:00</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -7597,6 +7597,11 @@ document.getElementById("turn-unholy-modal-backdrop").addEventListener("click", 
 });
 document.getElementById("turn-unholy-modal-lookup-btn").addEventListener("click", renderTurnUnholyModalResult);
 document.getElementById("turn-unholy-modal-hd-select").addEventListener("change", renderTurnUnholyModalResult);
+// Live-updates as the Total is typed, same as the HD dropdown's own
+// "change" listener above - the Look Up button stays as an explicit
+// manual re-trigger (e.g. after a blur, or just habit), but neither field
+// needs it anymore to see a fresh result.
+document.getElementById("turn-unholy-modal-total-input").addEventListener("input", renderTurnUnholyModalResult);
 
 // Maps each derived field to the ability field that feeds it, and (for
 // the three saves) the matching key into a DCC_CLASS_TABLES level row.
