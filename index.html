@@ -1008,7 +1008,7 @@
      same "computed value" chip look weapon-badge-die/.hp-btn already use
      elsewhere (var(--border) background) makes it read as a distinct,
      intentional readout instead of blending into the row. */
-  .attack-row .spell-attack-bonus, .attack-row .turn-unholy-bonus, .attack-row .lay-on-hands-bonus, .attack-row .cause-wounds-bonus { background: var(--border); border-color: var(--border); }
+  .attack-row .spell-attack-bonus, .attack-row .turn-unholy-bonus, .attack-row .lay-on-hands-bonus, .attack-row .cause-wounds-bonus, .attack-row .divine-aid-bonus { background: var(--border); border-color: var(--border); }
   .attack-quick-btn {
     flex: none;
     width: 22px;
@@ -1490,7 +1490,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 17:02</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 17:12</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1862,7 +1862,7 @@
           <div class="fumble-die-line">Fumble Die: <span id="pc-fumble-die">d4</span> <span class="fumble-die-note">(based on equipped armor/shield)</span> <button type="button" class="tables-btn" id="pc-tables-btn" title="View this character's Crit and Fumble tables">📖 Crit/Fumble Tables</button></div>
           <div class="attack-list" id="attack-list-pc"></div>
           <button type="button" class="add-attack-btn" id="add-attack-pc">+ Add Action</button>
-          <div class="fumble-die-note" id="pc-tw-note" style="margin-top:6px;">Mark one attack "Primary" and another "Off-hand" to fight with two weapons (Table 4-3). A row can also be switched to "🔮 Cast a Spell", "🛡️ Turn Unholy", "🩹 Lay on Hands" (Lawful/Neutral Cleric), or "🩸 Cause Wounds" (Chaotic Cleric) from its own dropdown.</div>
+          <div class="fumble-die-note" id="pc-tw-note" style="margin-top:6px;">Mark one attack "Primary" and another "Off-hand" to fight with two weapons (Table 4-3). A row can also be switched to "🔮 Cast a Spell", "🛡️ Turn Unholy", "🩹 Lay on Hands" (Lawful/Neutral Cleric), "🩸 Cause Wounds" (Chaotic Cleric), or "🙏 Divine Aid" from its own dropdown.</div>
         </fieldset>
 
         <fieldset id="pc-skills-fieldset" style="display:none">
@@ -2917,6 +2917,16 @@ const LAY_ON_HANDS_KEY = "__lay_on_hands__";
 // first in attackRowHtml, own simplified template, Sheet-only" contract
 // as LAY_ON_HANDS_KEY above.
 const CAUSE_WOUNDS_KEY = "__cause_wounds__";
+
+// Divine Aid (DCC RPG core rulebook, Cleric only, any Alignment - same
+// "kept OUT of DCC_WEAPONS, checked for first in attackRowHtml, own
+// simplified template, Sheet-only" contract as TURN_UNHOLY_KEY above, and
+// gated the same Cleric-only-regardless-of-Alignment way (unlike Lay on
+// Hands/Cause Wounds). No result TABLE exists for this one at all - "based
+// on the result of the spell check, the judge will describe the result"
+// per the rule itself - so rollDivineAidRow has no companion lookup modal
+// the way Turn Unholy/Lay on Hands/Cause Wounds do.
+const DIVINE_AID_KEY = "__divine_aid__";
 
 // Mighty Deeds of Arms (Reference Booklet p.25-31) - the seven named deed
 // types the book gives worked examples for, each with escalating flavor
@@ -4909,7 +4919,10 @@ function weaponOptionsHtml(selectedKey) {
   // Same reasoning again for Cause Wounds - causeWoundsRowHtml's own
   // "Only Chaotic Cleric" note is what explains it for anyone else.
   const causeWoundsOption = `<option value="${CAUSE_WOUNDS_KEY}"${selectedKey === CAUSE_WOUNDS_KEY ? " selected" : ""}>🩸 Cause Wounds</option>`;
-  return spellOption + turnUnholyOption + layOnHandsOption + causeWoundsOption + DCC_WEAPONS.map(w =>
+  // Same reasoning again for Divine Aid - divineAidRowHtml's own "Only
+  // Cleric" note is what explains it for anyone else.
+  const divineAidOption = `<option value="${DIVINE_AID_KEY}"${selectedKey === DIVINE_AID_KEY ? " selected" : ""}>🙏 Divine Aid</option>`;
+  return spellOption + turnUnholyOption + layOnHandsOption + causeWoundsOption + divineAidOption + DCC_WEAPONS.map(w =>
     `<option value="${w.key}"${w.key === selectedKey ? " selected" : ""}>${escapeHtml(w.label)}</option>`
   ).join("");
 }
@@ -5046,6 +5059,10 @@ function attackRowHtml(atk, mode) {
   // Same short-circuit for Cause Wounds - see CAUSE_WOUNDS_KEY's own comment.
   if (atk.weapon === CAUSE_WOUNDS_KEY) {
     return causeWoundsRowHtml(atk);
+  }
+  // Same short-circuit for Divine Aid - see DIVINE_AID_KEY's own comment.
+  if (atk.weapon === DIVINE_AID_KEY) {
+    return divineAidRowHtml(atk);
   }
 
   const entry = dccWeaponEntry(atk.weapon);
@@ -5300,6 +5317,8 @@ function readAttacks(mode) {
       isLayOnHands: row.classList.contains("lay-on-hands-row"),
       // Same reasoning again for a Cause Wounds row (causeWoundsRowHtml).
       isCauseWounds: row.classList.contains("cause-wounds-row"),
+      // Same reasoning again for a Divine Aid row (divineAidRowHtml).
+      isDivineAid: row.classList.contains("divine-aid-row"),
     };
     if (mode === "pc") {
       const weaponEl = row.querySelector(".attack-weapon");
@@ -5445,6 +5464,9 @@ function applyWeaponSelection(row) {
   // Same short-circuit for Cause Wounds - causeWoundsRowHtml's own
   // template also sets its name field itself (a fixed "Cause Wounds").
   if (weaponSel.value === CAUSE_WOUNDS_KEY) return;
+  // Same short-circuit for Divine Aid - divineAidRowHtml's own template
+  // also sets its name field itself (a fixed "Divine Aid").
+  if (weaponSel.value === DIVINE_AID_KEY) return;
   const entry = dccWeaponEntry(weaponSel.value);
 
   // Switching AWAY from "Cast a Spell" to a real weapon: the name field
@@ -5455,7 +5477,7 @@ function applyWeaponSelection(row) {
   // showing a leftover spell name as if it were the weapon's name. Same
   // reasoning switching away from Turn Unholy - its own fixed "Turn
   // Unholy" name wouldn't match a DCC_WEAPONS label either.
-  if (row.classList.contains("spell-attack-row") || row.classList.contains("turn-unholy-row") || row.classList.contains("lay-on-hands-row") || row.classList.contains("cause-wounds-row")) nameInput.value = "";
+  if (row.classList.contains("spell-attack-row") || row.classList.contains("turn-unholy-row") || row.classList.contains("lay-on-hands-row") || row.classList.contains("cause-wounds-row") || row.classList.contains("divine-aid-row")) nameInput.value = "";
 
   if (isAutoGeneratedWeaponName(nameInput.value)) {
     nameInput.value = entry.label.replace(/\s*\([^)]*\)\s*/g, "").trim();
@@ -5750,6 +5772,18 @@ function attachAttackRowListeners(mode) {
           clearTimeout(saveTimeout);
           await saveCurrent();
           rollCauseWoundsRow();
+        });
+      }
+      const divineAidRollBtn = row.querySelector(".divine-aid-roll-btn");
+      if (divineAidRollBtn) {
+        divineAidRollBtn.addEventListener("click", async () => {
+          if (!currentItemId) {
+            showStatus("Open this character/monster on a token first to roll its attack.", true);
+            return;
+          }
+          clearTimeout(saveTimeout);
+          await saveCurrent();
+          rollDivineAidRow();
         });
       }
       // Opens the shared Spellburn popup (openSpellburnModal) targeting
@@ -6114,6 +6148,8 @@ function renderPcStatline(d) {
   refreshLayOnHandsRows();
   // Same passive recompute again, for any Cause Wounds Actions row's Bonus.
   refreshCauseWoundsRows();
+  // Same passive recompute again, for any Divine Aid Actions row's Bonus.
+  refreshDivineAidRows();
   // Same passive, auto-synced-only recompute, for the Action Dice field -
   // used below instead of the possibly-stale `d.actdice` snapshot, same
   // reasoning as liveCrit above.
@@ -7661,17 +7697,20 @@ function checkPcDisapprovalTrigger(rolled, abilityId) {
   return widenPcDisapprovalRangeOnce();
 }
 
-// Widens the Disapproval Range by 1, unconditionally - the shared write
-// checkPcDisapprovalTrigger uses once it's confirmed a natural-roll
-// trigger, and rollTurnUnholyRow uses directly for its EXTRA class rule (a
-// failed check widens the range even without landing in it - see that
-// function's own comment). Returns the range that was just widened FROM
-// (i.e. what triggered it), matching checkPcDisapprovalTrigger's own
-// return contract.
-function widenPcDisapprovalRangeOnce() {
+// Widens the Disapproval Range, unconditionally, by `amount` (default 1) -
+// the shared write checkPcDisapprovalTrigger uses once it's confirmed a
+// natural-roll trigger, and rollTurnUnholyRow/rollLayOnHandsRow/
+// rollCauseWoundsRow use directly for their own EXTRA class rule (a failed
+// check widens the range even without landing in it - see each function's
+// own comment). rollDivineAidRow is the one caller that passes a non-1
+// amount - Divine Aid's own +10-per-use cost applies regardless of the
+// check's result at all, not just on a failure. Returns the range that was
+// just widened FROM (i.e. what triggered it), matching
+// checkPcDisapprovalTrigger's own return contract.
+function widenPcDisapprovalRangeOnce(amount = 1) {
   const range = pcDisapprovalRangeLive();
   const rangeEl = document.getElementById("pc-disapprovalRange");
-  if (rangeEl) rangeEl.value = String(range + 1);
+  if (rangeEl) rangeEl.value = String(range + amount);
   refreshPcDisapprovalRangeNote();
   scheduleSave();
   return range;
@@ -8164,6 +8203,53 @@ document.getElementById("cause-wounds-modal-roll-effect-btn").addEventListener("
   if (rollResultEl) rollResultEl.innerHTML = `<span class="roll-modal-result-roll">${escapeHtml(text)}</span>`;
 });
 
+// Divine Aid (DCC RPG core rulebook, Cleric only, any Alignment) - "the
+// cleric makes a spell check at the same modifier that would apply were
+// they casting a spell": for a Cleric that's Level + Personality modifier
+// (a Cleric's own Spell Check is never hindered by armor - see
+// pcSpellCheckModifierBreakdown's own comment), the SAME straight-d20
+// formula Turn Unholy/Lay on Hands/Cause Wounds already use, for the same
+// reason (this isn't tied to a known spell or an Action Die's own die
+// size). No result TABLE exists for this ability at all - "based on the
+// result of the spell check, the judge will describe the result" is the
+// rule's own words - so there's no companion lookup modal to open the way
+// the other three have; this just rolls the check and logs it, same as a
+// plain "Cast a Spell" row's own roll button does for the same reason
+// (rollSpellAttackRow). Unlike those three, though, the disapproval cost
+// here is NOT conditional on the check failing - "this extraordinary act
+// imparts a cumulative +10 penalty to future disapproval range" applies
+// on every single use, win or lose, ON TOP OF the normal natural-roll
+// disapproval trigger below if that separately fires too.
+function rollDivineAidRow() {
+  const classEl = document.getElementById("pc-class");
+  if (!classEl || classEl.value !== "Cleric") {
+    showStatus("Only Cleric has Divine Aid - pick Cleric above.", true, 4000);
+    return;
+  }
+  const levelEl = document.getElementById("pc-level");
+  const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
+  const perMod = abilityModifierFromField("pc-per");
+  const forcedD20 = consumeForcedD20();
+  const rolled = forcedD20 !== null ? forcedD20 : (Math.floor(Math.random() * 20) + 1);
+  const total = rolled + level + perMod;
+  let note = rolled === 1 ? ` ${markFumbleAlert("💀 FAILURE")} Natural 1 always fails.` : "";
+  const disapprovalRange = checkPcDisapprovalTrigger(rolled, "per");
+  if (disapprovalRange !== null) {
+    note += ` ${markFumbleAlert("😇 DISAPPROVAL")} - natural ${rolled} fell within this cleric's Disapproval Range (1${disapprovalRange > 1 ? `-${disapprovalRange}` : ""}) - roll on Table 5-7 (😇 Disapproval button near Spells). Range widens by 1.`;
+  }
+  // The guaranteed +10 cost - see this function's own comment - applies
+  // AFTER whatever the natural-roll trigger just did above; reading the
+  // range fresh here (rather than reusing `disapprovalRange`) means its
+  // own "widened FROM" value already reflects that +1 if it happened.
+  const rangeBeforeDivineAidCost = widenPcDisapprovalRangeOnce(10);
+  note += ` ${markFumbleAlert("😇 DIVINE AID")} - requesting aid always imparts a cumulative +10 penalty to Disapproval Range regardless of the check's result. Range now widens to 1-${rangeBeforeDivineAidCost + 10} for the rest of the day.`;
+  const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
+  const text = `Divine Aid: d20 (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(level)}(level) ${formatSignedNumber(perMod)}(Per) = ${markRollTotal(total)} - the Judge narrates the result (Simple requests DC 10, extraordinary requests DC 18+).${note}`;
+  showStatus(text, false, 9000);
+  appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId)) });
+  broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: level + perMod, notation: "d20", total, label: "Divine Aid" });
+}
+
 // Maps each derived field to the ability field that feeds it, and (for
 // the three saves) the matching key into a DCC_CLASS_TABLES level row.
 // Init has no per-level class table entry the way Fort/Ref/Will do - its
@@ -8279,6 +8365,8 @@ function refreshDerivedPcFields() {
   refreshLayOnHandsRows();
   // Same passive recompute again, for any Cause Wounds Actions row's Bonus.
   refreshCauseWoundsRows();
+  // Same passive recompute again, for any Divine Aid Actions row's Bonus.
+  refreshDivineAidRows();
   recalcPcAC();
   // An ability-score edit (Agility/Intelligence/Personality) can change any
   // still-auto Skills row's total too - same passive, auto-synced-only
@@ -8319,7 +8407,7 @@ function refreshAutoSyncedAttackBonuses() {
     // its own Bonus field entirely (see refreshSpellAttackRows, called
     // right alongside this function everywhere it's called from). Same
     // reasoning for a Turn Unholy row (refreshTurnUnholyRows).
-    if (row.classList.contains("spell-attack-row") || row.classList.contains("turn-unholy-row") || row.classList.contains("lay-on-hands-row") || row.classList.contains("cause-wounds-row")) return;
+    if (row.classList.contains("spell-attack-row") || row.classList.contains("turn-unholy-row") || row.classList.contains("lay-on-hands-row") || row.classList.contains("cause-wounds-row") || row.classList.contains("divine-aid-row")) return;
     const bonusInput = row.querySelector(".attack-bonus");
     if (!bonusInput) return;
     const weaponSel = row.querySelector(".attack-weapon");
@@ -8361,7 +8449,7 @@ function refreshAutoSyncedAttackDamages() {
     // input on either row exists only so readAttacks()/applyWeaponSelection
     // don't choke on a missing one, never anything for this function to
     // auto-fill.
-    if (row.classList.contains("spell-attack-row") || row.classList.contains("turn-unholy-row") || row.classList.contains("lay-on-hands-row") || row.classList.contains("cause-wounds-row")) return;
+    if (row.classList.contains("spell-attack-row") || row.classList.contains("turn-unholy-row") || row.classList.contains("lay-on-hands-row") || row.classList.contains("cause-wounds-row") || row.classList.contains("divine-aid-row")) return;
     const damageInput = row.querySelector(".attack-damage");
     if (!damageInput) return;
     const isBlank = damageInput.value.trim() === "";
@@ -10385,7 +10473,7 @@ function turnUnholyRowHtml(atk) {
 // Action Die). Unlike Turn Unholy, this one is gated on Alignment as well
 // as Class - only Lawful/Neutral clerics get Lay on Hands (Chaotic
 // clerics get Cause Wounds instead, causeWoundsRowHtml just below) - see
-// syncClericHealingRows's own comment for the full reasoning.
+// syncClericAbilityRows's own comment for the full reasoning.
 function layOnHandsRowHtml(atk) {
   const classEl = document.getElementById("pc-class");
   const cls = classEl ? classEl.value : "";
@@ -10456,6 +10544,45 @@ function causeWoundsRowHtml(atk) {
         <button type="button" class="attack-remove-btn" title="Remove">×</button>
       </div>
       ${canCauseWounds ? "" : `<div class="attack-row-meta">Only a Chaotic Cleric has Cause Wounds - Lawful/Neutral clerics get Lay on Hands instead.</div>`}
+    </div>`;
+}
+
+// Divine Aid's own Actions row template (DIVINE_AID_KEY) - same shape as
+// turnUnholyRowHtml (straight d20 + Level + Personality modifier, no
+// Action-Die-size stepping, no Spellburn/Mercurial Magic), and gated the
+// same Cleric-only-regardless-of-Alignment way, NOT alignment-split like
+// Lay on Hands/Cause Wounds above.
+function divineAidRowHtml(atk) {
+  const classEl = document.getElementById("pc-class");
+  const cls = classEl ? classEl.value : "";
+  const isCleric = cls === "Cleric";
+  const levelEl = document.getElementById("pc-level");
+  const actDieOptions = actionDieSelectOptions(cls, levelEl ? levelEl.value : "");
+  const effectiveActionDieIndex = actDieOptions.some(o => o.value === atk.actionDieIndex) ? atk.actionDieIndex : "0";
+  const actDieSelectHtml = actDieOptions.length ? `<select class="attack-action-die" title="Which of this character's Action Dice this Divine Aid attempt uses - shares the same one-action-per-die pool as this character's weapon attacks/spells (see the Combat Tracker). Doesn't change the roll itself - Divine Aid is always a straight d20.">${actDieOptions.map(o =>
+    `<option value="${o.value}"${o.value === effectiveActionDieIndex ? " selected" : ""}>${escapeHtml(o.label)}</option>`
+  ).join("")}</select>` : "";
+  const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
+  const perMod = abilityModifierFromField("pc-per");
+  const bonusText = isCleric ? formatSignedNumber(level + perMod) : "";
+  const bonusTitle = isCleric
+    ? `Divine Aid = d20 + Level ${formatSignedNumber(level)} + Personality ${formatSignedNumber(perMod)}. Always imparts a cumulative +10 penalty to future Disapproval Range, win or lose.`
+    : "Only Cleric has Divine Aid - pick Cleric above.";
+  const luckLastRollAttr = escapeHtml(JSON.stringify(atk.luckLastRoll || {}));
+  return `
+    <div class="attack-row pc-attack-row divine-aid-row" data-id="${atk.id}" data-line-deeds="{}" data-luck-last-roll="${luckLastRollAttr}">
+      <div class="attack-weapon-line">
+        <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
+        ${actDieSelectHtml}
+      </div>
+      <div class="attack-row-fields">
+        <input type="hidden" class="attack-name" value="Divine Aid" />
+        <input type="text" class="attack-bonus divine-aid-bonus" readonly value="${escapeHtml(bonusText)}" title="${escapeHtml(bonusTitle)}" />
+        <input type="hidden" class="attack-damage" value="" />
+        <button type="button" class="hp-btn divine-aid-roll-btn" title="Roll Divine Aid - the Judge narrates the result off this total (Simple requests DC 10, extraordinary requests DC 18+). Always costs +10 Disapproval Range.">🎲</button>
+        <button type="button" class="attack-remove-btn" title="Remove">×</button>
+      </div>
+      ${isCleric ? "" : `<div class="attack-row-meta">Only Cleric has Divine Aid - pick Cleric above to roll this row.</div>`}
     </div>`;
 }
 
@@ -10673,6 +10800,35 @@ function refreshCauseWoundsRows() {
       metaEl = document.createElement("div");
       metaEl.className = "attack-row-meta";
       metaEl.textContent = "Only a Chaotic Cleric has Cause Wounds - Lawful/Neutral clerics get Lay on Hands instead.";
+      row.appendChild(metaEl);
+    }
+  });
+}
+
+// Same passive resync as refreshTurnUnholyRows, for Divine Aid rows - same
+// narrow Level/Personality-only dependency set, no Alignment gate.
+function refreshDivineAidRows() {
+  const listEl = attackListEl("pc");
+  if (!listEl) return;
+  const classEl = document.getElementById("pc-class");
+  const isCleric = classEl && classEl.value === "Cleric";
+  const levelEl = document.getElementById("pc-level");
+  const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
+  const perMod = abilityModifierFromField("pc-per");
+  listEl.querySelectorAll(".divine-aid-row").forEach(row => {
+    const bonusInput = row.querySelector(".attack-bonus");
+    if (!bonusInput) return;
+    bonusInput.value = isCleric ? formatSignedNumber(level + perMod) : "";
+    bonusInput.title = isCleric
+      ? `Divine Aid = d20 + Level ${formatSignedNumber(level)} + Personality ${formatSignedNumber(perMod)}. Always imparts a cumulative +10 penalty to future Disapproval Range, win or lose.`
+      : "Only Cleric has Divine Aid - pick Cleric above.";
+    let metaEl = row.querySelector(".attack-row-meta");
+    if (isCleric) {
+      if (metaEl) metaEl.remove();
+    } else if (!metaEl) {
+      metaEl = document.createElement("div");
+      metaEl.className = "attack-row-meta";
+      metaEl.textContent = "Only Cleric has Divine Aid - pick Cleric above to roll this row.";
       row.appendChild(metaEl);
     }
   });
@@ -11056,7 +11212,7 @@ function syncWeaponsIntoEquipment() {
   const equipEl = document.getElementById("pc-equip-weapons");
   if (!equipEl) return;
 
-  const attacks = readAttacks("pc").filter(a => !a.isSpell && !a.isTurnUnholy && !a.isLayOnHands && !a.isCauseWounds && a.weapon !== "unarmed" && (a.name || a.bonus || a.damage));
+  const attacks = readAttacks("pc").filter(a => !a.isSpell && !a.isTurnUnholy && !a.isLayOnHands && !a.isCauseWounds && !a.isDivineAid && a.weapon !== "unarmed" && (a.name || a.bonus || a.damage));
   const lines = (equipEl.value || "").split("\n").filter(line => {
     return !/^.+ \(dmg .*\)( \[equipped\])?$/.test(line.trim());
   });
@@ -11552,24 +11708,24 @@ document.getElementById("pc-ac-misc").addEventListener("input", () => {
   scheduleSave();
 });
 
-// Keeps the three Cleric-only Actions rows (Turn Unholy, Lay on Hands,
-// Cause Wounds) in sync with the current Class AND Alignment. Turn Unholy
-// is available to any Cleric regardless of Alignment, but Lay on
-// Hands/Cause Wounds are mutually exclusive: DCC RPG core rulebook -
-// Lawful and Neutral clerics heal the faithful with Lay on Hands, while
-// Chaotic clerics use that same touch to inflict wounds instead (Cause
-// Wounds reuses LAY_ON_HANDS_TABLE's own dice-count table for exactly
-// this reason - same mechanic, opposite effect - see CAUSE_WOUNDS_TABLE's
-// own comment). An unset/blank Alignment defaults to Lay on Hands rather
-// than blocking either ability outright, same "don't block the more
-// common case on missing data" reasoning as elsewhere in this app.
-// Called from both the Class and Alignment change handlers - a Cleric who
-// converts Alignment mid-campaign needs this to fire just as much as a
-// fresh Class pick does. `silent` suppresses this function's own status
-// toast for the Class handler's call, which already shows its own
+// Keeps the four Cleric-only Actions rows (Turn Unholy, Lay on Hands,
+// Cause Wounds, Divine Aid) in sync with the current Class AND Alignment.
+// Turn Unholy and Divine Aid are available to any Cleric regardless of
+// Alignment, but Lay on Hands/Cause Wounds are mutually exclusive: DCC RPG
+// core rulebook - Lawful and Neutral clerics heal the faithful with Lay on
+// Hands, while Chaotic clerics use that same touch to inflict wounds
+// instead (Cause Wounds reuses LAY_ON_HANDS_TABLE's own dice-count table
+// for exactly this reason - same mechanic, opposite effect - see
+// CAUSE_WOUNDS_TABLE's own comment). An unset/blank Alignment defaults to
+// Lay on Hands rather than blocking either ability outright, same "don't
+// block the more common case on missing data" reasoning as elsewhere in
+// this app. Called from both the Class and Alignment change handlers - a
+// Cleric who converts Alignment mid-campaign needs this to fire just as
+// much as a fresh Class pick does. `silent` suppresses this function's own
+// status toast for the Class handler's call, which already shows its own
 // Cast-a-Spell-row message when one fires (showStatus overwrites, it
 // doesn't queue, so only one message per event ever actually shows).
-function syncClericHealingRows(silent) {
+function syncClericAbilityRows(silent) {
   const classEl = document.getElementById("pc-class");
   const alignmentEl = document.getElementById("pc-alignment");
   const isCleric = classEl && classEl.value === "Cleric";
@@ -11580,10 +11736,12 @@ function syncClericHealingRows(silent) {
   const hadTurnUnholy = before.some(a => a.weapon === TURN_UNHOLY_KEY);
   const hadLayOnHands = before.some(a => a.weapon === LAY_ON_HANDS_KEY);
   const hadCauseWounds = before.some(a => a.weapon === CAUSE_WOUNDS_KEY);
+  const hadDivineAid = before.some(a => a.weapon === DIVINE_AID_KEY);
   const attacks = before.filter(a =>
     (isCleric || a.weapon !== TURN_UNHOLY_KEY) &&
     (wantsLayOnHands || a.weapon !== LAY_ON_HANDS_KEY) &&
-    (wantsCauseWounds || a.weapon !== CAUSE_WOUNDS_KEY)
+    (wantsCauseWounds || a.weapon !== CAUSE_WOUNDS_KEY) &&
+    (isCleric || a.weapon !== DIVINE_AID_KEY)
   );
   const turnUnholyAdded = isCleric && !hadTurnUnholy;
   if (turnUnholyAdded) attacks.push({ ...emptyAttack(), weapon: TURN_UNHOLY_KEY });
@@ -11591,16 +11749,20 @@ function syncClericHealingRows(silent) {
   if (layOnHandsAdded) attacks.push({ ...emptyAttack(), weapon: LAY_ON_HANDS_KEY });
   const causeWoundsAdded = wantsCauseWounds && !hadCauseWounds;
   if (causeWoundsAdded) attacks.push({ ...emptyAttack(), weapon: CAUSE_WOUNDS_KEY });
+  const divineAidAdded = isCleric && !hadDivineAid;
+  if (divineAidAdded) attacks.push({ ...emptyAttack(), weapon: DIVINE_AID_KEY });
   renderAttacks("pc", attacks);
   if (silent) return;
   const removed = [];
   if (hadTurnUnholy && !isCleric) removed.push("Turn Unholy");
   if (hadLayOnHands && !wantsLayOnHands) removed.push("Lay on Hands");
   if (hadCauseWounds && !wantsCauseWounds) removed.push("Cause Wounds");
+  if (hadDivineAid && !isCleric) removed.push("Divine Aid");
   const added = [];
   if (turnUnholyAdded) added.push("Turn Unholy");
   if (layOnHandsAdded) added.push("Lay on Hands");
   if (causeWoundsAdded) added.push("Cause Wounds");
+  if (divineAidAdded) added.push("Divine Aid");
   if (!removed.length && !added.length) return;
   const parts = [];
   if (removed.length) parts.push(`Removed ${removed.join(" and ")}`);
@@ -11688,15 +11850,16 @@ document.getElementById("pc-class").addEventListener("change", () => {
     showStatus(`${spellRowsRemoved === 1 ? "Removed its Cast a Spell row" : `Removed ${spellRowsRemoved} Cast a Spell rows`} - this class doesn't cast spells.`, false, 5000);
   }
   // A Turn Unholy row (TURN_UNHOLY_KEY), a Lay on Hands row
-  // (LAY_ON_HANDS_KEY), and a Cause Wounds row (CAUSE_WOUNDS_KEY) get the
-  // same "visibly clear it" treatment for the same reason - all three
-  // Cleric only, and Lay on Hands/Cause Wounds mutually exclusive by
-  // Alignment (see syncClericHealingRows's own comment). Always runs
+  // (LAY_ON_HANDS_KEY), a Cause Wounds row (CAUSE_WOUNDS_KEY), and a
+  // Divine Aid row (DIVINE_AID_KEY) get the same "visibly clear it"
+  // treatment for the same reason - all four Cleric only, and Lay on
+  // Hands/Cause Wounds mutually exclusive by Alignment (see
+  // syncClericAbilityRows's own comment). Always runs
   // (switching AWAY from Cleric needs these rows gone same as any other
   // class change) - `silent` just suppresses its OWN status toast when
   // the Cast a Spell message above already claimed the one visible toast
   // this event gets (showStatus overwrites, it doesn't queue).
-  syncClericHealingRows(spellRowsRemoved > 0);
+  syncClericAbilityRows(spellRowsRemoved > 0);
   // A new Class can also mean the Spells section's spell-name field
   // switches between Table 5-8's dropdown (Wizard/Elf), Table 5-9's
   // dropdown (Cleric), and plain free text (anything else) - see
@@ -11777,8 +11940,8 @@ document.getElementById("pc-alignment").addEventListener("change", () => {
   // just above.
   recalcPcSkillsSection(true);
   // A Cleric's Lay on Hands/Cause Wounds row also depends on Alignment
-  // (Turn Unholy doesn't) - see syncClericHealingRows's own comment.
-  syncClericHealingRows(false);
+  // (Turn Unholy/Divine Aid don't) - see syncClericAbilityRows's own comment.
+  syncClericAbilityRows(false);
   scheduleSave();
 });
 
