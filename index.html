@@ -1154,7 +1154,7 @@
      making the Corruption/Disapproval modal open but be completely
      invisible/unclickable behind it. Bumped above the shared 500 so a
      modal opened from within another modal always stacks on top of it. */
-  #corruption-modal-backdrop, #disapproval-modal-backdrop { z-index: 510; }
+  #corruption-modal-backdrop, #disapproval-modal-backdrop, #turn-unholy-modal-backdrop { z-index: 510; }
   .tables-modal {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -1467,7 +1467,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 13:08</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 13:28</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2210,6 +2210,40 @@
     </div>
   </div>
 
+  <div id="turn-unholy-modal-backdrop" class="tables-modal-backdrop" style="display:none">
+    <div class="tables-modal">
+      <div class="tables-modal-header">
+        <div>
+          <div class="tables-modal-title">Turn Unholy</div>
+          <div class="tables-modal-subtitle">Table 4-4 - result depends on the Spell Check total AND the target creature's HD. A turned creature gets a Will save (DC = the Spell Check total) to resist unless marked "no save", and otherwise flees or cowers for 3d10 minutes.</div>
+        </div>
+        <button type="button" class="tables-modal-close" id="turn-unholy-modal-close" title="Close">×</button>
+      </div>
+      <div class="tables-modal-body">
+        <div class="roll-modal-inputs">
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">Spell Check Total</span>
+            <input type="number" id="turn-unholy-modal-total-input" min="0" value="1" />
+          </label>
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">Target HD</span>
+            <select id="turn-unholy-modal-hd-select">
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3-4">3-4</option>
+              <option value="5-6">5-6</option>
+              <option value="7-8">7-8</option>
+              <option value="9-10">9-10</option>
+              <option value="11-12">11-12</option>
+            </select>
+          </label>
+          <button type="button" class="btn-next" id="turn-unholy-modal-lookup-btn">📖 Look Up</button>
+        </div>
+        <div class="roll-modal-result" id="turn-unholy-modal-result"></div>
+      </div>
+    </div>
+  </div>
+
   <div id="spells-modal-backdrop" class="tables-modal-backdrop" style="display:none">
     <div class="tables-modal">
       <div class="tables-modal-header">
@@ -2225,7 +2259,7 @@
           <div style="margin-bottom:8px;">
             <button type="button" id="pc-corruption-btn" class="hp-btn" style="display:none;" title="Roll Corruption (Tables 5-3/5-4/5-5) - Wizard/Elf only.">☣ Corruption</button>
             <button type="button" id="pc-disapproval-btn" class="hp-btn" style="display:none;" title="Roll Disapproval (Table 5-7) - Cleric only.">😇 Disapproval</button>
-            <button type="button" id="pc-turn-unholy-btn" class="hp-btn" style="display:none;" title="Turn Unholy (DCC RPG core rulebook, Cleric only) - 1d20 + Personality modifier + caster Level, to deter undead/demons/devils. This app doesn't resolve the turning table's effect by HD - compare the total yourself. A FAILED check widens the Disapproval Range by 1 even if the roll itself didn't land in it - use the −1/+1 Range buttons near Spells.">🛡️ Turn Unholy</button>
+            <button type="button" id="pc-turn-unholy-btn" class="hp-btn" style="display:none;" title="Turn Unholy (DCC RPG core rulebook, Cleric only) - 1d20 + Personality modifier + caster Level, to deter undead/demons/devils. Opens Table 4-4 to resolve the effect against a chosen HD. A failed check (total 11 or under) widens the Disapproval Range even without landing in it.">🛡️ Turn Unholy</button>
           </div>
           <div class="attack-list" id="pc-spells-list"></div>
           <button type="button" class="add-attack-btn" id="add-spell-pc">+ Add Spell</button>
@@ -6981,6 +7015,36 @@ const DISAPPROVAL_TABLE = {
   ],
 };
 
+// Table 4-4: Turn Unholy (DCC RPG Reference Booklet, free PDF, p.9 - its
+// own Table of Contents also lists "Table 4-4: Turn Unholy.....9" - same free
+// source already verified for CRIT_TABLES/FUMBLE_TABLE/DISAPPROVAL_TABLE/
+// etc., re-confirmed for this table specifically by downloading that exact
+// PDF and extracting its text. Rows are keyed by the Spell Check TOTAL
+// (not the natural die result - lookupTableRow's shared "ascending max"
+// convention still applies), each branching again by the target
+// creature's HD via `byHd` - a plain code string per Table 4-4's own key:
+// NE = no effect. T = turn (flees/cowers for 3d10 minutes or until
+// attacked) - the number/dice before "+CL" is how many creatures of that
+// HD are turned, CL = this cleric's caster Level. D = the turned
+// creature(s) ALSO take that damage on the first round. K = creatures of
+// that HD are destroyed outright, not merely turned. Every turned/damaged
+// creature gets a Will save (DC = the Spell Check total) to resist unless
+// the entry says "(no save)".
+const TURN_UNHOLY_TABLE = {
+  label: "Turn Unholy — Table 4-4",
+  rows: [
+    { max: 11, turnRange: "-", holySmite: "-", byHd: { "1": "NE", "2": "NE", "3-4": "NE", "5-6": "NE", "7-8": "NE", "9-10": "NE", "11-12": "NE" } },
+    { max: 13, turnRange: "30'", holySmite: "-", byHd: { "1": "T1", "2": "NE", "3-4": "NE", "5-6": "NE", "7-8": "NE", "9-10": "NE", "11-12": "NE" } },
+    { max: 17, turnRange: "30'", holySmite: "-", byHd: { "1": "T1d3+CL", "2": "NE", "3-4": "NE", "5-6": "NE", "7-8": "NE", "9-10": "NE", "11-12": "NE" } },
+    { max: 19, turnRange: "30'", holySmite: "-", byHd: { "1": "T1d4+CL", "2": "T1", "3-4": "NE", "5-6": "NE", "7-8": "NE", "9-10": "NE", "11-12": "NE" } },
+    { max: 23, turnRange: "60'", holySmite: "-", byHd: { "1": "T1d6+CL", "2": "T1d3+CL", "3-4": "T1", "5-6": "NE", "7-8": "NE", "9-10": "NE", "11-12": "NE" } },
+    { max: 27, turnRange: "60'", holySmite: "Beam, 60', 1d3 dmg (no save)", byHd: { "1": "T1d8+CL, D1d4 (no save)", "2": "T1d4+CL", "3-4": "T1d3+CL", "5-6": "T1", "7-8": "NE", "9-10": "NE", "11-12": "NE" } },
+    { max: 29, turnRange: "60'", holySmite: "Cone, 30', 1d4 dmg (no save)", byHd: { "1": "T2d6+CL, D1d4 (no save)", "2": "T1d6+CL", "3-4": "T1d4+CL", "5-6": "T1d3+CL", "7-8": "T1", "9-10": "NE", "11-12": "NE" } },
+    { max: 31, turnRange: "120'", holySmite: "Cone, 60', 1d5 dmg (no save)", byHd: { "1": "K1d8+CL (no save)", "2": "T1d8+CL, D1d4 (no save)", "3-4": "T1d6+CL", "5-6": "T1d4+CL", "7-8": "T1d3+CL", "9-10": "T1", "11-12": "NE" } },
+    { max: Infinity, turnRange: "240'", holySmite: "Cone, 120', 1d6 dmg (no save)", byHd: { "1": "K2d6+CL (no save)", "2": "T2d6+CL, D1d4 (no save)", "3-4": "T1d8+CL, D1d4", "5-6": "T1d6+CL", "7-8": "T1d4+CL", "9-10": "T1d3+CL", "11-12": "T1" } },
+  ],
+};
+
 // Both Corruption and Disapproval need the caster's current Luck
 // modifier - reads straight off pc-lck live, same as everything else on
 // the Sheet.
@@ -7278,6 +7342,18 @@ function checkPcDisapprovalTrigger(rolled, abilityId) {
   if (abilityId !== "per") return null;
   const range = pcDisapprovalRangeLive();
   if (rolled > range) return null;
+  return widenPcDisapprovalRangeOnce();
+}
+
+// Widens the Disapproval Range by 1, unconditionally - the shared write
+// checkPcDisapprovalTrigger uses once it's confirmed a natural-roll
+// trigger, and Turn Unholy's own listener uses directly for its EXTRA
+// class rule (a failed check widens the range even without landing in it
+// - see pc-turn-unholy-btn's own comment). Returns the range that was
+// just widened FROM (i.e. what triggered it), matching
+// checkPcDisapprovalTrigger's own return contract.
+function widenPcDisapprovalRangeOnce() {
+  const range = pcDisapprovalRangeLive();
   const rangeEl = document.getElementById("pc-disapprovalRange");
   if (rangeEl) rangeEl.value = String(range + 1);
   refreshPcDisapprovalRangeNote();
@@ -7355,16 +7431,18 @@ document.getElementById("disapproval-modal-roll-btn").addEventListener("click", 
 // checks": 1d20 + Personality modifier + caster Level. ALWAYS a straight
 // d20 - unlike a "Cast a Spell" row, Turn Unholy isn't tied to an Action
 // Die slot, so none of that row's Spellburn/Mercurial Magic/Reversing
-// Spells machinery applies. This app has no per-monster-HD turning table
-// to resolve the actual effect, so it just reports the total for the
-// Judge to compare - same "flag it, don't resolve it further" contract
-// Manifestation/spell effects already follow. A roll that lands within
-// the current Disapproval Range still auto-widens it exactly like a
-// normal Spell Check (checkPcDisapprovalTrigger) - but per the class's
-// own extra rule, a FAILED Turn Unholy check widens the range too even
-// when it didn't land in it, and this app can't tell pass from fail on
-// its own, so that part's flagged as a reminder toward the manual
-// +1 Range button (adjustPcDisapprovalRange) instead of applied here.
+// Spells machinery applies. Opens the Turn Unholy modal (Table 4-4)
+// pre-filled with this total so the Judge can resolve it against whatever
+// HD the target actually is - the same total can be re-looked-up against
+// several different HD brackets for a mixed group without re-rolling.
+// Disapproval has two independent triggers here: a natural roll landing
+// within the current Disapproval Range widens it exactly like any other
+// Spell Check (checkPcDisapprovalTrigger); Turn Unholy's own EXTRA class
+// rule also widens it on a flat-out FAILED check (Table 4-4's total<=11
+// row - No Effect against every HD, i.e. the check whiffed regardless of
+// target) even when that didn't happen to land in the range. Only one
+// widen ever applies per roll (the `else` below) - one bad check is one
+// disapproval event, not two, even if both conditions technically held.
 document.getElementById("pc-turn-unholy-btn").addEventListener("click", () => {
   const levelEl = document.getElementById("pc-level");
   const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
@@ -7375,14 +7453,52 @@ document.getElementById("pc-turn-unholy-btn").addEventListener("click", () => {
   const disapprovalRange = checkPcDisapprovalTrigger(rolled, "per");
   if (disapprovalRange !== null) {
     note += ` ${markFumbleAlert("😇 DISAPPROVAL")} - natural ${rolled} fell within this cleric's Disapproval Range (1${disapprovalRange > 1 ? `-${disapprovalRange}` : ""}) - roll on Table 5-7 (😇 Disapproval button above). Range now widens to 1-${disapprovalRange + 1} for the rest of the day.`;
+  } else if (total <= 11) {
+    const widenedFrom = widenPcDisapprovalRangeOnce();
+    note += ` ${markFumbleAlert("😇 DISAPPROVAL")} - the check failed (${total} ≤ 11, no effect regardless of HD) - roll on Table 5-7. Range now widens to 1-${widenedFrom + 1} for the rest of the day.`;
   }
-  note += ` Compare ${total} to your turning table for the effect - if it FAILS (even without triggering Disapproval above), widen the Disapproval Range 1 more yourself (−1/+1 Range buttons near Spells).`;
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
   const text = `Turn Unholy: d20 (${rolled}) ${formatSignedNumber(level)}(level) ${formatSignedNumber(perMod)}(Per) = ${markRollTotal(total)}${note}`;
   showStatus(text, false, note ? 9000 : 4000);
   appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId)) });
   broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: level + perMod, notation: "d20", total, label: "Turn Unholy" });
+  openTurnUnholyModal(total);
 });
+
+// Turn Unholy Table (Table 4-4) lookup modal - takes a Spell Check total
+// (pre-filled from the roll above, but freely re-editable) and a target
+// HD bracket, and shows Table 4-4's own Turn Range/Holy Smite/effect for
+// that combination. Kept re-usable rather than roll-and-discard since one
+// check total can apply to several different-HD creatures in a mixed
+// group.
+function openTurnUnholyModal(prefillTotal) {
+  const inputEl = document.getElementById("turn-unholy-modal-total-input");
+  if (inputEl && typeof prefillTotal === "number") inputEl.value = String(prefillTotal);
+  renderTurnUnholyModalResult();
+  document.getElementById("turn-unholy-modal-backdrop").style.display = "flex";
+}
+function closeTurnUnholyModal() {
+  document.getElementById("turn-unholy-modal-backdrop").style.display = "none";
+}
+function renderTurnUnholyModalResult() {
+  const total = Math.max(0, parseInt(document.getElementById("turn-unholy-modal-total-input").value, 10) || 0);
+  const hd = document.getElementById("turn-unholy-modal-hd-select").value;
+  const row = lookupTableRow(TURN_UNHOLY_TABLE, total);
+  const resultEl = document.getElementById("turn-unholy-modal-result");
+  if (!resultEl) return;
+  if (!row) {
+    resultEl.innerHTML = "";
+    return;
+  }
+  const effect = row.byHd[hd] || "NE";
+  resultEl.innerHTML = `<span class="roll-modal-result-roll">Check ${total} vs ${escapeHtml(hd)} HD</span> — <b>${escapeHtml(effect)}</b><br>Turn Range: ${escapeHtml(row.turnRange)} · Holy Smite: ${escapeHtml(row.holySmite)}`;
+}
+document.getElementById("turn-unholy-modal-close").addEventListener("click", closeTurnUnholyModal);
+document.getElementById("turn-unholy-modal-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "turn-unholy-modal-backdrop") closeTurnUnholyModal();
+});
+document.getElementById("turn-unholy-modal-lookup-btn").addEventListener("click", renderTurnUnholyModalResult);
+document.getElementById("turn-unholy-modal-hd-select").addEventListener("change", renderTurnUnholyModalResult);
 
 // Maps each derived field to the ability field that feeds it, and (for
 // the three saves) the matching key into a DCC_CLASS_TABLES level row.
