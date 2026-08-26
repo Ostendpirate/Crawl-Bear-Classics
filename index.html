@@ -1490,7 +1490,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 17:16</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 17:33</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1799,10 +1799,15 @@
           <div id="pc-trained-weapon-wrap">
             <label id="pc-trained-weapon-label">Trained Weapon (0-level)</label>
             <div class="field-sync-row">
-              <input type="text" id="pc-trained-weapon" placeholder="e.g. Dagger, or Hammer (as club)" title="Table 1-3's Occupation grants training in one weapon - but only applies to a 0-level character (no Class yet). The moment a character is classed, their class's own fixed weapon list takes over instead (Warrior: all weapons; Cleric: deity-based, not tracked here; Thief/Wizard/Elf/Halfling: a fixed list per class) and this field stops mattering for the Table 4-1 untrained-weapon penalty - so it's hidden once classed, except for Warriors/Dwarves (who instead pick a Favorite Weapon from a dropdown - see the ↻ button)." />
+              <input type="text" id="pc-trained-weapon" placeholder="e.g. Dagger, or Hammer (as club)" title="Table 1-3's Occupation grants training in one weapon - but only applies to a 0-level character (no Class yet). The moment a character is classed, their class's own fixed weapon list takes over instead (Warrior: all weapons; Cleric: deity-based, see Deity below; Thief/Wizard/Elf/Halfling: a fixed list per class) and this field stops mattering for the Table 4-1 untrained-weapon penalty - so it's hidden once classed, except for Warriors/Dwarves (who instead pick a Favorite Weapon from a dropdown - see the ↻ button)." />
               <select id="pc-trained-weapon-select" style="display:none" title="A Warrior/Dwarf picks their Favorite Weapon from what they're actually trained in - adds their Luck modifier to the attack roll (not damage) whenever they use it."></select>
               <button type="button" class="derived-sync-btn" id="pc-trained-weapon-sync-btn" title="Set to this Occupation's Trained Weapon (Table 1-3)">↻</button>
             </div>
+          </div>
+          <div id="pc-deity-wrap" style="display:none">
+            <label>Deity (Cleric)</label>
+            <input type="hidden" id="pc-deity" />
+            <select id="pc-deity-select" title="A cleric's deity is chosen from the sample deities matching their own Alignment - the list here refilters automatically if Alignment changes. Which weapons this cleric is trained in (Table 4-1's untrained-weapon penalty) and which creatures count as unholy for Turn Unholy both follow the SAME Alignment, shared by every deity in that group - this pick itself is flavor/roleplay only."></select>
           </div>
         </div>
 
@@ -2265,6 +2270,7 @@
         <div class="roll-modal-result" id="turn-unholy-modal-result"></div>
         <button type="button" class="btn-next" id="turn-unholy-modal-roll-effect-btn" style="margin-top:8px; display:none;">🎲 Roll Result</button>
         <div class="roll-modal-result" id="turn-unholy-modal-roll-result"></div>
+        <div class="roll-modal-result" id="turn-unholy-modal-unholy-note" style="margin-top:10px; font-size:12px;"></div>
       </div>
     </div>
   </div>
@@ -2434,7 +2440,7 @@ const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al", "montype"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto"];
+const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-deity","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
 const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
@@ -4527,6 +4533,42 @@ function updatePcDeedDieVisibility() {
   wrap.style.display = pcClassHasDeedDieLive() ? "" : "none";
 }
 
+// Rebuilds the Deity <select>'s options for the given Alignment code
+// ("L"/"N"/"C") and pre-selects whichever option matches currentValue - so
+// switching Alignment (or loading a token that already had one recorded)
+// doesn't silently blank a still-valid pick, same "keep the selection only
+// if it's still on the list" contract populateFavoriteWeaponSelect follows
+// for Warrior/Dwarf's own dropdown. No Alignment (or one with nothing in
+// DCC_CLERIC_DEITIES) just empties the list - nothing to pick from yet.
+function populateClericDeitySelect(alignment, currentValue) {
+  const selectEl = document.getElementById("pc-deity-select");
+  if (!selectEl) return;
+  const group = DCC_CLERIC_DEITIES[alignment];
+  const gods = group ? group.gods : [];
+  selectEl.innerHTML = [`<option value="">— (pick a deity)</option>`]
+    .concat(gods.map(name => `<option value="${escapeHtml(name)}"${name === currentValue ? " selected" : ""}>${escapeHtml(name)}</option>`))
+    .join("");
+}
+
+// Shows the Deity field for a Cleric only (everyone else has no deity-
+// based weapon training/Turn Unholy target list to pick a flavor deity
+// for), and keeps its option list matching the CURRENT Alignment - called
+// on every render (renderPcStatline) so it's correct right after loading a
+// different token, and directly from the Alignment change handler too
+// (that one doesn't otherwise trigger a full re-render pass the way a
+// Class change's own cfgRenderFromCurrentForm call does).
+function updatePcDeityVisibility() {
+  const wrap = document.getElementById("pc-deity-wrap");
+  if (!wrap) return;
+  const classEl = document.getElementById("pc-class");
+  const isCleric = classEl && classEl.value === "Cleric";
+  wrap.style.display = isCleric ? "" : "none";
+  if (!isCleric) return;
+  const alignmentEl = document.getElementById("pc-alignment");
+  const deityEl = document.getElementById("pc-deity");
+  populateClericDeitySelect(alignmentEl ? alignmentEl.value : "", deityEl ? deityEl.value : "");
+}
+
 // A handful of Table 1-3 "Trained Weapon" flavor names don't map to a
 // weapon-table category by their own text alone even after stripping an
 // "(as X)" annotation - "axe" (e.g. Butcher's "Cleaver (as axe)") has no
@@ -4584,6 +4626,60 @@ const CLASS_WEAPON_TRAINING = {
   Dwarf: ["battleaxe", "club", "dagger", "handaxe", "longsword", "mace", "short sword", "spear", "two-handed sword", "warhammer", "crossbow", "javelin", "shortbow", "sling"],
   Elf: ["dagger", "javelin", "lance", "longbow", "longsword", "shortbow", "short sword", "staff", "spear", "two-handed sword"],
   Halfling: ["club", "crossbow", "dagger", "handaxe", "javelin", "shortbow", "short sword", "sling", "staff"],
+};
+
+// Sample Deities (DCC RPG core rulebook Appendix) - user-supplied table,
+// not independently verified against the published book the way the free
+// Reference Booklet's own tables were (see the copyright-rulebook-content
+// memory's own note on this feature - flagged to the user rather than
+// silently assumed correct). Keyed by the same "L"/"N"/"C" codes
+// pc-alignment's own <option> values use. `gods` is flavor/roleplay only -
+// which specific deity within an Alignment a cleric follows doesn't change
+// any of the app's own math. `weapons` (already normalized the same way
+// CLASS_WEAPON_TRAINING's own lists are - see dccWeaponTrainingKey) and
+// `unholyCreatures` are shared by every deity in the group, straight from
+// the table's own Alignment-level Weapons/Unholy Creatures columns - a
+// cleric's weapon training and Turn Unholy target list follow their
+// ALIGNMENT, not their individual deity (isWeaponUntrained's Cleric case,
+// renderTurnUnholyModalResult's unholy-creatures note).
+const DCC_CLERIC_DEITIES = {
+  L: {
+    gods: [
+      "Shul, god of the moon",
+      "Klazath, god of war",
+      "Ulesh, god of peace",
+      "Choranus, the Seer Father, lord of creation",
+      "Daenthar, the Mountain Lord, greater god of earth and industry",
+      "Gorhan, the Helmed Vengeance, god of valor and chivalry",
+      "Justicia, goddess of justice and mercy",
+      "Aristemis, the Insightful One, demi-goddess of true seeing and strategy",
+    ],
+    weapons: ["club", "mace", "sling", "staff", "warhammer"],
+    unholyCreatures: "Un-dead, demons, devils, chaotic extraplanar creatures, monsters (e.g., basilisk or medusa), Chaos Primes, chaotic humanoids (e.g., orcs), chaotic dragons",
+  },
+  N: {
+    gods: [
+      "Amun Tor, god of mysteries and riddles",
+      "Ildavir, goddess of nature",
+      "Pelagia, goddess of the sea",
+      "Cthulhu, priest of the Old Ones",
+    ],
+    weapons: ["dagger", "mace", "sling", "staff", "longsword", "short sword", "two-handed sword"],
+    unholyCreatures: "Mundane animals, un-dead, demons, devils, monsters (e.g., basilisk or medusa), lycanthropes, perversions of nature (e.g., otyughs and slimes)",
+  },
+  C: {
+    gods: [
+      "Ahriman, god of death and disease",
+      "Hidden Lord, god of secrets",
+      "Azi Dahaka, demon prince of storms and waste",
+      "Bobugbubilz, demon lord of evil amphibians",
+      "Cadixtat, chaos titan",
+      "Nimlurun, the unclean one, lord of filth and pollution",
+      "Malotoch, the carrion crow god",
+    ],
+    weapons: ["battleaxe", "handaxe", "longbow", "shortbow", "dagger", "dart", "flail"],
+    unholyCreatures: "Angels, paladins, lawful dragons, Lords of Law, Lawful Primes, and Law-aligned humanoids (e.g., goblins)",
+  },
 };
 
 // One display-friendly {key, label} entry per DISTINCT weapon-training key
@@ -4644,18 +4740,21 @@ function populateFavoriteWeaponSelect(cls, currentRawValue) {
 // Other" (nothing on file to judge training against - left to the
 // Judge); the character is a Warrior (trained in the use of ALL weapons,
 // per the class's own writeup - never takes this penalty regardless of
-// level or weapon); the character is a Cleric (DCC ties cleric weapon
-// training to their deity rather than a fixed list - not modeled here,
-// so Clerics are exempt for now rather than guessing wrong); the
-// character has some OTHER class (Thief/Wizard/Dwarf/Elf/Halfling) and
-// the weapon is on that class's own CLASS_WEAPON_TRAINING list; or the
-// character has no class yet (0-level) and the weapon matches Table 1-3's
-// Occupation-derived Trained Weapon field (recalcPcTrainedWeapon) - which
-// ONLY applies pre-class, per DCC's rule that a class's own weapon
-// training supersedes the 0-level Occupation weapon the moment a
-// character is classed. A blank Trained Weapon field (0-level, nothing
-// on file) or an unrecognized/homebrew "Other" class (no list on file to
-// judge against) both skip the penalty rather than guessing untrained by
+// level or weapon); the character is a Cleric and the weapon is on their
+// current Alignment's own DCC_CLERIC_DEITIES weapon list (DCC ties a
+// cleric's weapon training to their deity, which this app models by
+// Alignment group rather than the individual deity pick - every deity in
+// a group shares the same weapon list, see DCC_CLERIC_DEITIES's own
+// comment); the character has some OTHER class (Thief/Wizard/Dwarf/Elf/
+// Halfling) and the weapon is on that class's own CLASS_WEAPON_TRAINING
+// list; or the character has no class yet (0-level) and the weapon
+// matches Table 1-3's Occupation-derived Trained Weapon field
+// (recalcPcTrainedWeapon) - which ONLY applies pre-class, per DCC's rule
+// that a class's own weapon training supersedes the 0-level Occupation
+// weapon the moment a character is classed. A blank Trained Weapon field
+// (0-level, nothing on file), a Cleric with no Alignment picked yet (no
+// deity list to judge against), or an unrecognized/homebrew "Other" class
+// (same reason) all skip the penalty rather than guessing untrained by
 // default - same "missing data isn't a penalty" stance this app takes
 // elsewhere (e.g. a blank HD field).
 function isWeaponUntrained(stats, atk) {
@@ -4663,7 +4762,18 @@ function isWeaponUntrained(stats, atk) {
   const entry = dccWeaponEntry(atk.weapon);
   if (!entry || entry.key === "unarmed" || entry.key === "custom") return false;
   const cls = (stats.data.class || "").trim();
-  if (cls === "Warrior" || cls === "Cleric") return false;
+  if (cls === "Warrior") return false;
+  if (cls === "Cleric") {
+    // DCC ties a cleric's weapon training to their deity's own Alignment
+    // group (DCC_CLERIC_DEITIES) rather than a single fixed class-wide
+    // list - a blank/unrecognized Alignment has no list to judge against,
+    // so it's exempt rather than guessing untrained by default, same
+    // "missing data isn't a penalty" stance the trailing Other/Homebrew
+    // case below already takes.
+    const deityGroup = DCC_CLERIC_DEITIES[(stats.data.alignment || "").trim()];
+    if (!deityGroup) return false;
+    return !deityGroup.weapons.includes(dccWeaponTrainingKey(entry));
+  }
   const classWeapons = CLASS_WEAPON_TRAINING[cls];
   if (classWeapons) return !classWeapons.includes(dccWeaponTrainingKey(entry));
   if (cls !== "") return false; // "Other/Homebrew" - nothing on file to judge.
@@ -4678,7 +4788,8 @@ function isWeaponUntrained(stats, atk) {
 function isWeaponUntrainedLive(atk) {
   const classEl = document.getElementById("pc-class");
   const trainedEl = document.getElementById("pc-trained-weapon");
-  return isWeaponUntrained({ mode: "pc", data: { class: classEl ? classEl.value : "", "trained-weapon": trainedEl ? trainedEl.value : "" } }, atk);
+  const alignmentEl = document.getElementById("pc-alignment");
+  return isWeaponUntrained({ mode: "pc", data: { class: classEl ? classEl.value : "", "trained-weapon": trainedEl ? trainedEl.value : "", alignment: alignmentEl ? alignmentEl.value : "" } }, atk);
 }
 
 // A Warrior or Dwarf (FAVORITE_WEAPON_CLASSES) who's designated a
@@ -5125,19 +5236,23 @@ function attackRowHtml(atk, mode) {
     // Below 1st level, "trained in" means Table 1-3's Occupation-derived
     // Trained Weapon field; classed (1st level+) Thief/Wizard/Dwarf/Elf/
     // Halfling instead read from that class's own fixed weapon list
-    // (CLASS_WEAPON_TRAINING) - see isWeaponUntrained for why this badge
-    // never shows for Warriors (trained in all weapons) or Clerics
-    // (deity-based, not modeled).
+    // (CLASS_WEAPON_TRAINING); a Cleric reads from their Alignment's own
+    // DCC_CLERIC_DEITIES weapon list instead - see isWeaponUntrained for
+    // why this badge never shows for Warriors (trained in all weapons).
     const classElForBadge = document.getElementById("pc-class");
     const clsForBadge = classElForBadge ? classElForBadge.value.trim() : "";
     let trainedText;
-    if (CLASS_WEAPON_TRAINING[clsForBadge]) {
+    if (clsForBadge === "Cleric") {
+      const alignmentElForBadge = document.getElementById("pc-alignment");
+      const deityGroupForBadge = DCC_CLERIC_DEITIES[alignmentElForBadge ? alignmentElForBadge.value : ""];
+      trainedText = deityGroupForBadge ? deityGroupForBadge.weapons.join(", ") : "(pick an Alignment)";
+    } else if (CLASS_WEAPON_TRAINING[clsForBadge]) {
       trainedText = CLASS_WEAPON_TRAINING[clsForBadge].join(", ");
     } else {
       const trainedEl = document.getElementById("pc-trained-weapon");
       trainedText = trainedEl && trainedEl.value.trim() ? trainedEl.value.trim() : "(none on file)";
     }
-    badges.push(`<span class="weapon-badge weapon-badge-untrained" title="Untrained weapon (Table 4-1) - this character is only trained in ${escapeHtml(trainedText)}. -1 die step to the attack roll (not damage); Warriors (all weapons) and Clerics (deity-based, not modeled) never take this.">Untrained</span>`);
+    badges.push(`<span class="weapon-badge weapon-badge-untrained" title="Untrained weapon (Table 4-1) - this character is only trained in ${escapeHtml(trainedText)}. -1 die step to the attack roll (not damage); Warriors (trained in all weapons) never take this.">Untrained</span>`);
   }
   // Mighty Deeds of Arms is character-wide (see pcClassHasDeedDieLive), so
   // every attack row for a Warrior/Dwarf gets this reminder that a Deed
@@ -6167,6 +6282,10 @@ function renderPcStatline(d) {
   // Same reasoning, for the Deed Die row - Warrior/Dwarf only (see
   // updatePcDeedDieVisibility).
   updatePcDeedDieVisibility();
+  // Same reasoning again, for the Deity row - Cleric only, and its option
+  // list also needs to stay matching the current Alignment (see
+  // updatePcDeityVisibility).
+  updatePcDeityVisibility();
   const hp = d.hpMax ? `${d.hpCurrent || d.hpMax}/${d.hpMax}` : (d.hpCurrent || "—");
   const classLevel = [d.class || d.occupation || null, d.level ? `Lvl ${d.level}` : null].filter(Boolean).join(" ");
   const atkSummary = formatAttacksSummary(d.attacks);
@@ -6455,6 +6574,21 @@ if (pcTrainedWeaponSyncBtn) {
     // Trained Weapon right away.
     renderAttacks("pc", readAttacks("pc"));
     cfgRenderFromCurrentForm("pc");
+  });
+}
+const pcDeitySelectEl = document.getElementById("pc-deity-select");
+if (pcDeitySelectEl) {
+  // Same "dropdown writes into the underlying persisted field" contract
+  // as the Favorite Weapon dropdown above (pcTrainedWeaponSelectEl) - the
+  // visible select is rebuilt from DCC_CLERIC_DEITIES on every render
+  // (updatePcDeityVisibility) and can't itself survive a save/load
+  // round-trip (its <option>s don't exist until Alignment/Class are
+  // already known), so the actual saved value lives in the hidden
+  // #pc-deity input instead.
+  pcDeitySelectEl.addEventListener("change", () => {
+    const deityEl = document.getElementById("pc-deity");
+    if (deityEl) deityEl.value = pcDeitySelectEl.value;
+    scheduleSave();
   });
 }
 
@@ -7941,6 +8075,20 @@ function renderTurnUnholyModalResult() {
   // for - once either changes, it no longer applies, so it's cleared
   // rather than left sitting there looking like it still matches.
   if (rollResultEl) rollResultEl.innerHTML = "";
+  // Which creatures actually count as "unholy" (turnable at all) follows
+  // this cleric's own Alignment, per whichever deity they follow -
+  // DCC_CLERIC_DEITIES's own comment on why this is Alignment-wide rather
+  // than per-individual-deity. Independent of the Total/HD inputs above
+  // (it's the same list regardless of check result), so it's refreshed
+  // here unconditionally rather than only on a successful table lookup.
+  const unholyNoteEl = document.getElementById("turn-unholy-modal-unholy-note");
+  if (unholyNoteEl) {
+    const alignmentElForNote = document.getElementById("pc-alignment");
+    const deityGroupForNote = DCC_CLERIC_DEITIES[alignmentElForNote ? alignmentElForNote.value : ""];
+    unholyNoteEl.innerHTML = deityGroupForNote
+      ? `<strong>Unholy Creatures</strong> (this cleric's Alignment): ${escapeHtml(deityGroupForNote.unholyCreatures)}.`
+      : "";
+  }
   if (!resultEl) return;
   if (!row) {
     resultEl.innerHTML = "";
@@ -11809,6 +11957,9 @@ document.getElementById("pc-class").addEventListener("change", () => {
   // Same reasoning - hides the whole Deed Die row immediately for a class
   // that doesn't get one, rather than waiting for the next full render.
   updatePcDeedDieVisibility();
+  // Same reasoning again, for the Deity row (Cleric only) - see
+  // updatePcDeityVisibility's own comment.
+  updatePcDeityVisibility();
   // A new Class also means a (possibly different) Action Dice progression
   // (and whether the Dwarf-only Shield Bash option even applies) - same
   // force-overwrite contract as Crit Die/Table and Deed Die above.
@@ -11954,6 +12105,20 @@ document.getElementById("pc-alignment").addEventListener("change", () => {
   // A Cleric's Lay on Hands/Cause Wounds row also depends on Alignment
   // (Turn Unholy/Divine Aid don't) - see syncClericAbilityRows's own comment.
   syncClericAbilityRows(false);
+  // A Cleric's Deity list is Alignment-filtered (DCC_CLERIC_DEITIES) -
+  // refilter it now rather than waiting for the next unrelated render pass
+  // (updatePcDeityVisibility is otherwise only called passively from
+  // renderPcStatline, same gap a Class change fills via its own
+  // cfgRenderFromCurrentForm call at the end of that handler).
+  updatePcDeityVisibility();
+  // A Cleric's weapon training is ALSO Alignment-based now
+  // (DCC_CLERIC_DEITIES.weapons, see isWeaponUntrained's Cleric case) -
+  // every row's Untrained badge needs a fresh look at the new Alignment,
+  // same "resync bonuses before the rebuild, then re-render" contract the
+  // Favorite Weapon dropdown's own change handler already follows for the
+  // same reason.
+  refreshAutoSyncedAttackBonuses();
+  renderAttacks("pc", readAttacks("pc"));
   scheduleSave();
 });
 
@@ -14041,10 +14206,16 @@ function trackerLineHtml(item, stats, line) {
     if (line.twHand === "offhand") badges.push(`<span class="weapon-badge weapon-badge-tw" title="Two-weapon fighting: off-hand">TW: Off-hand</span>`);
     if (isWeaponUntrained(stats, atk)) {
       const cls = (stats.data.class || "").trim();
-      const trainedText = CLASS_WEAPON_TRAINING[cls]
-        ? CLASS_WEAPON_TRAINING[cls].join(", ")
-        : (String(stats.data["trained-weapon"] || "").trim() || "(none on file)");
-      badges.push(`<span class="weapon-badge weapon-badge-untrained" title="Untrained weapon (Table 4-1) - this character is only trained in ${escapeHtml(trainedText)}. -1 die step to the attack roll (not damage); Warriors (all weapons) and Clerics (deity-based, not modeled) never take this.">Untrained</span>`);
+      let trainedText;
+      if (cls === "Cleric") {
+        const deityGroupForBadge = DCC_CLERIC_DEITIES[(stats.data.alignment || "").trim()];
+        trainedText = deityGroupForBadge ? deityGroupForBadge.weapons.join(", ") : "(pick an Alignment)";
+      } else {
+        trainedText = CLASS_WEAPON_TRAINING[cls]
+          ? CLASS_WEAPON_TRAINING[cls].join(", ")
+          : (String(stats.data["trained-weapon"] || "").trim() || "(none on file)");
+      }
+      badges.push(`<span class="weapon-badge weapon-badge-untrained" title="Untrained weapon (Table 4-1) - this character is only trained in ${escapeHtml(trainedText)}. -1 die step to the attack roll (not damage); Warriors (trained in all weapons) never take this.">Untrained</span>`);
     }
     if (hasDeedDie) {
       const deedDieText = String(stats.data["deed-die"] || "").trim() || "Deed Die";
