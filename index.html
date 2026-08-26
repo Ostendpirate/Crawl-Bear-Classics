@@ -1490,7 +1490,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 15:59</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 16:18</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -11038,11 +11038,21 @@ document.getElementById("pc-class").addEventListener("change", () => {
   );
   const spellRowsRemoved = attacksForClassChange.filter(a => a.weapon === SPELL_ATTACK_KEY).length - attacksAfterCasterCheck.filter(a => a.weapon === SPELL_ATTACK_KEY).length;
   const turnUnholyRowsRemoved = attacksForClassChange.filter(a => a.weapon === TURN_UNHOLY_KEY).length - attacksAfterCasterCheck.filter(a => a.weapon === TURN_UNHOLY_KEY).length;
+  // Switching INTO Cleric should hand the player their Turn Unholy row
+  // right away rather than making them add it manually via + Add Action -
+  // every Cleric has this ability, same as every Warrior/Dwarf always has
+  // a Deed Die row. Only adds one if the class change just removed the
+  // last one (or there was never one) - never duplicates an existing row
+  // a player already added themselves.
+  const turnUnholyRowAdded = staysCleric && !attacksAfterCasterCheck.some(a => a.weapon === TURN_UNHOLY_KEY);
+  if (turnUnholyRowAdded) attacksAfterCasterCheck.push({ ...emptyAttack(), weapon: TURN_UNHOLY_KEY });
   renderAttacks("pc", attacksAfterCasterCheck);
   if (spellRowsRemoved > 0) {
     showStatus(`${spellRowsRemoved === 1 ? "Removed its Cast a Spell row" : `Removed ${spellRowsRemoved} Cast a Spell rows`} - this class doesn't cast spells.`, false, 5000);
   } else if (turnUnholyRowsRemoved > 0) {
     showStatus(`${turnUnholyRowsRemoved === 1 ? "Removed its Turn Unholy row" : `Removed ${turnUnholyRowsRemoved} Turn Unholy rows`} - this class doesn't have Turn Unholy.`, false, 5000);
+  } else if (turnUnholyRowAdded) {
+    showStatus("Added a Turn Unholy row - Clerics can turn unholy creatures (Table 4-4).", false, 5000);
   }
   // A new Class can also mean the Spells section's spell-name field
   // switches between Table 5-8's dropdown (Wizard/Elf), Table 5-9's
