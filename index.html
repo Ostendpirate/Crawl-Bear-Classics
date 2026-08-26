@@ -1341,7 +1341,7 @@
   .attack-detail-row-wrap:last-child { border-bottom: none; padding-bottom: 0; }
   .attack-detail-row { display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
   .attack-detail-name { flex: 1; color: var(--text); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tracker-spell-select { flex: 1; min-width: 0; padding: 3px 4px; font-size: 11px; font-weight: 600; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 4px; }
+  .tracker-spell-select, .tracker-skill-select { flex: 1; min-width: 0; padding: 3px 4px; font-size: 11px; font-weight: 600; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 4px; }
   .attack-detail-meta { color: var(--muted); white-space: nowrap; display: flex; gap: 8px; }
   .attack-detail-meta-part b { color: var(--text); font-weight: 600; }
   .attack-detail-used-up { color: var(--muted); font-size: 11px; line-height: 1.5; padding: 4px 2px; }
@@ -1490,7 +1490,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 20:14</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 20:20</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -6258,6 +6258,10 @@ function renderPcStatline(d) {
   // refreshSpellAttackRows below so a freshly-added row's Bonus gets
   // computed on this same pass instead of waiting for the next one.
   ensureCasterHasSpellAttackRow();
+  // A Thief/Halfling gets a Thief Skill Check row automatically the same
+  // way - see ensureThiefHasSkillActionRow's own comment for why more
+  // than one is fine here (unlike Cast a Spell above).
+  ensureThiefHasSkillActionRow();
   // Keeps the Spell Check list's visibility (Cleric/Wizard/Elf only) and
   // mechanic-reminder note matching the current Class on every render,
   // same passive contract as the Skills section just above.
@@ -10925,6 +10929,31 @@ function ensureCasterHasSpellAttackRow() {
   scheduleSave();
 }
 
+// Same "guaranteed at least one, added automatically" contract as
+// ensureCasterHasSpellAttackRow just above, for a Thief/Halfling's own
+// Thief Skill Check row - unlike Cast a Spell, more than one is a
+// perfectly normal configuration here (a player readying several skills
+// at once), so this only tops up to ONE if none exist yet at all; it
+// never blocks adding a second/third the way the spell version's own
+// .attack-weapon change handler does. The fresh row starts with no skill
+// picked (thiefSkillActionRowHtml's own "— Select a skill —" placeholder)
+// - same idempotent "check the live DOM, safe on every passive render
+// pass" contract as the spell version. Only ever ADDS - never removes an
+// existing row even if Class changes away from Thief/Halfling (the class
+// change handler's own filter already handles that removal - see its
+// "staysSkillClass" comment), so switching Class and back doesn't
+// silently drop whatever was configured on it.
+function ensureThiefHasSkillActionRow() {
+  const classEl = document.getElementById("pc-class");
+  const cls = classEl ? classEl.value : "";
+  if (cls !== "Thief" && cls !== "Halfling") return;
+  const attacks = readAttacks("pc");
+  if (attacks.some(a => a.weapon === THIEF_SKILL_ACTION_KEY)) return;
+  attackListEl("pc").insertAdjacentHTML("beforeend", attackRowHtml({ ...emptyAttack(), weapon: THIEF_SKILL_ACTION_KEY }, "pc"));
+  attachAttackRowListeners("pc");
+  scheduleSave();
+}
+
 // Recomputes the Bonus field + its hover breakdown for every currently-
 // rendered spell-cast Attacks row, without touching anything else about
 // it (the selected spell, in particular) - same "passive, every-render
@@ -12550,6 +12579,19 @@ function activeSkillRowDefs(cls, levelRaw, alignmentRaw) {
     };
   }
   return { status: "not-applicable" };
+}
+
+// Stats-based sibling of thiefSkillActionRows() (the Sheet's own version,
+// near thiefSkillActionRowHtml) - the list of rollable skills a token can
+// currently pick from for a Thief Skill Check row/line, resolved off
+// stats.data instead of the live Sheet DOM. Single source of truth shared
+// by deriveTrackerLines, thiefSkillTrackerLineHtml, and
+// rollThiefSkillForTracker, so the Tracker's own skill picker/roll/line
+// list can never disagree with each other about what's available.
+function thiefSkillActionRowsForStats(stats) {
+  const cls = (stats.data.class || "").trim();
+  const info = activeSkillRowDefs(cls, stats.data.level, stats.data.alignment);
+  return (info.rows || []).filter(row => row.rollable !== false);
 }
 
 // Folds a skill row's flat Table bonus together with this character's live
@@ -14385,10 +14427,12 @@ function deriveTrackerLines(item, stats) {
   const thiefSkillAttacks = stats.attacks.filter(a => a.weapon === THIEF_SKILL_ACTION_KEY && (a.name || "").trim());
   thiefSkillAttacks.forEach(atk => {
     const slotKey = actDieOptions.some(o => o.value === atk.actionDieIndex) ? atk.actionDieIndex : "0";
-    const skillRows = activeSkillRowDefs(cls, level, stats.data.alignment).rows || [];
-    const skillRow = skillRows.find(r => r.label === atk.name && r.rollable !== false);
+    const skillRow = thiefSkillActionRowsForStats(stats).find(r => r.label === atk.name);
     const dieSides = skillRow && skillRow.isDie ? skillRow.classBonus : 20;
-    lines.push({ atk, attackId: atk.id, slotKey, isTw: false, isThiefSkill: true, label: `🗝️ ${atk.name}`, dieSides });
+    // No skill name in the label itself - thiefSkillTrackerLineHtml shows
+    // it via its own picker dropdown instead (same "label is generic, the
+    // select shows the specific pick" split spell lines already use).
+    lines.push({ atk, attackId: atk.id, slotKey, isTw: false, isThiefSkill: true, label: "🗝️ Skill Check", dieSides });
   });
 
   return lines.map(tagUsed);
@@ -14823,24 +14867,32 @@ function divineAidTrackerLineHtml(item, stats, line) {
     </div>`;
 }
 
-// One rollable line for a Thief Skill Check row - same shape as the four
-// above, resolved via computeSkillRowTotalForStats (thiefSkillActionRows'
-// own stats-based sibling) against whichever skill this row has picked
-// (line.atk.name).
+// One rollable line for a Thief Skill Check row - same overall shape as
+// spellTrackerLineHtml above, including its own picker dropdown
+// (.tracker-skill-select) so the skill this line checks can be changed
+// right from the Tracker, not just the Sheet - wired in
+// attachTrackerRowListeners via applyTrackerSkillSelection, same
+// "dropdown writes straight to atk.name" contract the spell picker
+// follows when its own row hasn't expanded into multiple lines (a Thief
+// Skill Check row NEVER expands - see deriveTrackerLines' own comment -
+// so there's no spellBySlot-style per-slot map to worry about here, it's
+// always a direct write). Resolved via computeSkillRowTotalForStats
+// (thiefSkillActionRowsForStats' own stats-based sibling) against
+// whichever skill is currently picked (line.atk.name).
 function thiefSkillTrackerLineHtml(item, stats, line) {
-  const cls = (stats.data.class || "").trim();
-  const skillRows = activeSkillRowDefs(cls, stats.data.level, stats.data.alignment).rows || [];
-  const skillRow = skillRows.find(r => r.label === line.atk.name && r.rollable !== false);
+  const rows = thiefSkillActionRowsForStats(stats);
+  const skillRow = rows.find(r => r.label === line.atk.name);
   const c = skillRow ? computeSkillRowTotalForStats(stats, skillRow) : null;
   const bonusText = c ? (c.isDie ? `d${c.sides}` : formatSignedNumber(c.total)) : "+0";
-  const bonusTooltip = skillRow ? skillRowTitleForStats(stats, skillRow) : "This skill isn't available for the current Class/Level/Alignment.";
+  const bonusTooltip = skillRow ? skillRowTitleForStats(stats, skillRow) : (rows.length ? "Pick a skill." : "Only Thief/Halfling have skills to check here.");
   return `
     <div class="attack-detail-row-wrap">
       <div class="attack-detail-row" data-attack-id="${line.attackId}" data-slot-key="${line.slotKey || ""}">
+        <select class="tracker-skill-select" title="Which skill this line checks - add more rows in the Actions list on the Sheet.">${thiefSkillSelectOptionsHtml(line.atk.name, rows)}</select>
         <span class="attack-detail-meta">
-          <span class="attack-detail-meta-part" title="${escapeHtml(bonusTooltip)}">${escapeHtml(line.label)} <b>${escapeHtml(bonusText)}</b></span>
+          <span class="attack-detail-meta-part" title="${escapeHtml(bonusTooltip)}"><b>${escapeHtml(bonusText)}</b></span>
         </span>
-        <button class="hp-btn attack-roll-btn"${skillRow ? "" : " disabled"} title="${escapeHtml(skillRow ? `Roll ${skillRow.label}` : "This skill isn't available for the current Class/Level/Alignment.")}">🎲</button>
+        <button class="hp-btn attack-roll-btn"${skillRow ? "" : " disabled"} title="${escapeHtml(skillRow ? `Roll ${skillRow.label}` : "Pick a skill above first")}">🎲</button>
       </div>
     </div>`;
 }
@@ -16550,9 +16602,7 @@ async function rollThiefSkillForTracker(itemId, attackId, slotKey) {
   const atk = stats.attacks.find(a => a.id === attackId);
   const label = atk && atk.name ? atk.name.trim() : "";
   if (!label) return;
-  const cls = (stats.data.class || "").trim();
-  const skillRows = activeSkillRowDefs(cls, stats.data.level, stats.data.alignment).rows || [];
-  const skillRow = skillRows.find(r => r.label === label && r.rollable !== false);
+  const skillRow = thiefSkillActionRowsForStats(stats).find(r => r.label === label);
   if (!skillRow) {
     const msg = `${item.name || "Token"}: This skill isn't available for the current Class/Level/Alignment.`;
     showTrackerStatus(msg, true);
@@ -16671,6 +16721,16 @@ function attachTrackerRowListeners() {
       if (spellSelect) {
         spellSelect.addEventListener("change", () => {
           applyTrackerSpellSelection(parentId, attackId, slotKey, spellSelect.value);
+        });
+      }
+
+      // Thief Skill Check line's own picker (thiefSkillTrackerLineHtml) -
+      // see applyTrackerSkillSelection's own comment for why this is a
+      // direct write, unlike the spell picker just above.
+      const skillSelect = wrap.querySelector(".tracker-skill-select");
+      if (skillSelect) {
+        skillSelect.addEventListener("change", () => {
+          applyTrackerSkillSelection(parentId, attackId, skillSelect.value);
         });
       }
 
@@ -16907,6 +16967,27 @@ async function applyTrackerSpellSelection(itemId, attackId, slotKey, name) {
         if (expanded) return { ...a, spellBySlot: { ...(a.spellBySlot || {}), [slotKey]: name } };
         return { ...a, name };
       });
+      item.metadata[PC_METADATA_KEY] = data;
+    });
+  });
+  await refreshTracker();
+}
+
+// Tracker-side sibling of applyTrackerSpellSelection just above, for a
+// Thief Skill Check line's own picker (.tracker-skill-select, see
+// thiefSkillTrackerLineHtml) - much simpler, since a Thief Skill Check row
+// never expands into multiple Action-Die lines the way a Cast a Spell row
+// can (see deriveTrackerLines' own comment - each row already pins to one
+// Action Die on the Sheet, so this line and that row are always the same
+// thing), so there's no spellBySlot-style per-slot branching needed: the
+// pick always writes straight to the row's own `name`.
+async function applyTrackerSkillSelection(itemId, attackId, name) {
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      if (mode !== "pc") return;
+      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+      data.attacks = (data.attacks || []).map(a => (a.id === attackId ? { ...a, name } : a));
       item.metadata[PC_METADATA_KEY] = data;
     });
   });
