@@ -1490,7 +1490,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 17:12</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 17:16</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -7784,12 +7784,16 @@ document.getElementById("disapproval-modal-roll-btn").addEventListener("click", 
 });
 
 // Turn Unholy (DCC RPG core rulebook, Cleric only) - "as with all spell
-// checks": 1d20 + Personality modifier + caster Level. ALWAYS a straight
-// d20 - unlike a "Cast a Spell" row, Turn Unholy isn't tied to an Action
-// Die slot's own die size, so none of that row's Spellburn/Mercurial
-// Magic/Reversing Spells machinery applies - this takes no row/slot
-// argument at all, since the math never varies by which Actions row or
-// Action Die triggered it (see turnUnholyRowHtml's own comment). Opens
+// checks": 1d20 + Personality modifier + caster Level, PLUS the Cleric
+// class table's own note that "a cleric's Luck modifier applies to all
+// spell checks to turn unholy creatures" - a bonus specific to THIS
+// ability alone (Lay on Hands/Cause Wounds/Divine Aid don't get it, see
+// their own roll functions' Level+Personality-only formulas). ALWAYS a
+// straight d20 - unlike a "Cast a Spell" row, Turn Unholy isn't tied to an
+// Action Die slot's own die size, so none of that row's Spellburn/
+// Mercurial Magic/Reversing Spells machinery applies - this takes no
+// row/slot argument at all, since the math never varies by which Actions
+// row or Action Die triggered it (see turnUnholyRowHtml's own comment). Opens
 // the Turn Unholy modal (Table 4-4) pre-filled with this total so the
 // Judge can resolve it against whatever HD the target actually is - the
 // same total can be re-looked-up against several different HD brackets
@@ -7811,9 +7815,10 @@ function rollTurnUnholyRow() {
   const levelEl = document.getElementById("pc-level");
   const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
   const perMod = abilityModifierFromField("pc-per");
+  const luckMod = pcLuckModifierLive();
   const forcedD20 = consumeForcedD20();
   const rolled = forcedD20 !== null ? forcedD20 : (Math.floor(Math.random() * 20) + 1);
-  const total = rolled + level + perMod;
+  const total = rolled + level + perMod + luckMod;
   let note = rolled === 1 ? ` ${markFumbleAlert("💀 FAILURE")} Natural 1 always fails.` : "";
   const disapprovalRange = checkPcDisapprovalTrigger(rolled, "per");
   if (disapprovalRange !== null) {
@@ -7823,10 +7828,10 @@ function rollTurnUnholyRow() {
     note += ` ${markFumbleAlert("😇 DISAPPROVAL")} - the check failed (${total} ≤ 11, no effect regardless of HD) - roll on Table 5-7. Range now widens to 1-${widenedFrom + 1} for the rest of the day.`;
   }
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
-  const text = `Turn Unholy: d20 (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(level)}(level) ${formatSignedNumber(perMod)}(Per) = ${markRollTotal(total)}${note}`;
+  const text = `Turn Unholy: d20 (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(level)}(level) ${formatSignedNumber(perMod)}(Per) ${formatSignedNumber(luckMod)}(Luck) = ${markRollTotal(total)}${note}`;
   showStatus(text, false, note ? 9000 : 4000);
   appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId)) });
-  broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: level + perMod, notation: "d20", total, label: "Turn Unholy" });
+  broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: level + perMod + luckMod, notation: "d20", total, label: "Turn Unholy" });
   openTurnUnholyModal(total);
 }
 
@@ -10424,13 +10429,18 @@ function emptySpellAttack() {
 // per-Action-Die spell-name splitting, so it needs neither spellBySlot nor
 // a "which slot is THIS roll using" resolution beyond the plain Action Die
 // picker every weapon row already has. Bonus is always d20 + Level +
-// Personality modifier (see rollTurnUnholyRow) - a straight d20, never
-// stepped by a smaller Action Die the way a Spell Check is, since Turn
-// Unholy isn't tied to a spellcasting slot at all (DCC RPG core rulebook:
-// "At any time, a cleric may utilize a spell check..."). The Action Die
-// picker here only exists so the Combat Tracker's "used this round"
-// bookkeeping has a slot to mark, matching every other action a character
-// takes - it does NOT change what's actually rolled.
+// Personality modifier + Luck modifier (see rollTurnUnholyRow) - a
+// straight d20, never stepped by a smaller Action Die the way a Spell
+// Check is, since Turn Unholy isn't tied to a spellcasting slot at all
+// (DCC RPG core rulebook: "At any time, a cleric may utilize a spell
+// check..."). The Luck modifier is Turn-Unholy-specific - the core
+// rulebook's own Cleric class table note reads "A cleric's Luck modifier
+// applies to all spell checks to turn unholy creatures," a bonus none of
+// Lay on Hands/Cause Wounds/Divine Aid get (see their own Bonus formulas,
+// still just Level + Personality). The Action Die picker here only exists
+// so the Combat Tracker's "used this round" bookkeeping has a slot to
+// mark, matching every other action a character takes - it does NOT
+// change what's actually rolled.
 function turnUnholyRowHtml(atk) {
   const classEl = document.getElementById("pc-class");
   const cls = classEl ? classEl.value : "";
@@ -10443,9 +10453,10 @@ function turnUnholyRowHtml(atk) {
   ).join("")}</select>` : "";
   const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
   const perMod = abilityModifierFromField("pc-per");
-  const bonusText = isCleric ? formatSignedNumber(level + perMod) : "";
+  const luckMod = pcLuckModifierLive();
+  const bonusText = isCleric ? formatSignedNumber(level + perMod + luckMod) : "";
   const bonusTitle = isCleric
-    ? `Turn Unholy = d20 + Level ${formatSignedNumber(level)} + Personality ${formatSignedNumber(perMod)}.`
+    ? `Turn Unholy = d20 + Level ${formatSignedNumber(level)} + Personality ${formatSignedNumber(perMod)} + Luck ${formatSignedNumber(luckMod)}.`
     : "Only Cleric has Turn Unholy - pick Cleric above.";
   const luckLastRollAttr = escapeHtml(JSON.stringify(atk.luckLastRoll || {}));
   return `
@@ -10724,12 +10735,13 @@ function refreshTurnUnholyRows() {
   const levelEl = document.getElementById("pc-level");
   const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
   const perMod = abilityModifierFromField("pc-per");
+  const luckMod = pcLuckModifierLive();
   listEl.querySelectorAll(".turn-unholy-row").forEach(row => {
     const bonusInput = row.querySelector(".attack-bonus");
     if (!bonusInput) return;
-    bonusInput.value = isCleric ? formatSignedNumber(level + perMod) : "";
+    bonusInput.value = isCleric ? formatSignedNumber(level + perMod + luckMod) : "";
     bonusInput.title = isCleric
-      ? `Turn Unholy = d20 + Level ${formatSignedNumber(level)} + Personality ${formatSignedNumber(perMod)}.`
+      ? `Turn Unholy = d20 + Level ${formatSignedNumber(level)} + Personality ${formatSignedNumber(perMod)} + Luck ${formatSignedNumber(luckMod)}.`
       : "Only Cleric has Turn Unholy - pick Cleric above.";
     let metaEl = row.querySelector(".attack-row-meta");
     if (isCleric) {
