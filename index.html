@@ -1490,7 +1490,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 15:08</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 15:59</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -7600,7 +7600,11 @@ function parseTurnUnholyCell(code) {
     const dm = damagePart.match(/^D(\d+)(?:d(\d+))?$/);
     if (dm) damageSpec = dm[2] ? `${dm[1]}d${dm[2]}` : dm[1];
   }
-  return { type, countSpec, plusCasterLevel, damageSpec, noSave };
+  // Duration is fixed by the rule itself (see TURN_UNHOLY_TABLE's own
+  // comment: "flees/cowers for 3d10 minutes"), not part of the table's
+  // per-cell code - and only applies to "turn" results, never "kill".
+  const durationSpec = type === "turn" ? "3d10" : null;
+  return { type, countSpec, plusCasterLevel, damageSpec, durationSpec, noSave };
 }
 
 // Builds the plain-language description of one Table 4-4 cell - no T/D/K/
@@ -7703,6 +7707,10 @@ document.getElementById("turn-unholy-modal-roll-effect-btn").addEventListener("c
   let text = parsed.type === "kill"
     ? `Rolled result: ${count} ${creatureWord} destroyed outright.`
     : `Rolled result: ${count} ${creatureWord} turned.`;
+  if (parsed.durationSpec) {
+    const duration = rollTurnUnholyDiceSpec(parsed.durationSpec);
+    text += ` Flees for ${duration} minutes.`;
+  }
   if (parsed.damageSpec) {
     const damage = rollTurnUnholyDiceSpec(parsed.damageSpec);
     text += ` Each also takes ${damage} damage.`;
