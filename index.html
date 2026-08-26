@@ -1118,26 +1118,29 @@
   .fumble-die-note {
     font-size: 10px;
   }
-  /* Max Luck badge (see refreshPcLuckMaxNote) - a small gold pill instead
-     of a plain sentence, so a burned character's true/unburned score
-     reads as a quick at-a-glance stat rather than another line of prose
-     competing with the New Day button right below it. Hugs its own
-     content width (inline-flex) rather than stretching the full row the
-     way .fumble-die-note's plain text did. */
-  .luck-max-badge {
+  /* Shared shape for a small "current value of a tracked stat" pill - Max
+     Luck (refreshPcLuckMaxNote) and Disapproval Range
+     (refreshPcDisapprovalRangeNote) both use this instead of a plain
+     sentence, so a burned/widened stat reads as a quick at-a-glance
+     number rather than another line of prose competing with the button(s)
+     right below it. Hugs its own content width (inline-flex) rather than
+     stretching the full row the way .fumble-die-note's plain text did -
+     each badge's own color (below) is what tells them apart. */
+  .stat-badge {
     display: inline-flex;
     align-items: center;
     gap: 4px;
     font-size: 11px;
     font-weight: 700;
-    background: linear-gradient(135deg, var(--accent), #8a5a28);
     color: #1e1b18;
     padding: 3px 10px;
     border-radius: 999px;
     margin-bottom: 8px;
     cursor: default;
   }
-  .luck-max-badge b { font-size: 12px; }
+  .stat-badge b { font-size: 12px; }
+  .luck-max-badge { background: linear-gradient(135deg, var(--accent), #8a5a28); }
+  .disapproval-range-badge { background: linear-gradient(135deg, #e0665a, #8a2d2d); color: #fff; }
   .tables-btn {
     background: var(--border);
     border: none;
@@ -1487,7 +1490,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 14:00</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 14:10</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1719,7 +1722,7 @@
             <div class="save-box"><label class="roll-label" data-roll-ability="int" title="Click to roll an Intelligence check: d20 + Intelligence modifier.">Int</label><input type="text" id="pc-int" placeholder="9 (+0)"/></div>
             <div class="save-box"><label class="roll-label" data-roll-ability="lck" title="Click to roll a Luck check: d20 + Luck modifier.">Lck</label><input type="text" id="pc-lck" placeholder="11 (+0)"/></div>
           </div>
-          <div class="luck-max-badge" id="pc-luck-max-note" style="display:none;"></div>
+          <div class="stat-badge luck-max-badge" id="pc-luck-max-note" style="display:none;"></div>
           <button type="button" id="pc-spellburn-newday-btn" class="newday-btn" title="A night's rest - every class. Heals 1 HP. Wizard/Elf: recovers 1 point to ONE Str/Agi/Sta ability spent on Spellburn (see the Cast a Spell row), up to what it was before any Spellburn - asks which to recover if more than one is eligible. Thief/Halfling: also recovers Luck equal to their Level, up to its own natural max. Also clears any Lost spells. Click once per in-game day that passes.">🌙 New Day</button>
           <input type="hidden" id="pc-spellburnMax" value="" />
           <input type="hidden" id="pc-luckMax" value="" />
@@ -1879,7 +1882,7 @@
           </div>
           <div id="pc-disapproval-range-wrap" style="display:none; margin-top:8px;">
             <div class="spell-section-header">Disapproval Range</div>
-            <div class="fumble-die-note" id="pc-disapproval-range-note"></div>
+            <div class="stat-badge disapproval-range-badge" id="pc-disapproval-range-note"></div>
             <button type="button" class="hp-btn disapproval-range-btn" id="pc-disapproval-range-minus" title="Manually narrow the Disapproval Range by 1 (minimum natural 1 only) - e.g. correcting a mistaken widen.">−1 Range</button>
             <button type="button" class="hp-btn disapproval-range-btn" id="pc-disapproval-range-plus" title="Manually widen the Disapproval Range by 1 - e.g. a failed Turn Unholy check (DCC RPG core rulebook: 'Failure increases disapproval range'), which this app can't auto-detect since it doesn't resolve the turning table itself.">+1 Range</button>
           </div>
@@ -2026,12 +2029,12 @@
         <legend>GM Testing</legend>
         <div class="row">
           <div>
-            <label>Force next attack's d20</label>
+            <label>Force next d20</label>
             <input type="number" id="gm-force-d20" placeholder="e.g. 20 or 1" min="1" max="20" />
           </div>
         </div>
         <div class="fumble-die-note" style="margin-top:4px;">
-          Set 1-20 and the next attack roll (Sheet or Tracker) uses that number instead of a random roll - handy for testing crit/fumble outcomes on demand. Clears itself after one use.
+          Set 1-20 and the next d20 roll - attack, ability check, save, skill, or Spell Check, Sheet or Tracker - uses that number instead of a random roll (stepped-down dice cap at their own max face) - handy for testing crit/fumble/Disapproval outcomes on demand. Clears itself after one use.
         </div>
       </fieldset>
 
@@ -6308,13 +6311,19 @@ const SAVE_ROLL_LABELS = { fort: "Fortitude", ref: "Reflex", will: "Will" };
 // see abilityLuckBurnCtx) - caches this result in token metadata
 // (setAbilityLuckLastRollForStats) so the Log's own 🍀 button has
 // something to adjust, same "guarded on currentItemId" contract
-// rollSaveFromField follows.
+// rollSaveFromField follows. Honors the GM Testing "force next d20" field
+// (consumeForcedD20) same as every Tracker roll already does - this and
+// rollSaveFromField/rollSpellAttackRow were the only Sheet-tab rolls that
+// didn't, since they predate that field and roll their own d20 directly
+// rather than going through the shared stats-based roll functions the
+// Sheet's weapon-attack button itself already delegates to.
 async function rollPcAbilityCheck(abilityId) {
   const mod = abilityModifierFromField(`pc-${abilityId}`);
   const label = `${ABILITY_CHECK_LABELS[abilityId] || abilityId} Check`;
-  const rolled = Math.floor(Math.random() * 20) + 1;
+  const forcedD20 = consumeForcedD20();
+  const rolled = forcedD20 !== null ? forcedD20 : (Math.floor(Math.random() * 20) + 1);
   const total = rolled + mod;
-  const text = `${label}: d20 (${rolled}) ${formatSignedNumber(mod)} = ${markRollTotal(total)}`;
+  const text = `${label}: d20 (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(mod)} = ${markRollTotal(total)}`;
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
   showStatus(text, false, 4000);
   const luckTargets = currentItemId ? [{ type: "ability", itemId: currentItemId, abilityId, label }] : [];
@@ -6335,13 +6344,16 @@ async function rollPcAbilityCheck(abilityId) {
 // every other roll type now) - caches this result in token metadata
 // (setSaveLuckLastRollForStats) so the Log's own 🍀 button has something
 // to adjust, same "guarded on currentItemId" contract rollPcSkill follows.
+// Honors the GM Testing "force next d20" field (consumeForcedD20) - see
+// rollPcAbilityCheck's own comment for why this needed its own fix.
 async function rollSaveFromField(fieldId, saveId, mode) {
   const el = document.getElementById(fieldId);
   const mod = parseModifier(el ? el.value : "");
   const label = `${SAVE_ROLL_LABELS[saveId] || saveId} Save`;
-  const rolled = Math.floor(Math.random() * 20) + 1;
+  const forcedD20 = consumeForcedD20();
+  const rolled = forcedD20 !== null ? forcedD20 : (Math.floor(Math.random() * 20) + 1);
   const total = rolled + mod;
-  const text = `${label}: d20 (${rolled}) ${formatSignedNumber(mod)} = ${markRollTotal(total)}`;
+  const text = `${label}: d20 (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(mod)} = ${markRollTotal(total)}`;
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || (mode === "monster" ? "Monster" : "Character");
   showStatus(text, false, 4000);
   const luckTargets = (mode === "pc" && currentItemId) ? [{ type: "save", itemId: currentItemId, saveId, label }] : [];
@@ -7340,14 +7352,20 @@ function pcDisapprovalRangeLive() {
   return Number.isFinite(val) && val >= 1 ? val : 1;
 }
 
-// Keeps the Disapproval Range note (Spells fieldset, Cleric-only) matching
-// pc-disapprovalRange - same "purely internal snapshot surfaced as a
-// visible note" contract as refreshPcLuckMaxNote for pc-luckMax.
+// Keeps the Disapproval Range badge (Spells fieldset, Cleric-only)
+// matching pc-disapprovalRange - same "purely internal snapshot surfaced
+// as a small badge, full explanation in the title tooltip" contract
+// refreshPcLuckMaxNote uses for pc-luckMax. Unlike Max Luck (hidden until
+// something's actually been burned), this stays visible for every Cleric
+// even at the untouched baseline (range 1) - it's a live stat readout, not
+// just an anomaly flag, so "nothing widened yet" is itself worth seeing
+// at a glance rather than disappearing.
 function refreshPcDisapprovalRangeNote() {
   const noteEl = document.getElementById("pc-disapproval-range-note");
   if (!noteEl) return;
   const range = pcDisapprovalRangeLive();
-  noteEl.textContent = range <= 1
+  noteEl.innerHTML = `😇 Range <b>${range > 1 ? `1-${range}` : "1"}</b>`;
+  noteEl.title = range <= 1
     ? "Currently only a natural 1 on a Spell Check triggers Disapproval."
     : `Currently a natural 1-${range} on a Spell Check triggers Disapproval (widened by ${range - 1} earlier disapproval${range - 1 === 1 ? "" : "s"} today - resets on New Day).`;
 }
@@ -7472,7 +7490,8 @@ document.getElementById("pc-turn-unholy-btn").addEventListener("click", () => {
   const levelEl = document.getElementById("pc-level");
   const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
   const perMod = abilityModifierFromField("pc-per");
-  const rolled = Math.floor(Math.random() * 20) + 1;
+  const forcedD20 = consumeForcedD20();
+  const rolled = forcedD20 !== null ? forcedD20 : (Math.floor(Math.random() * 20) + 1);
   const total = rolled + level + perMod;
   let note = rolled === 1 ? ` ${markFumbleAlert("💀 FAILURE")} Natural 1 always fails.` : "";
   const disapprovalRange = checkPcDisapprovalTrigger(rolled, "per");
@@ -7483,7 +7502,7 @@ document.getElementById("pc-turn-unholy-btn").addEventListener("click", () => {
     note += ` ${markFumbleAlert("😇 DISAPPROVAL")} - the check failed (${total} ≤ 11, no effect regardless of HD) - roll on Table 5-7. Range now widens to 1-${widenedFrom + 1} for the rest of the day.`;
   }
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
-  const text = `Turn Unholy: d20 (${rolled}) ${formatSignedNumber(level)}(level) ${formatSignedNumber(perMod)}(Per) = ${markRollTotal(total)}${note}`;
+  const text = `Turn Unholy: d20 (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(level)}(level) ${formatSignedNumber(perMod)}(Per) = ${markRollTotal(total)}${note}`;
   showStatus(text, false, note ? 9000 : 4000);
   appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId)) });
   broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: level + perMod, notation: "d20", total, label: "Turn Unholy" });
@@ -9895,9 +9914,16 @@ async function rollSpellAttackRow(row) {
   // Spellburn: spending a full 20 points in one declaration automatically
   // treats this check as a natural max, no die actually rolled - reuses
   // spellCheckNaturalResultText's own crit handling below rather than a
-  // second, separate crit path.
+  // second, separate crit path. Otherwise honors the GM Testing "force
+  // next d20" field (consumeForcedD20), same as the Tracker's own
+  // rollSpellAttackForTracker already does and every weapon-attack roll
+  // already inherits via rollAttackFor - this Sheet-only roll had its own
+  // separate die-roll that never checked it, same gap rollPcAbilityCheck/
+  // rollSaveFromField had. Capped at this roll's own die size (a forced
+  // 20 on a stepped-down d14 still only ever reads as a 14).
   const autoNat = burnPoints >= 20;
-  const rolled = autoNat ? check.sides : (Math.floor(Math.random() * check.sides) + 1);
+  const forcedD20 = autoNat ? null : consumeForcedD20();
+  const rolled = autoNat ? check.sides : (forcedD20 !== null ? Math.min(forcedD20, check.sides) : (Math.floor(Math.random() * check.sides) + 1));
   const { critBonus, note: baseNote } = spellCheckNaturalResultText(rolled, check.sides, check.level, check.abilityId);
   let note = autoNat ? `${baseNote} (forced by Spellburn - ${burnPoints} points spent)` : baseNote;
   // Disapproval Range (DCC RPG core rulebook, Cleric only) - auto-detects
@@ -9934,7 +9960,7 @@ async function rollSpellAttackRow(row) {
     openFailedSpellburnModal();
   }
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
-  const text = `${label} - Spell Check: d${check.sides} (${rolled}) ${formatSignedNumber(check.modifier)}${critBonus ? ` ${formatSignedNumber(critBonus)}(level)` : ""} = ${markRollTotal(total)}${note}`;
+  const text = `${label} - Spell Check: d${check.sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(check.modifier)}${critBonus ? ` ${formatSignedNumber(critBonus)}(level)` : ""} = ${markRollTotal(total)}${note}`;
   showStatus(text, false, note ? 8000 : 4000);
   // luckTargets (see chatEntryHtml's own comment) - same natural-1
   // exclusion as the cache write further down.
@@ -11333,6 +11359,9 @@ async function rollPcSkill(key) {
   const cacheLuckLastRoll = async total => {
     if (currentItemId) await setSkillLuckLastRollForStats(currentItemId, key, total, label);
   };
+  // Both branches below honor the GM Testing "force next d20" field
+  // (consumeForcedD20) - see rollPcAbilityCheck's own comment for why this
+  // Sheet-only roll needed its own fix rather than inheriting it for free.
   if (row.dataset.isDie === "1") {
     const sidesMatch = /d(\d+)/i.exec(input.value || "");
     const sides = sidesMatch ? parseInt(sidesMatch[1], 10) : 20;
@@ -11340,9 +11369,10 @@ async function rollPcSkill(key) {
     const abilityMod = abilityId ? abilityModifierFromField(`pc-${abilityId}`) : 0;
     const penalty = row.dataset.checkPenaltyApplies === "1" ? computePcCheckPenaltyTotal() : 0;
     const modifier = abilityMod + penalty;
-    const rolled = Math.floor(Math.random() * sides) + 1;
+    const forcedD20 = consumeForcedD20();
+    const rolled = forcedD20 !== null ? Math.min(forcedD20, sides) : (Math.floor(Math.random() * sides) + 1);
     const total = rolled + modifier;
-    const text = `${label}: d${sides} (${rolled}) ${formatSignedNumber(modifier)} = ${markRollTotal(total)}`;
+    const text = `${label}: d${sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(modifier)} = ${markRollTotal(total)}`;
     showStatus(text, false, 4000);
     appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly, luckTargets });
     broadcastDiceRoll({ rollerName, dice: [{ sides, value: rolled }], modifier, notation: `d${sides}`, total, label });
@@ -11350,7 +11380,8 @@ async function rollPcSkill(key) {
     return;
   }
   const bonus = parseModifier(input.value);
-  const rolled = Math.floor(Math.random() * 20) + 1;
+  const forcedD20 = consumeForcedD20();
+  const rolled = forcedD20 !== null ? forcedD20 : (Math.floor(Math.random() * 20) + 1);
   const total = rolled + bonus;
   // Disable Trap's own rule: "A natural 1 on a disable trap check triggers
   // the trap." Every other skill here just fails on a low roll like any
@@ -11359,7 +11390,7 @@ async function rollPcSkill(key) {
   // natural 1 has special text on an attack roll (Fumble) elsewhere in
   // this app.
   const trapTriggerNote = (key === "disableTrap" && rolled === 1) ? " ⚠️ Natural 1 - the trap triggers!" : "";
-  const text = `${label}: d20 (${rolled}) ${formatSignedNumber(bonus)} = ${markRollTotal(total)}${trapTriggerNote}`;
+  const text = `${label}: d20 (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(bonus)} = ${markRollTotal(total)}${trapTriggerNote}`;
   showStatus(text, rolled === 1 && key === "disableTrap", trapTriggerNote ? 6000 : 4000);
   appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly, luckTargets });
   broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: bonus, notation: "d20", total, label });
