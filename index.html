@@ -1467,7 +1467,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 13:28</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 13:44</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1896,7 +1896,8 @@
           <legend>Languages</legend>
           <div class="fumble-die-note" id="pc-languages-note" style="margin-bottom:6px;"></div>
           <textarea id="pc-languages" placeholder="Common, Elvish"></textarea>
-          <button type="button" class="hp-btn roll-language-btn" id="pc-roll-language-btn" style="margin-top:6px;" title="Roll d100 on Appendix L (% Chance to Know Language, by Class) for one more known language, and append it below. Alignment tongue resolves to your own Chaos/Law/Neutrality; duplicates re-roll automatically.">🎲 Roll Language</button>
+          <button type="button" class="hp-btn roll-language-btn" id="pc-roll-language-btn" style="margin-top:6px;" title="Roll d100 on Appendix L (% Chance to Know Language, by Class) for one more known language, and append it below. Alignment tongue resolves to your own Chaos/Law/Neutrality; duplicates re-roll automatically. Capped at the bonus-language total shown above - refuses once every rollable slot is filled.">🎲 Roll Language</button>
+          <input type="hidden" id="pc-racial-language-auto" value="" />
         </fieldset>
 
         <fieldset>
@@ -2302,7 +2303,7 @@ const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al", "montype"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange"];
+const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
 const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
@@ -2617,10 +2618,10 @@ function fillForm(mode, data) {
     // luck-less number the moment its sheet is reopened, until something
     // else happened to touch it.
     refreshAutoSyncedAttackBonuses();
-    // Backfills Thieves' Cant into Languages for a Thief token saved
-    // before this feature existed (or just re-affirms it's still there) -
-    // see syncThievesCantIntoLanguages's own comment.
-    syncThievesCantIntoLanguages();
+    // Backfills Common/Thieves' Cant/racial language into Languages for a
+    // token saved before this existed (or just re-affirms they're still
+    // there) - see syncPcStartingLanguages's own comment.
+    syncPcStartingLanguages();
     // Re-stamp each ability field's own "score (mod)" display text against
     // the CURRENT DCC_ABILITY_MOD_TABLE, same "resync stale saved text on
     // load" reasoning as refreshAutoSyncedAttackBonuses just above. A
@@ -7614,6 +7615,13 @@ function refreshDerivedPcFields() {
   // An Intelligence edit changes the Languages bonus count too - see
   // refreshPcLanguagesNote's own comment.
   refreshPcLanguagesNote();
+  // An Intelligence edit can also cross the 0-level "Int 8+" racial-
+  // language threshold (see pcRacialLanguageName) - same passive re-sync
+  // as the note above, just for the actual field content. Also covers
+  // Level changes: cascadeLevelChangeEffects calls this function too, so
+  // a manual Level pick, the ↻ button, and an XP-driven auto-level-up all
+  // route through here without needing their own separate call.
+  syncPcStartingLanguages();
   updateTwoWeaponNote();
   // Keeps the Max Luck note (see its own comment) matching pc-luckMax on
   // every render - covers both a fresh Burn Luck snapshot and recoverLuck
@@ -10160,26 +10168,88 @@ function syncWeaponsIntoEquipment() {
   scheduleSave();
 }
 
-// Thieves' Cant: "Thieves speak a secret language called the cant known
-// only to members of their class... Teaching the cant to a non-thief is
-// punishable by death." Every Thief knows it automatically, so it gets the
-// same auto-managed-line treatment as the Equipment textareas above
-// (syncArmorIntoEquipment/syncWeaponsIntoEquipment) - stripped and re-added
-// by exact line match every time Class changes (or a saved token loads),
-// so it never duplicates and it disappears again the moment the character
-// stops being a Thief, without disturbing anything else the player has
-// typed in this field (Common, an alignment tongue, bonus languages from a
-// high Intelligence, etc.).
-function syncThievesCantIntoLanguages() {
+// This character's own racial language name, from Appendix L's own
+// per-race rows ("Dwarf"/"Elf"/"Halfling" - Appendix L names these
+// languages after the race itself, not "Dwarven"/"Elvish", so re-using
+// those exact strings keeps rollPcLanguage's own duplicate-detection
+// working correctly if the player later rolls this SAME language
+// independently). Matches computePcLanguagesText's own "automatically
+// knows their own racial language" gate exactly: unconditional once
+// actually Level 1+, or (still 0-level) only with Int 8+ - see that
+// function's own comment for why 0-level/1st-level are tracked as
+// genuinely distinct states here. Returns null for every non-demi-human
+// class, and for a 0-level demi-human under Int 8.
+function pcRacialLanguageName(cls, intScore, level) {
+  if (cls !== "Dwarf" && cls !== "Elf" && cls !== "Halfling") return null;
+  const isClassed = level !== null && level >= 1;
+  if (isClassed) return cls;
+  return intScore !== null && intScore >= 8 ? cls : null;
+}
+
+// Keeps three auto-managed lines synced into the Languages field: Common
+// (DCC RPG core rulebook - every character, even 0-level, knows it
+// unconditionally, so this one's never actually removed once added, just
+// backfilled if somehow missing), Thieves' Cant ("Thieves speak a secret
+// language called the cant known only to members of their class...
+// Teaching the cant to a non-thief is punishable by death" - Thief only,
+// and never in Appendix L, so there's no collision risk stripping it
+// unconditionally the way Common's own "always strip, always re-add"
+// works), and this character's own racial language (demi-human only, see
+// pcRacialLanguageName). Same auto-managed-line treatment as the
+// Equipment textareas above (syncArmorIntoEquipment/syncWeaponsIntoEquipment)
+// - stripped and re-added together (in this fixed order, ahead of
+// anything else) every time Class/Level/Int changes (or a saved token
+// loads), so none of them ever duplicates and Thieves' Cant/the racial
+// language disappear again the moment they no longer apply.
+//
+// The racial language is NOT blanket-stripped like the other two, though
+// - unlike Thieves' Cant, "Dwarf"/"Elf"/"Halfling" ARE real Appendix L
+// rows any class can roll (rollPcLanguage), so a non-demi-human who
+// legitimately rolled e.g. "Dwarf" as a bonus language must never have it
+// silently deleted just because this sync also happens to manage a
+// same-named line for actual Dwarves. pc-racial-language-auto tracks
+// which race name (if any) THIS function itself last added, so only that
+// specific previously-auto-added line gets removed when it stops
+// applying - a roll from Appendix L never touches this tracker, so it's
+// left alone regardless of what this sync does elsewhere.
+function syncPcStartingLanguages() {
   const el = document.getElementById("pc-languages");
+  const autoEl = document.getElementById("pc-racial-language-auto");
   if (!el) return;
   const classEl = document.getElementById("pc-class");
-  const isThief = !!classEl && classEl.value === "Thief";
-  const lines = (el.value || "").split("\n").filter(line => line.trim() !== "Thieves' Cant");
-  while (lines.length && lines[0].trim() === "") lines.shift();
-  el.value = isThief
-    ? (lines.length ? ["Thieves' Cant", "", ...lines].join("\n") : "Thieves' Cant")
-    : lines.join("\n");
+  const cls = classEl ? classEl.value : "";
+  const levelEl = document.getElementById("pc-level");
+  const level = parseLevelNumber(levelEl ? levelEl.value : "");
+  const intScore = parseAbilityScore(document.getElementById("pc-int").value);
+  const isThief = cls === "Thief";
+  const racialLanguage = pcRacialLanguageName(cls, intScore, level);
+  const previousAuto = autoEl ? autoEl.value : "";
+  let rest = (el.value || "").split("\n").filter(line => {
+    const t = line.trim().toLowerCase();
+    return t !== "common" && t !== "thieves' cant";
+  });
+  // Drop the stale auto-added racial-language line only when it's no
+  // longer what this sync would add (covers both "switched away from
+  // that race/level/Int threshold" and "switched TO a different demi-human
+  // race" in one go) - removes at most the one line this function itself
+  // is responsible for, never a same-named line the player rolled.
+  if (previousAuto && previousAuto !== racialLanguage) {
+    const idx = rest.findIndex(line => line.trim().toLowerCase() === previousAuto.toLowerCase());
+    if (idx !== -1) rest.splice(idx, 1);
+  }
+  // If the current racial language is already sitting in `rest` (freshly
+  // rolled independently, or simply never got stripped above because it
+  // matches `previousAuto`), pull it out here so it moves up into the
+  // fixed prefix below instead of appearing twice.
+  if (racialLanguage) {
+    const idx = rest.findIndex(line => line.trim().toLowerCase() === racialLanguage.toLowerCase());
+    if (idx !== -1) rest.splice(idx, 1);
+  }
+  while (rest.length && rest[0].trim() === "") rest.shift();
+  const prefix = ["Common", ...(isThief ? ["Thieves' Cant"] : []), ...(racialLanguage ? [racialLanguage] : [])];
+  const hasRest = rest.some(line => line.trim() !== "");
+  el.value = hasRest ? [...prefix, "", ...rest].join("\n") : prefix.join("\n");
+  if (autoEl) autoEl.value = racialLanguage || "";
   scheduleSave();
 }
 
@@ -10192,20 +10262,22 @@ function syncThievesCantIntoLanguages() {
 // OTHER demi-human (Dwarf/Elf/Halfling) learns one more, flat - gated on
 // `cls` being classed at all (0-level/"None" gets none of this, only the
 // Int-modifier base). A Thief instead learns Thieves' Cant (already
-// auto-added to the field by syncThievesCantIntoLanguages, so it's not
+// auto-added to the field by syncPcStartingLanguages, so it's not
 // counted in this total). Only computes the COUNT - which specific
 // languages ("commonly known include those of centaurs, giants, gnomes,
 // goblins, and kobolds... Wizards may know magical languages and the
 // animal tongues") is the player's/Judge's own pick, per Appendix L.
-function computePcLanguagesText(cls, intScore, intMod, level) {
-  if (intScore === null) return "";
+// Split out from computePcLanguagesText so rollPcLanguage can enforce the
+// exact same cap the note describes, instead of the button rolling
+// indefinitely - see pcRollableLanguageCountLive. `isClassed` checks
+// whether this character has actually ADVANCED to 1st level yet, not just
+// whether Class is filled in - this app tracks Class/Level as two
+// independent fields, so "Dwarf" at Level 0 is a real, distinct state (a
+// 0-level demi-human, still funnel-eligible) from "Dwarf" at Level 1+ (a
+// classed Dwarf) - see the racial-language note below for why this
+// distinction matters.
+function pcLanguagesBonusCounts(cls, intMod, level) {
   const isDemihuman = cls === "Dwarf" || cls === "Elf" || cls === "Halfling";
-  // Whether this character has actually ADVANCED to 1st level yet, not
-  // just whether Class is filled in - this app tracks Class/Level as two
-  // independent fields, so "Dwarf" at Level 0 is a real, distinct state
-  // (a 0-level demi-human, still funnel-eligible) from "Dwarf" at Level 1+
-  // (a classed Dwarf) - see the racial-language note below for why this
-  // distinction matters.
   const isClassed = level !== null && level >= 1;
   const zeroLevelBonus = Math.max(0, intMod);
   let firstLevelBonus = 0;
@@ -10217,6 +10289,12 @@ function computePcLanguagesText(cls, intScore, intMod, level) {
     firstLevelBonus = 1;
     firstLevelNote = ", +1 more at 1st level (Demi-human)";
   }
+  return { isDemihuman, isClassed, zeroLevelBonus, firstLevelBonus, firstLevelNote };
+}
+
+function computePcLanguagesText(cls, intScore, intMod, level) {
+  if (intScore === null) return "";
+  const { isDemihuman, isClassed, zeroLevelBonus, firstLevelBonus, firstLevelNote } = pcLanguagesBonusCounts(cls, intMod, level);
   const total = 1 + zeroLevelBonus + firstLevelBonus;
   // Racial language (DCC RPG core rulebook, Dwarf's own class description:
   // "At 1st level, a dwarf automatically knows Common, the dwarven racial
@@ -10323,6 +10401,21 @@ function lookupLanguageTableRow(cls, roll) {
   return null;
 }
 
+// How many Appendix L rolls this character is actually entitled to (the
+// bonus-language count computePcLanguagesText's own note describes, MINUS
+// the base Common itself - Common is auto-known, not rolled, see
+// syncPcStartingLanguages) - reads straight off the live Sheet DOM, same
+// as everything else rollPcLanguage checks.
+function pcRollableLanguageCountLive() {
+  const classEl = document.getElementById("pc-class");
+  const cls = classEl ? classEl.value : "";
+  const levelEl = document.getElementById("pc-level");
+  const level = parseLevelNumber(levelEl ? levelEl.value : "");
+  const intMod = abilityModifierFromField("pc-int");
+  const { zeroLevelBonus, firstLevelBonus } = pcLanguagesBonusCounts(cls, intMod, level);
+  return zeroLevelBonus + firstLevelBonus;
+}
+
 // Rolls once on Appendix L for this character's own Class, resolves
 // "Alignment tongue" to their own Chaos/Law/Neutrality tongue (see
 // pcAlignmentTongueName), and appends the result to the Languages field -
@@ -10330,6 +10423,10 @@ function lookupLanguageTableRow(cls, roll) {
 // the character's alignment tongue") whenever the resolved name is
 // already sitting in the field, capped at a handful of attempts so a
 // character with almost nothing left to roll can't hang the button.
+// Refuses outright once every rollable slot (pcRollableLanguageCountLive)
+// is already filled - Common/Thieves' Cant/the racial language don't
+// count against this cap (they're automatically known, not rolled), so
+// they're excluded before comparing.
 function rollPcLanguage() {
   const classEl = document.getElementById("pc-class");
   const cls = classEl ? classEl.value : "";
@@ -10337,10 +10434,27 @@ function rollPcLanguage() {
     showStatus("Appendix L doesn't cover \"Other/Homebrew\" - pick a listed Class (0-level/blank counts as its own column) to roll a language.", true, 6000);
     return;
   }
+  // Make sure Common/Thieves' Cant/the racial language are actually
+  // sitting in the field before counting against them below - covers a
+  // roll fired before some other trigger has had a chance to sync them in.
+  syncPcStartingLanguages();
   const alignmentEl = document.getElementById("pc-alignment");
   const ownAlignmentTongue = pcAlignmentTongueName(alignmentEl ? alignmentEl.value : "");
   const langEl = document.getElementById("pc-languages");
   const known = (langEl.value || "").split("\n").map(l => l.trim().toLowerCase()).filter(Boolean);
+
+  const intScoreForCap = parseAbilityScore(document.getElementById("pc-int").value);
+  const levelForCap = parseLevelNumber(document.getElementById("pc-level").value);
+  const racialLanguageForCap = pcRacialLanguageName(cls, intScoreForCap, levelForCap);
+  const autoManaged = new Set(["common", "thieves' cant", ...(racialLanguageForCap ? [racialLanguageForCap.toLowerCase()] : [])]);
+  const rolledCount = known.filter(name => !autoManaged.has(name)).length;
+  const cap = pcRollableLanguageCountLive();
+  if (rolledCount >= cap) {
+    const isDemihuman = cls === "Dwarf" || cls === "Elf" || cls === "Halfling";
+    const hasLevelBonus = cls === "Wizard" || isDemihuman;
+    showStatus(`Already knows ${rolledCount} of ${cap} rollable bonus language${cap === 1 ? "" : "s"} (Int modifier${hasLevelBonus ? "/1st-level bonus" : ""}) - nothing left to roll. Raise Intelligence${hasLevelBonus ? ", or level up," : ""} to unlock another.`, true, 6000);
+    return;
+  }
 
   let rolled, row, name;
   for (let attempt = 0; attempt < 20; attempt++) {
@@ -10576,10 +10690,11 @@ document.getElementById("pc-class").addEventListener("change", () => {
   // under a fresh set of column data - same force-overwrite contract as
   // Crit Die/Deed Die/Title above.
   recalcPcSkillsSection(true);
-  // A new Class also means Thieves' Cant should appear (or disappear) in
-  // Languages - see syncThievesCantIntoLanguages's own comment for why
-  // this is safe to run unconditionally on every Class change.
-  syncThievesCantIntoLanguages();
+  // A new Class also means Thieves' Cant and/or the racial language
+  // should appear (or disappear) in Languages - see
+  // syncPcStartingLanguages's own comment for why this is safe to run
+  // unconditionally on every Class change.
+  syncPcStartingLanguages();
   // Halfling's special two-weapon rule waives the off-hand's "light
   // weapon" restriction - switching Class in or out of Halfling can
   // change which weapons are eligible for that role, so the attack rows
