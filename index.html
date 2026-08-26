@@ -1118,6 +1118,26 @@
   .fumble-die-note {
     font-size: 10px;
   }
+  /* Max Luck badge (see refreshPcLuckMaxNote) - a small gold pill instead
+     of a plain sentence, so a burned character's true/unburned score
+     reads as a quick at-a-glance stat rather than another line of prose
+     competing with the New Day button right below it. Hugs its own
+     content width (inline-flex) rather than stretching the full row the
+     way .fumble-die-note's plain text did. */
+  .luck-max-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), #8a5a28);
+    color: #1e1b18;
+    padding: 3px 10px;
+    border-radius: 999px;
+    margin-bottom: 8px;
+    cursor: default;
+  }
+  .luck-max-badge b { font-size: 12px; }
   .tables-btn {
     background: var(--border);
     border: none;
@@ -1467,7 +1487,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 13:44</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 14:00</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1699,7 +1719,7 @@
             <div class="save-box"><label class="roll-label" data-roll-ability="int" title="Click to roll an Intelligence check: d20 + Intelligence modifier.">Int</label><input type="text" id="pc-int" placeholder="9 (+0)"/></div>
             <div class="save-box"><label class="roll-label" data-roll-ability="lck" title="Click to roll a Luck check: d20 + Luck modifier.">Lck</label><input type="text" id="pc-lck" placeholder="11 (+0)"/></div>
           </div>
-          <div class="fumble-die-note" id="pc-luck-max-note" style="display:none;"></div>
+          <div class="luck-max-badge" id="pc-luck-max-note" style="display:none;"></div>
           <button type="button" id="pc-spellburn-newday-btn" class="newday-btn" title="A night's rest - every class. Heals 1 HP. Wizard/Elf: recovers 1 point to ONE Str/Agi/Sta ability spent on Spellburn (see the Cast a Spell row), up to what it was before any Spellburn - asks which to recover if more than one is eligible. Thief/Halfling: also recovers Luck equal to their Level, up to its own natural max. Also clears any Lost spells. Click once per in-game day that passes.">🌙 New Day</button>
           <input type="hidden" id="pc-spellburnMax" value="" />
           <input type="hidden" id="pc-luckMax" value="" />
@@ -6458,14 +6478,17 @@ function recoverSpellburnAbility(ability, extraNote = "") {
 }
 
 // Surfaces pc-luckMax (otherwise a purely internal snapshot - see its own
-// comment below) as a visible note under the Abilities grid, so a player
+// comment below) as a small badge under the Abilities grid, so a player
 // who's burned Luck can still see what their true/unburned score was
 // without opening the Burn Luck popup again. Shown for every class, not
 // just Thief/Halfling (luckRecoverable is Thief/Halfling-only because
 // THAT'S the nightly-recovery rule - but any class can Burn Luck in the
 // first place, per Chapter 1, so the snapshot itself is universal). Hidden
 // entirely once nothing's been burned (or a Thief/Halfling has recovered
-// back to it, which clears pc-luckMax - see recoverLuck).
+// back to it, which clears pc-luckMax - see recoverLuck). The badge itself
+// stays short (just the number) since it's read at a glance next to the
+// Abilities grid; the full sentence moves to its title tooltip instead of
+// competing with the New Day button for space right below it.
 function refreshPcLuckMaxNote() {
   const noteEl = document.getElementById("pc-luck-max-note");
   if (!noteEl) return;
@@ -6475,7 +6498,8 @@ function refreshPcLuckMaxNote() {
     noteEl.style.display = "none";
     return;
   }
-  noteEl.textContent = `Luck has been burned - true score (before burning) was ${maxVal}.`;
+  noteEl.innerHTML = `🍀 True Luck <b>${maxVal}</b>`;
+  noteEl.title = `Luck has been burned - true score (before burning) was ${maxVal}.`;
   noteEl.style.display = "";
 }
 
