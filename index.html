@@ -1008,7 +1008,7 @@
      same "computed value" chip look weapon-badge-die/.hp-btn already use
      elsewhere (var(--border) background) makes it read as a distinct,
      intentional readout instead of blending into the row. */
-  .attack-row .spell-attack-bonus, .attack-row .turn-unholy-bonus, .attack-row .lay-on-hands-bonus, .attack-row .cause-wounds-bonus, .attack-row .divine-aid-bonus { background: var(--border); border-color: var(--border); }
+  .attack-row .spell-attack-bonus, .attack-row .turn-unholy-bonus, .attack-row .lay-on-hands-bonus, .attack-row .cause-wounds-bonus, .attack-row .divine-aid-bonus, .attack-row .thief-skill-bonus { background: var(--border); border-color: var(--border); }
   .attack-quick-btn {
     flex: none;
     width: 22px;
@@ -1490,7 +1490,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 17:41</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 17:55</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1866,7 +1866,7 @@
           <div class="fumble-die-line">Fumble Die: <span id="pc-fumble-die">d4</span> <span class="fumble-die-note">(based on equipped armor/shield)</span> <button type="button" class="tables-btn" id="pc-tables-btn" title="View this character's Crit and Fumble tables">📖 Crit/Fumble Tables</button></div>
           <div class="attack-list" id="attack-list-pc"></div>
           <button type="button" class="add-attack-btn" id="add-attack-pc">+ Add Action</button>
-          <div class="fumble-die-note" id="pc-tw-note" style="margin-top:6px;">Mark one attack "Primary" and another "Off-hand" to fight with two weapons (Table 4-3). A row can also be switched to "🔮 Cast a Spell", "🛡️ Turn Unholy", "🩹 Lay on Hands" (Lawful/Neutral Cleric), "🩸 Cause Wounds" (Chaotic Cleric), or "🙏 Divine Aid" from its own dropdown.</div>
+          <div class="fumble-die-note" id="pc-tw-note" style="margin-top:6px;">Mark one attack "Primary" and another "Off-hand" to fight with two weapons (Table 4-3). A row can also be switched to "🔮 Cast a Spell", "🛡️ Turn Unholy", "🩹 Lay on Hands" (Lawful/Neutral Cleric), "🩸 Cause Wounds" (Chaotic Cleric), "🙏 Divine Aid", or "🗝️ Thief Skill" (Thief/Halfling) from its own dropdown.</div>
         </fieldset>
 
         <fieldset id="pc-skills-fieldset" style="display:none">
@@ -2932,6 +2932,22 @@ const CAUSE_WOUNDS_KEY = "__cause_wounds__";
 // per the rule itself - so rollDivineAidRow has no companion lookup modal
 // the way Turn Unholy/Lay on Hands/Cause Wounds do.
 const DIVINE_AID_KEY = "__divine_aid__";
+
+// Thief Skill Check (Table 1-9/Table 1-18, Thief/Halfling only) - same
+// "kept OUT of DCC_WEAPONS, checked for first in attackRowHtml, own
+// simplified template, Sheet-only" contract as TURN_UNHOLY_KEY above. A
+// skill check is a Judge-adjudicated action just like a spell cast or a
+// weapon swing, so it belongs in the Actions list alongside them - the
+// existing #pc-skills-list (Table 1-9/1-18) stays as a reference/at-a-
+// glance bonus table with its own roll buttons; this is a second, opt-in
+// way to roll the SAME check that also shares an Action Die slot with
+// this character's other actions, for a player who wants that tracked.
+// Unlike the four Cleric-only keys above, one row here can represent ANY
+// of the 12 rollable skills (13 minus Backstab, which stays Combat-
+// Tracker-only - see skillRowHtml's own comment) via its own picker
+// dropdown, same "one row type, many named options" shape Cast a Spell
+// already uses for known spells.
+const THIEF_SKILL_ACTION_KEY = "__thief_skill__";
 
 // Mighty Deeds of Arms (Reference Booklet p.25-31) - the seven named deed
 // types the book gives worked examples for, each with escalating flavor
@@ -4986,7 +5002,10 @@ function weaponOptionsHtml(selectedKey) {
   // Same reasoning again for Divine Aid - divineAidRowHtml's own "Only
   // Cleric" note is what explains it for anyone else.
   const divineAidOption = `<option value="${DIVINE_AID_KEY}"${selectedKey === DIVINE_AID_KEY ? " selected" : ""}>🙏 Divine Aid</option>`;
-  return spellOption + turnUnholyOption + layOnHandsOption + causeWoundsOption + divineAidOption + DCC_WEAPONS.map(w =>
+  // Same reasoning again for a Thief Skill Check - thiefSkillActionRowHtml's
+  // own "Only Thief/Halfling" note is what explains it for anyone else.
+  const thiefSkillOption = `<option value="${THIEF_SKILL_ACTION_KEY}"${selectedKey === THIEF_SKILL_ACTION_KEY ? " selected" : ""}>🗝️ Thief Skill</option>`;
+  return spellOption + turnUnholyOption + layOnHandsOption + causeWoundsOption + divineAidOption + thiefSkillOption + DCC_WEAPONS.map(w =>
     `<option value="${w.key}"${w.key === selectedKey ? " selected" : ""}>${escapeHtml(w.label)}</option>`
   ).join("");
 }
@@ -5127,6 +5146,11 @@ function attackRowHtml(atk, mode) {
   // Same short-circuit for Divine Aid - see DIVINE_AID_KEY's own comment.
   if (atk.weapon === DIVINE_AID_KEY) {
     return divineAidRowHtml(atk);
+  }
+  // Same short-circuit for a Thief Skill Check - see
+  // THIEF_SKILL_ACTION_KEY's own comment.
+  if (atk.weapon === THIEF_SKILL_ACTION_KEY) {
+    return thiefSkillActionRowHtml(atk);
   }
 
   const entry = dccWeaponEntry(atk.weapon);
@@ -5387,6 +5411,8 @@ function readAttacks(mode) {
       isCauseWounds: row.classList.contains("cause-wounds-row"),
       // Same reasoning again for a Divine Aid row (divineAidRowHtml).
       isDivineAid: row.classList.contains("divine-aid-row"),
+      // Same reasoning again for a Thief Skill Check row (thiefSkillActionRowHtml).
+      isThiefSkill: row.classList.contains("thief-skill-row"),
     };
     if (mode === "pc") {
       const weaponEl = row.querySelector(".attack-weapon");
@@ -5535,6 +5561,10 @@ function applyWeaponSelection(row) {
   // Same short-circuit for Divine Aid - divineAidRowHtml's own template
   // also sets its name field itself (a fixed "Divine Aid").
   if (weaponSel.value === DIVINE_AID_KEY) return;
+  // Same short-circuit for a Thief Skill Check - thiefSkillActionRowHtml's
+  // own template sets its name field itself (via the .thief-skill-select
+  // picker's own change listener, not this generic weapon-select path).
+  if (weaponSel.value === THIEF_SKILL_ACTION_KEY) return;
   const entry = dccWeaponEntry(weaponSel.value);
 
   // Switching AWAY from "Cast a Spell" to a real weapon: the name field
@@ -5545,7 +5575,7 @@ function applyWeaponSelection(row) {
   // showing a leftover spell name as if it were the weapon's name. Same
   // reasoning switching away from Turn Unholy - its own fixed "Turn
   // Unholy" name wouldn't match a DCC_WEAPONS label either.
-  if (row.classList.contains("spell-attack-row") || row.classList.contains("turn-unholy-row") || row.classList.contains("lay-on-hands-row") || row.classList.contains("cause-wounds-row") || row.classList.contains("divine-aid-row")) nameInput.value = "";
+  if (row.classList.contains("spell-attack-row") || row.classList.contains("turn-unholy-row") || row.classList.contains("lay-on-hands-row") || row.classList.contains("cause-wounds-row") || row.classList.contains("divine-aid-row") || row.classList.contains("thief-skill-row")) nameInput.value = "";
 
   if (isAutoGeneratedWeaponName(nameInput.value)) {
     nameInput.value = entry.label.replace(/\s*\([^)]*\)\s*/g, "").trim();
@@ -5852,6 +5882,35 @@ function attachAttackRowListeners(mode) {
           clearTimeout(saveTimeout);
           await saveCurrent();
           rollDivineAidRow();
+        });
+      }
+      // Thief Skill Check row (thiefSkillActionRowHtml) - picking a
+      // different skill just needs to land in the hidden .attack-name
+      // field (same contract as the Cast a Spell dropdown's own listener),
+      // but UNLIKE that one, the Bonus here genuinely varies by which
+      // skill is picked (different class bonus/ability/Check Penalty gate
+      // per skill), so a full re-render is needed to pick up the new
+      // number - refreshSpellAttackRows-style passive resync alone
+      // wouldn't catch it.
+      const thiefSkillSelectEl = row.querySelector(".thief-skill-select");
+      if (thiefSkillSelectEl) {
+        thiefSkillSelectEl.addEventListener("change", () => {
+          const nameInput = row.querySelector(".attack-name");
+          if (nameInput) nameInput.value = thiefSkillSelectEl.value;
+          scheduleSave();
+          renderAttacks("pc", readAttacks("pc"));
+        });
+      }
+      const thiefSkillRollBtn = row.querySelector(".thief-skill-roll-btn");
+      if (thiefSkillRollBtn) {
+        thiefSkillRollBtn.addEventListener("click", async () => {
+          if (!currentItemId) {
+            showStatus("Open this character/monster on a token first to roll its attack.", true);
+            return;
+          }
+          clearTimeout(saveTimeout);
+          await saveCurrent();
+          await rollThiefSkillActionRow(row);
         });
       }
       // Opens the shared Spellburn popup (openSpellburnModal) targeting
@@ -6218,6 +6277,9 @@ function renderPcStatline(d) {
   refreshCauseWoundsRows();
   // Same passive recompute again, for any Divine Aid Actions row's Bonus.
   refreshDivineAidRows();
+  // Same passive recompute again, for any Thief Skill Check Actions row's
+  // Bonus - see refreshThiefSkillActionRows's own comment.
+  refreshThiefSkillActionRows();
   // Same passive, auto-synced-only recompute, for the Action Dice field -
   // used below instead of the possibly-stale `d.actdice` snapshot, same
   // reasoning as liveCrit above.
@@ -8457,6 +8519,9 @@ function refreshDerivedPcFields() {
   refreshCauseWoundsRows();
   // Same passive recompute again, for any Divine Aid Actions row's Bonus.
   refreshDivineAidRows();
+  // Same passive recompute again, for any Thief Skill Check Actions row's
+  // Bonus - see refreshThiefSkillActionRows's own comment.
+  refreshThiefSkillActionRows();
   recalcPcAC();
   // An ability-score edit (Agility/Intelligence/Personality) can change any
   // still-auto Skills row's total too - same passive, auto-synced-only
@@ -8497,7 +8562,7 @@ function refreshAutoSyncedAttackBonuses() {
     // its own Bonus field entirely (see refreshSpellAttackRows, called
     // right alongside this function everywhere it's called from). Same
     // reasoning for a Turn Unholy row (refreshTurnUnholyRows).
-    if (row.classList.contains("spell-attack-row") || row.classList.contains("turn-unholy-row") || row.classList.contains("lay-on-hands-row") || row.classList.contains("cause-wounds-row") || row.classList.contains("divine-aid-row")) return;
+    if (row.classList.contains("spell-attack-row") || row.classList.contains("turn-unholy-row") || row.classList.contains("lay-on-hands-row") || row.classList.contains("cause-wounds-row") || row.classList.contains("divine-aid-row") || row.classList.contains("thief-skill-row")) return;
     const bonusInput = row.querySelector(".attack-bonus");
     if (!bonusInput) return;
     const weaponSel = row.querySelector(".attack-weapon");
@@ -8539,7 +8604,7 @@ function refreshAutoSyncedAttackDamages() {
     // input on either row exists only so readAttacks()/applyWeaponSelection
     // don't choke on a missing one, never anything for this function to
     // auto-fill.
-    if (row.classList.contains("spell-attack-row") || row.classList.contains("turn-unholy-row") || row.classList.contains("lay-on-hands-row") || row.classList.contains("cause-wounds-row") || row.classList.contains("divine-aid-row")) return;
+    if (row.classList.contains("spell-attack-row") || row.classList.contains("turn-unholy-row") || row.classList.contains("lay-on-hands-row") || row.classList.contains("cause-wounds-row") || row.classList.contains("divine-aid-row") || row.classList.contains("thief-skill-row")) return;
     const damageInput = row.querySelector(".attack-damage");
     if (!damageInput) return;
     const isBlank = damageInput.value.trim() === "";
@@ -10682,6 +10747,71 @@ function divineAidRowHtml(atk) {
     </div>`;
 }
 
+// The list of rollable skills this character can currently pick from for
+// a Thief Skill Check Actions row - reuses activeSkillRowDefs (the exact
+// same source of truth the #pc-skills-list reference table itself reads
+// from, see recalcPcSkillsSection) rather than re-deriving Table 1-9/1-18
+// gating a second time, so the two surfaces can never quietly disagree.
+// Backstab is filtered out (rollable === false) - it stays a Combat
+// Tracker/"Declare Backstab" thing, not something rolled on its own (see
+// skillRowHtml's own comment on why it has no roll button there either).
+function thiefSkillActionRows() {
+  const classEl = document.getElementById("pc-class");
+  const levelEl = document.getElementById("pc-level");
+  const alignmentEl = document.getElementById("pc-alignment");
+  const info = activeSkillRowDefs(classEl ? classEl.value : "", levelEl ? levelEl.value : "", alignmentEl ? alignmentEl.value : "");
+  return (info.rows || []).filter(row => row.rollable !== false);
+}
+
+function thiefSkillSelectOptionsHtml(selectedLabel, rows) {
+  if (!rows.length) return `<option value="">— (no skills available)</option>`;
+  return [`<option value="">— Select a skill —</option>`]
+    .concat(rows.map(row => `<option value="${escapeHtml(row.label)}"${row.label === selectedLabel ? " selected" : ""}>${escapeHtml(row.label)}</option>`))
+    .join("");
+}
+
+// Thief Skill Check's own Actions row template (THIEF_SKILL_ACTION_KEY) -
+// same shape as turnUnholyRowHtml (straight roll, no Spellburn/Mercurial
+// Magic/Reversing Spells/Lost machinery), but with a known-skill picker
+// like Cast a Spell's own dropdown (spellAttackRowHtml) instead of a
+// single fixed check - the hidden .attack-name field holds whichever
+// skill's LABEL is picked (same "the name field IS the selection" contract
+// spellAttackRowHtml already uses for atk.name/spell name), looked back up
+// against thiefSkillActionRows() to get its actual math. Bonus/die varies
+// per skill (computeSkillRowTotal), unlike Turn Unholy/Divine Aid's fixed
+// Level+Personality formula.
+function thiefSkillActionRowHtml(atk) {
+  const classEl = document.getElementById("pc-class");
+  const cls = classEl ? classEl.value : "";
+  const levelEl = document.getElementById("pc-level");
+  const rows = thiefSkillActionRows();
+  const selectedRow = rows.find(row => row.label === atk.name);
+  const actDieOptions = actionDieSelectOptions(cls, levelEl ? levelEl.value : "");
+  const effectiveActionDieIndex = actDieOptions.some(o => o.value === atk.actionDieIndex) ? atk.actionDieIndex : "0";
+  const actDieSelectHtml = actDieOptions.length ? `<select class="attack-action-die" title="Which of this character's Action Dice this skill check uses - shares the same one-action-per-die pool as this character's weapon attacks/spells (see the Combat Tracker). Doesn't change the roll itself.">${actDieOptions.map(o =>
+    `<option value="${o.value}"${o.value === effectiveActionDieIndex ? " selected" : ""}>${escapeHtml(o.label)}</option>`
+  ).join("")}</select>` : "";
+  const bonusText = selectedRow ? skillRowValueText(selectedRow) : "";
+  const bonusTitle = selectedRow ? skillRowTitle(selectedRow) : (rows.length ? "Pick a skill above." : "Only Thief/Halfling have skills to check here - pick a Class above (Thief also needs a Level and Alignment).");
+  const luckLastRollAttr = escapeHtml(JSON.stringify(atk.luckLastRoll || {}));
+  return `
+    <div class="attack-row pc-attack-row thief-skill-row" data-id="${atk.id}" data-line-deeds="{}" data-luck-last-roll="${luckLastRollAttr}">
+      <div class="attack-weapon-line">
+        <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
+        ${actDieSelectHtml}
+      </div>
+      <div class="attack-row-fields">
+        <input type="hidden" class="attack-name" value="${escapeHtml(atk.name || "")}" />
+        <select class="thief-skill-select" title="Which skill this row checks - matches the #pc-skills-list Table 1-9/1-18 rows below.">${thiefSkillSelectOptionsHtml(atk.name, rows)}</select>
+        <input type="text" class="attack-bonus thief-skill-bonus" readonly value="${escapeHtml(bonusText)}" title="${escapeHtml(bonusTitle)}" />
+        <input type="hidden" class="attack-damage" value="" />
+        <button type="button" class="hp-btn thief-skill-roll-btn"${selectedRow ? "" : " disabled"} title="${escapeHtml(selectedRow ? `Roll ${selectedRow.label}` : "Pick a skill above first")}">🎲</button>
+        <button type="button" class="attack-remove-btn" title="Remove">×</button>
+      </div>
+      ${rows.length ? "" : `<div class="attack-row-meta">Only Thief/Halfling have skills to check here - pick a Class above (Thief also needs a Level and Alignment).</div>`}
+    </div>`;
+}
+
 // Casters get exactly one "Cast a Spell" Attacks row, added automatically
 // the moment their Class can cast (pcCasterAbilityId) rather than the
 // player having to add one by hand via "+ Add Attack" + picking it from
@@ -10926,6 +11056,45 @@ function refreshDivineAidRows() {
       metaEl = document.createElement("div");
       metaEl.className = "attack-row-meta";
       metaEl.textContent = "Only Cleric has Divine Aid - pick Cleric above to roll this row.";
+      row.appendChild(metaEl);
+    }
+  });
+}
+
+// Same passive resync as refreshDivineAidRows just above, for Thief Skill
+// Check rows - but unlike that one (fixed Level+Personality formula), the
+// Bonus here depends on WHICH skill this row currently has picked, so it
+// re-resolves that against thiefSkillActionRows() on every pass rather
+// than a single flat computation. Deliberately does NOT touch the
+// .thief-skill-select's own <option> list (only the Bonus/tooltip/roll-
+// button/meta-note) - the option list only changes shape on a genuine
+// Class/Level/Alignment change, which already forces a full row rebuild
+// via renderAttacks elsewhere (those three change handlers all end with
+// one), so rebuilding it here too on every passive ability-score-edit
+// pass would just risk fighting a currently-open dropdown for no reason.
+function refreshThiefSkillActionRows() {
+  const listEl = attackListEl("pc");
+  if (!listEl) return;
+  const rows = thiefSkillActionRows();
+  listEl.querySelectorAll(".thief-skill-row").forEach(row => {
+    const nameInput = row.querySelector(".attack-name");
+    const bonusInput = row.querySelector(".attack-bonus");
+    const rollBtn = row.querySelector(".thief-skill-roll-btn");
+    if (!bonusInput) return;
+    const selectedRow = rows.find(r => r.label === (nameInput ? nameInput.value : ""));
+    bonusInput.value = selectedRow ? skillRowValueText(selectedRow) : "";
+    bonusInput.title = selectedRow ? skillRowTitle(selectedRow) : (rows.length ? "Pick a skill above." : "Only Thief/Halfling have skills to check here - pick a Class above (Thief also needs a Level and Alignment).");
+    if (rollBtn) {
+      rollBtn.disabled = !selectedRow;
+      rollBtn.title = selectedRow ? `Roll ${selectedRow.label}` : "Pick a skill above first";
+    }
+    let metaEl = row.querySelector(".attack-row-meta");
+    if (rows.length) {
+      if (metaEl) metaEl.remove();
+    } else if (!metaEl) {
+      metaEl = document.createElement("div");
+      metaEl.className = "attack-row-meta";
+      metaEl.textContent = "Only Thief/Halfling have skills to check here - pick a Class above (Thief also needs a Level and Alignment).";
       row.appendChild(metaEl);
     }
   });
@@ -11309,7 +11478,7 @@ function syncWeaponsIntoEquipment() {
   const equipEl = document.getElementById("pc-equip-weapons");
   if (!equipEl) return;
 
-  const attacks = readAttacks("pc").filter(a => !a.isSpell && !a.isTurnUnholy && !a.isLayOnHands && !a.isCauseWounds && !a.isDivineAid && a.weapon !== "unarmed" && (a.name || a.bonus || a.damage));
+  const attacks = readAttacks("pc").filter(a => !a.isSpell && !a.isTurnUnholy && !a.isLayOnHands && !a.isCauseWounds && !a.isDivineAid && !a.isThiefSkill && a.weapon !== "unarmed" && (a.name || a.bonus || a.damage));
   const lines = (equipEl.value || "").split("\n").filter(line => {
     return !/^.+ \(dmg .*\)( \[equipped\])?$/.test(line.trim());
   });
@@ -11940,14 +12109,23 @@ document.getElementById("pc-class").addEventListener("change", () => {
   // leaving an un-castable row behind, same "switching OUT of a class
   // that has a thing should visibly clear it" contract Deed Die/Action
   // Dice above already follow.
+  // A Thief Skill Check row (THIEF_SKILL_ACTION_KEY) gets the same
+  // "visibly clear it" treatment too - Thief/Halfling only, same as the
+  // #pc-skills-list reference table itself (activeSkillRowDefs).
   const attacksForClassChange = readAttacks("pc");
   const newCls = document.getElementById("pc-class").value;
   const staysCaster = !!pcCasterAbilityId(newCls);
-  const attacksAfterCasterCheck = attacksForClassChange.filter(a => staysCaster || a.weapon !== SPELL_ATTACK_KEY);
+  const staysSkillClass = newCls === "Thief" || newCls === "Halfling";
+  const attacksAfterCasterCheck = attacksForClassChange.filter(a =>
+    (staysCaster || a.weapon !== SPELL_ATTACK_KEY) && (staysSkillClass || a.weapon !== THIEF_SKILL_ACTION_KEY)
+  );
   const spellRowsRemoved = attacksForClassChange.filter(a => a.weapon === SPELL_ATTACK_KEY).length - attacksAfterCasterCheck.filter(a => a.weapon === SPELL_ATTACK_KEY).length;
+  const skillRowsRemoved = attacksForClassChange.filter(a => a.weapon === THIEF_SKILL_ACTION_KEY).length - attacksAfterCasterCheck.filter(a => a.weapon === THIEF_SKILL_ACTION_KEY).length;
   renderAttacks("pc", attacksAfterCasterCheck);
   if (spellRowsRemoved > 0) {
     showStatus(`${spellRowsRemoved === 1 ? "Removed its Cast a Spell row" : `Removed ${spellRowsRemoved} Cast a Spell rows`} - this class doesn't cast spells.`, false, 5000);
+  } else if (skillRowsRemoved > 0) {
+    showStatus(`${skillRowsRemoved === 1 ? "Removed its Thief Skill row" : `Removed ${skillRowsRemoved} Thief Skill rows`} - this class has no skills to check.`, false, 5000);
   }
   // A Turn Unholy row (TURN_UNHOLY_KEY), a Lay on Hands row
   // (LAY_ON_HANDS_KEY), a Cause Wounds row (CAUSE_WOUNDS_KEY), and a
@@ -12593,6 +12771,55 @@ async function rollPcSkill(key) {
   showStatus(text, rolled === 1 && key === "disableTrap", trapTriggerNote ? 6000 : 4000);
   appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly, luckTargets });
   broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: bonus, notation: "d20", total, label });
+  await cacheLuckLastRoll(total);
+}
+
+// Rolls a Thief Skill Check Actions row (thiefSkillActionRowHtml) - same
+// math and same result text/chat-log/broadcast/Burn-Luck-caching contract
+// as rollPcSkill just above, just resolved against thiefSkillActionRows()
+// fresh (this row's own picked skill) instead of reading a fixed
+// #pc-skill-${key} DOM node from the #pc-skills-list reference table -
+// the two entry points share the same underlying computeSkillRowTotal
+// math so they can never disagree on the number, just how they get there.
+async function rollThiefSkillActionRow(row) {
+  const nameInput = row.querySelector(".attack-name");
+  const label = nameInput ? nameInput.value.trim() : "";
+  if (!label) {
+    showStatus("Pick a skill on this row first.", true, 4000);
+    return;
+  }
+  const skillRow = thiefSkillActionRows().find(r => r.label === label);
+  if (!skillRow) {
+    showStatus("This skill isn't available for the current Class/Level/Alignment - pick a different one.", true, 4000);
+    return;
+  }
+  const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
+  const gmOnly = isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId));
+  const luckTargets = currentItemId ? [{ type: "skill", itemId: currentItemId, skillKey: skillRow.key, label }] : [];
+  const cacheLuckLastRoll = async total => {
+    if (currentItemId) await setSkillLuckLastRollForStats(currentItemId, skillRow.key, total, label);
+  };
+  const c = computeSkillRowTotal(skillRow);
+  const forcedD20 = consumeForcedD20();
+  if (c.isDie) {
+    const rolled = forcedD20 !== null ? Math.min(forcedD20, c.sides) : (Math.floor(Math.random() * c.sides) + 1);
+    const modifier = c.abilityMod + c.penalty;
+    const total = rolled + modifier;
+    const text = `${label}: d${c.sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(modifier)} = ${markRollTotal(total)}`;
+    showStatus(text, false, 4000);
+    appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly, luckTargets });
+    broadcastDiceRoll({ rollerName, dice: [{ sides: c.sides, value: rolled }], modifier, notation: `d${c.sides}`, total, label });
+    await cacheLuckLastRoll(total);
+    return;
+  }
+  const rolled = forcedD20 !== null ? forcedD20 : (Math.floor(Math.random() * 20) + 1);
+  const total = rolled + c.total;
+  // Same Disable Trap natural-1 rule as rollPcSkill's own comment explains.
+  const trapTriggerNote = (skillRow.key === "disableTrap" && rolled === 1) ? " ⚠️ Natural 1 - the trap triggers!" : "";
+  const text = `${label}: d20 (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(c.total)} = ${markRollTotal(total)}${trapTriggerNote}`;
+  showStatus(text, rolled === 1 && skillRow.key === "disableTrap", trapTriggerNote ? 6000 : 4000);
+  appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly, luckTargets });
+  broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: c.total, notation: "d20", total, label });
   await cacheLuckLastRoll(total);
 }
 
