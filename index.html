@@ -798,7 +798,7 @@
      auto-width/padded treatment .backstab-toggle-btn already gets for the
      same reason. */
   .spell-attack-burn-btn, .tracker-burn-btn, .newday-modal-recover, #pc-corruption-btn, #pc-disapproval-btn,
-  .spell-attack-reversed-btn, .tracker-reversed-btn, #pc-luck-check-btn, .roll-language-btn {
+  .spell-attack-reversed-btn, .tracker-reversed-btn, .roll-language-btn {
     width: auto;
     height: auto;
     padding: 3px 8px;
@@ -1467,7 +1467,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 10:56</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 12:44</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1697,9 +1697,9 @@
             <div class="save-box"><label class="roll-label" data-roll-ability="sta" title="Click to roll a Stamina check: d20 + Stamina modifier.">Sta</label><input type="text" id="pc-sta" placeholder="12 (+0)"/></div>
             <div class="save-box"><label class="roll-label" data-roll-ability="per" title="Click to roll a Personality check: d20 + Personality modifier.">Per</label><input type="text" id="pc-per" placeholder="8 (-1)"/></div>
             <div class="save-box"><label class="roll-label" data-roll-ability="int" title="Click to roll an Intelligence check: d20 + Intelligence modifier.">Int</label><input type="text" id="pc-int" placeholder="9 (+0)"/></div>
-            <div class="save-box"><label class="roll-label" data-roll-ability="lck" title="Click to roll a Luck check: d20 + Luck modifier. For the DCC roll-under Luck Check, use the button below instead.">Lck</label><input type="text" id="pc-lck" placeholder="11 (+0)"/></div>
+            <div class="save-box"><label class="roll-label" data-roll-ability="lck" title="Click to roll a Luck check: d20 + Luck modifier.">Lck</label><input type="text" id="pc-lck" placeholder="11 (+0)"/></div>
           </div>
-          <button type="button" id="pc-luck-check-btn" class="hp-btn luck-check-btn" title="Luck Check (DCC RPG core rulebook) - roll 1d20; success on a result equal to or less than your current Luck score. For judge-adjudicated feats resolved by Luck alone.">🍀 Luck Check</button>
+          <div class="fumble-die-note" id="pc-luck-max-note" style="display:none;"></div>
           <button type="button" id="pc-spellburn-newday-btn" class="newday-btn" title="A night's rest - every class. Heals 1 HP. Wizard/Elf: recovers 1 point to ONE Str/Agi/Sta ability spent on Spellburn (see the Cast a Spell row), up to what it was before any Spellburn - asks which to recover if more than one is eligible. Thief/Halfling: also recovers Luck equal to their Level, up to its own natural max. Also clears any Lost spells. Click once per in-game day that passes.">🌙 New Day</button>
           <input type="hidden" id="pc-spellburnMax" value="" />
           <input type="hidden" id="pc-luckMax" value="" />
@@ -1766,7 +1766,7 @@
         </div>
 
         <div class="row">
-          <div>
+          <div id="pc-deed-die-wrap">
             <label>Deed Die</label>
             <div class="field-sync-row">
               <input type="text" id="pc-deed-die" placeholder="— (Warrior/Dwarf only)" title="Mighty Deeds of Arms (Table 1-10/1-14) - Warrior/Dwarf only. Rolled ONCE per combat round (tracked by the Combat Tracker's Round counter) and added to both to-hit and damage on every attack this character makes that round - extra Action Dice attacks and both hands of a two-weapon pair all reuse the same roll, they don't each get their own." />
@@ -4308,6 +4308,18 @@ function updatePcTrainedWeaponVisibility() {
   }
 }
 
+// Hides the whole Deed Die field for any class that doesn't roll one
+// (see pcClassHasDeedDieLive) - it's Warrior/Dwarf-only (Table 1-10/
+// 1-14), so leaving an always-blank "— (Warrior/Dwarf only)" field on
+// screen for every other class is just clutter. computePcDeedDieText/
+// recalcPcDeedDie already blank the value for those classes; this only
+// controls whether the row itself is shown.
+function updatePcDeedDieVisibility() {
+  const wrap = document.getElementById("pc-deed-die-wrap");
+  if (!wrap) return;
+  wrap.style.display = pcClassHasDeedDieLive() ? "" : "none";
+}
+
 // A handful of Table 1-3 "Trained Weapon" flavor names don't map to a
 // weapon-table category by their own text alone even after stripping an
 // "(as X)" annotation - "axe" (e.g. Butcher's "Cleaver (as axe)") has no
@@ -5829,6 +5841,9 @@ function renderPcStatline(d) {
   // needs to run on every render, not just a Class change, so it's also
   // correct right after loading a different token.
   updatePcTrainedWeaponVisibility();
+  // Same reasoning, for the Deed Die row - Warrior/Dwarf only (see
+  // updatePcDeedDieVisibility).
+  updatePcDeedDieVisibility();
   const hp = d.hpMax ? `${d.hpCurrent || d.hpMax}/${d.hpMax}` : (d.hpCurrent || "—");
   const classLevel = [d.class || d.occupation || null, d.level ? `Lvl ${d.level}` : null].filter(Boolean).join(" ");
   const atkSummary = formatAttacksSummary(d.attacks);
@@ -6397,6 +6412,28 @@ function recoverSpellburnAbility(ability, extraNote = "") {
   refreshDerivedPcFields();
   scheduleSave();
   showStatus(`New Day: recovered 1 point of ${spellburnAbilityLabel(ability)} (now ${next}).${extraNote}`, false, 5000);
+}
+
+// Surfaces pc-luckMax (otherwise a purely internal snapshot - see its own
+// comment below) as a visible note under the Abilities grid, so a player
+// who's burned Luck can still see what their true/unburned score was
+// without opening the Burn Luck popup again. Shown for every class, not
+// just Thief/Halfling (luckRecoverable is Thief/Halfling-only because
+// THAT'S the nightly-recovery rule - but any class can Burn Luck in the
+// first place, per Chapter 1, so the snapshot itself is universal). Hidden
+// entirely once nothing's been burned (or a Thief/Halfling has recovered
+// back to it, which clears pc-luckMax - see recoverLuck).
+function refreshPcLuckMaxNote() {
+  const noteEl = document.getElementById("pc-luck-max-note");
+  if (!noteEl) return;
+  const maxEl = document.getElementById("pc-luckMax");
+  const maxVal = maxEl && maxEl.value ? parseInt(maxEl.value, 10) : NaN;
+  if (!Number.isFinite(maxVal)) {
+    noteEl.style.display = "none";
+    return;
+  }
+  noteEl.textContent = `Luck has been burned - true score (before burning) was ${maxVal}.`;
+  noteEl.style.display = "";
 }
 
 // Luck-specific sibling of spellburnRecoverableAbilities/recoverSpellburnAbility
@@ -6978,27 +7015,6 @@ function computeLuckBurnBonus(cls, levelRaw, points) {
   return { bonus: points, detail: `${points} Luck × 1`, rolls: null, sides: null };
 }
 
-// Luck Check (DCC RPG core rulebook) - "The judge will provide the
-// specifics of any attempt, but the attempt is usually resolved by
-// rolling equal to or less than the character's Luck score on 1d20." Not
-// tied to any specific roll type (unlike Burn Luck below) - universal,
-// standalone, and doesn't spend anything.
-document.getElementById("pc-luck-check-btn").addEventListener("click", () => {
-  const el = document.getElementById("pc-lck");
-  const score = parseAbilityScore(el ? el.value : "");
-  if (score === null) {
-    showStatus("Set a Luck score first.", true, 4000);
-    return;
-  }
-  const rolled = Math.floor(Math.random() * 20) + 1;
-  const success = rolled <= score;
-  const text = `Luck Check: d20 (${rolled}) vs Luck ${score} = ${success ? markRollTotal("SUCCESS") : markFumbleAlert("FAILURE")}`;
-  showStatus(text, !success, 5000);
-  const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
-  appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId)) });
-  broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: 0, notation: "d20", total: rolled, label: "Luck Check" });
-});
-
 // Burn Luck (DCC RPG core rulebook) - a SHARED popup (#luckburn-modal-backdrop),
 // same "one piece of DOM, retargeted per open" pattern as the Spellburn
 // popup, generalized to work with ANY roll type via a `ctx` the caller
@@ -7355,6 +7371,10 @@ function refreshDerivedPcFields() {
   // refreshPcLanguagesNote's own comment.
   refreshPcLanguagesNote();
   updateTwoWeaponNote();
+  // Keeps the Max Luck note (see its own comment) matching pc-luckMax on
+  // every render - covers both a fresh Burn Luck snapshot and recoverLuck
+  // clearing it back out, neither of which otherwise routes through here.
+  refreshPcLuckMaxNote();
   scheduleSave();
 }
 
@@ -10253,6 +10273,9 @@ document.getElementById("pc-class").addEventListener("change", () => {
   // clear it, not leave a stale die behind for a class that no longer has
   // one).
   recalcPcDeedDie(true);
+  // Same reasoning - hides the whole Deed Die row immediately for a class
+  // that doesn't get one, rather than waiting for the next full render.
+  updatePcDeedDieVisibility();
   // A new Class also means a (possibly different) Action Dice progression
   // (and whether the Dwarf-only Shield Bash option even applies) - same
   // force-overwrite contract as Crit Die/Table and Deed Die above.
