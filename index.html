@@ -1490,7 +1490,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 20:38</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 21:02</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -5809,11 +5809,10 @@ function attachAttackRowListeners(mode) {
         });
       }
       // "Cast a Spell" rows (spellAttackRowHtml) - picking a known spell
-      // just needs to land in the hidden .attack-name field (so
-      // readAttacks/formatAttacksSummary see it like any other row's name)
-      // and persist; the Bonus itself never depends on WHICH spell is
-      // picked (see refreshSpellAttackRows), so nothing else needs to
-      // re-render here.
+      // lands in the hidden .attack-name field (so readAttacks/
+      // formatAttacksSummary see it like any other row's name) and
+      // persists, then triggers a full row rebuild - see the comment on
+      // that rebuild call below for why patching in place isn't enough.
       const spellSelectEl = row.querySelector(".spell-attack-select");
       if (spellSelectEl) {
         spellSelectEl.addEventListener("change", () => {
@@ -5821,10 +5820,15 @@ function attachAttackRowListeners(mode) {
           if (nameInput) nameInput.value = spellSelectEl.value;
           scheduleSave();
           // Switching to a different known spell can also switch this
-          // row's Lost state (see isSpellLost/refreshSpellAttackRows) -
-          // resync immediately rather than waiting for the next unrelated
-          // render pass.
-          refreshSpellAttackRows();
+          // row's Lost state, or (Invoke Patron specifically) whether the
+          // 🩸 Spellburn button needs to exist at all - spellAttackRowHtml
+          // only renders that button once a spell's actually picked, and
+          // refreshSpellAttackRows' passive pass only updates an existing
+          // button, never adds one. A full Attacks-list rebuild (same call
+          // the weapon-type <select> right above already uses to swap row
+          // shape) picks up both correctly instead of leaving a freshly
+          // Invoke-Patron-picked row with no way to satisfy its own gate.
+          renderAttacks(mode, readAttacks(mode));
         });
       }
       const spellRollBtn = row.querySelector(".spell-attack-roll-btn");
@@ -10668,11 +10672,37 @@ function spellAttackRowHtml(atk) {
   // burnPoints ultimately gets checked again before actually rolling.
   const spellLevelForBurn = isLost ? spellLevelForName(atk.name) : null;
   const isRegainable = isLost && spellLevelForBurn !== null && pendingPoints >= spellLevelForBurn;
-  const rollBlocked = isLost && !isRegainable;
+  // Invoke Patron's own mandatory cost (DCC RPG core rulebook, p.107): "To
+  // invoke a patron, the wizard must spellburn at least 1 point of an
+  // ability score ... and cast the spell invoke patron." Spending that
+  // point is what actually calls out to the patron - a check made without
+  // spellburning anything first isn't invoking, so the roll is blocked
+  // (same "grey out the button, defense-in-depth check again in
+  // rollSpellAttackRow itself" contract Lost already uses) until at least
+  // 1 point is pending on THIS Action Die. No level scaling the way Lost's
+  // recovery cost has - the rule's own "at least 1" is a flat floor
+  // regardless of spell level (Invoke Patron is always 1st level anyway).
+  const requiresPatronBurn = atk.name === "Invoke patron";
+  const patronBurnMissing = requiresPatronBurn && pendingPoints < 1;
+  const rollBlocked = (isLost && !isRegainable) || patronBurnMissing;
+  const rollBtnTitle = rollBlocked
+    ? (isLost && !isRegainable
+      ? (spellLevelForBurn !== null
+        ? `This spell is Lost - burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} via 🩸 Spellburn to cast it anyway, or use New Day near Abilities to rest it off.`
+        : "This spell is Lost until you rest - see the 🔒 badge above (click it to un-mark), or New Day near Abilities.")
+      : "Invoke Patron requires spellburning at least 1 point of an ability score first (DCC RPG core rulebook) - use the 🩸 Spellburn button below, then roll.")
+    : (isLost ? "Regaining this Lost spell via Spellburn - rolling still resolves as a normal Spell Check." : "Roll Spell Check");
   const lostBadgeHtml = isLost
     ? `<span class="weapon-badge weapon-badge-lost spell-lost-badge" title="Lost (DCC RPG core rulebook) - this spell failed its last Spell Check badly enough to lose it until you rest. Click to un-mark if this spell's own casting table says this roll shouldn't have lost it. ${spellLevelForBurn !== null ? `Burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} via 🩸 Spellburn to cast it anyway.` : "Fill in this spell's Level to allow regaining it via Spellburn."}">🔒 Lost</span>`
     : "";
-  const dieBadgeHtml = (check || isLost) ? `<div class="attack-row-badges">${check ? `<span class="weapon-badge weapon-badge-die" title="Spell Check die this row rolls">d${check.sides}</span>` : ""}${lostBadgeHtml}</div>` : "";
+  // Reminder badge - shown whenever this row IS Invoke Patron, not just
+  // while the requirement is currently unmet, so it's a standing reminder
+  // rather than something that only appears right as the roll gets
+  // blocked.
+  const patronBurnBadgeHtml = requiresPatronBurn
+    ? `<span class="weapon-badge weapon-badge-lost" title="Invoke Patron requires spellburning at least 1 point of an ability score to cast (DCC RPG core rulebook, p.107) - use the 🩸 Spellburn button below before rolling.">🩸 Requires Spellburn</span>`
+    : "";
+  const dieBadgeHtml = (check || isLost || requiresPatronBurn) ? `<div class="attack-row-badges">${check ? `<span class="weapon-badge weapon-badge-die" title="Spell Check die this row rolls">d${check.sides}</span>` : ""}${lostBadgeHtml}${patronBurnBadgeHtml}</div>` : "";
   const spellBySlotAttr = escapeHtml(JSON.stringify(atk.spellBySlot || {}));
   const spellburnPendingAttr = escapeHtml(JSON.stringify(spellburnPending));
   const castReversedBySlotAttr = escapeHtml(JSON.stringify(castReversedBySlot));
@@ -10729,7 +10759,7 @@ function spellAttackRowHtml(atk) {
         <select class="spell-attack-select" title="Which known spell this row casts - add more in the Spells section below.">${spellSelectOptionsHtml(atk.name)}</select>
         <input type="text" class="attack-bonus spell-attack-bonus" readonly value="${escapeHtml(bonusText)}" title="${escapeHtml(bonusTitle)}" />
         <input type="hidden" class="attack-damage" value="" />
-        <button type="button" class="hp-btn spell-attack-roll-btn${rollBlocked ? " disabled" : ""}"${rollBlocked ? " disabled" : ""} title="${rollBlocked ? (spellLevelForBurn !== null ? `This spell is Lost - burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} via 🩸 Spellburn to cast it anyway, or use New Day near Abilities to rest it off.` : "This spell is Lost until you rest - see the 🔒 badge above (click it to un-mark), or New Day near Abilities.") : (isLost ? "Regaining this Lost spell via Spellburn - rolling still resolves as a normal Spell Check." : "Roll Spell Check")}">🎲</button>
+        <button type="button" class="hp-btn spell-attack-roll-btn${rollBlocked ? " disabled" : ""}"${rollBlocked ? " disabled" : ""} title="${escapeHtml(rollBtnTitle)}">🎲</button>
         <button type="button" class="attack-remove-btn" title="Remove">×</button>
       </div>
       ${spellburnHtml}
@@ -11109,11 +11139,16 @@ function refreshSpellAttackRows() {
     // Regaining spells via Spellburn - see spellAttackRowHtml's own comment.
     const spellLevelForBurn = isLost ? spellLevelForName(nameEl2 ? nameEl2.value : "") : null;
     const isRegainable = isLost && spellLevelForBurn !== null && pendingPoints >= spellLevelForBurn;
-    const rollBlocked = isLost && !isRegainable;
+    // Invoke Patron's own mandatory Spellburn cost - see spellAttackRowHtml's
+    // own comment.
+    const requiresPatronBurn = (nameEl2 ? nameEl2.value : "") === "Invoke patron";
+    const patronBurnMissing = requiresPatronBurn && pendingPoints < 1;
+    const rollBlocked = (isLost && !isRegainable) || patronBurnMissing;
     let badgeWrap = row.querySelector(".attack-row-badges");
     const badgesHtml = [
       check ? `<span class="weapon-badge weapon-badge-die" title="Spell Check die this row rolls">d${check.sides}</span>` : "",
       isLost ? `<span class="weapon-badge weapon-badge-lost spell-lost-badge" title="Lost (DCC RPG core rulebook) - this spell failed its last Spell Check badly enough to lose it until you rest. Click to un-mark if this spell's own casting table says this roll shouldn't have lost it. ${spellLevelForBurn !== null ? `Burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} via 🩸 Spellburn to cast it anyway.` : "Fill in this spell's Level to allow regaining it via Spellburn."}">🔒 Lost</span>` : "",
+      requiresPatronBurn ? `<span class="weapon-badge weapon-badge-lost" title="Invoke Patron requires spellburning at least 1 point of an ability score to cast (DCC RPG core rulebook, p.107) - use the 🩸 Spellburn button below before rolling.">🩸 Requires Spellburn</span>` : "",
     ].filter(Boolean).join("");
     if (badgesHtml) {
       if (!badgeWrap) {
@@ -11141,9 +11176,11 @@ function refreshSpellAttackRows() {
       rollBtn.classList.toggle("disabled", rollBlocked);
       rollBtn.disabled = rollBlocked;
       rollBtn.title = rollBlocked
-        ? (spellLevelForBurn !== null
-          ? `This spell is Lost - burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} via 🩸 Spellburn to cast it anyway, or use New Day near Abilities to rest it off.`
-          : "This spell is Lost until you rest - see the 🔒 badge above (click it to un-mark), or New Day near Abilities.")
+        ? (isLost && !isRegainable
+          ? (spellLevelForBurn !== null
+            ? `This spell is Lost - burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} via 🩸 Spellburn to cast it anyway, or use New Day near Abilities to rest it off.`
+            : "This spell is Lost until you rest - see the 🔒 badge above (click it to un-mark), or New Day near Abilities.")
+          : "Invoke Patron requires spellburning at least 1 point of an ability score first (DCC RPG core rulebook) - use the 🩸 Spellburn button below, then roll.")
         : (isLost ? "Regaining this Lost spell via Spellburn - rolling still resolves as a normal Spell Check." : "Roll Spell Check");
     }
   });
@@ -11425,6 +11462,16 @@ async function rollSpellAttackRow(row) {
         : `${label} is Lost - fill in its Level (Spells section) to regain it via Spellburn.`, true, 5000);
       return;
     }
+  }
+  // Invoke Patron's own mandatory Spellburn cost (DCC RPG core rulebook,
+  // p.107): "To invoke a patron, the wizard must spellburn at least 1
+  // point of an ability score ... and cast the spell invoke patron." The
+  // roll button's disabled state already blocks this in practice (see
+  // spellAttackRowHtml/refreshSpellAttackRows), this is just defense in
+  // depth against a stale button.
+  if (spellName === "Invoke patron" && burnPoints < 1) {
+    showStatus("Invoke Patron requires spellburning at least 1 point of an ability score first - use 🩸 Spellburn, then roll.", true, 5000);
+    return;
   }
   // Spellburn: spending a full 20 points in one declaration automatically
   // treats this check as a natural max, no die actually rolled - reuses
@@ -14844,8 +14891,13 @@ function spellTrackerLineHtml(item, stats, line) {
   // live Sheet DOM.
   const spellLevelForBurn = isLost ? spellLevelForNameForStats(stats, atk.name) : null;
   const isRegainable = isLost && spellLevelForBurn !== null && pendingPoints >= spellLevelForBurn;
-  const rollBlocked = isLost && !isRegainable;
+  // Invoke Patron's own mandatory Spellburn cost - see spellAttackRowHtml's
+  // own comment (Sheet-side sibling).
+  const requiresPatronBurn = atk.name === "Invoke patron";
+  const patronBurnMissing = requiresPatronBurn && pendingPoints < 1;
+  const rollBlocked = (isLost && !isRegainable) || patronBurnMissing;
   if (isLost) badges.push(`<span class="weapon-badge weapon-badge-lost spell-lost-badge" data-spell-name="${escapeHtml(atk.name || "")}" title="Lost (DCC RPG core rulebook) - this spell failed its last Spell Check badly enough to lose it until you rest. Click to un-mark if this spell's own casting table says this roll shouldn't have lost it. ${spellLevelForBurn !== null ? `Burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} via 🩸 Spellburn to cast it anyway.` : "Fill in this spell's Level on the Sheet to allow regaining it via Spellburn."}">🔒 Lost</span>`);
+  if (requiresPatronBurn) badges.push(`<span class="weapon-badge weapon-badge-lost" title="Invoke Patron requires spellburning at least 1 point of an ability score to cast (DCC RPG core rulebook, p.107) - use the 🩸 Spellburn button below before rolling.">🩸 Requires Spellburn</span>`);
   // Spellburn (DCC RPG core rulebook) - Wizard/Elf only, same gate as the
   // Sheet's own spellburn-row (spellAttackRowHtml) - opens the shared
   // popup (attachTrackerRowListeners wires the click, since parentId/
@@ -14880,7 +14932,13 @@ function spellTrackerLineHtml(item, stats, line) {
         <span class="attack-detail-meta">
           <span class="attack-detail-meta-part" title="${escapeHtml(bonusTooltip)}">${escapeHtml(line.label)} <b>${escapeHtml(bonusText)}</b></span>
         </span>
-        <button class="hp-btn attack-roll-btn${rollBlocked ? " disabled" : ""}"${rollBlocked ? " disabled" : ""} title="${rollBlocked ? (spellLevelForBurn !== null ? `This spell is Lost - burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} via 🩸 Spellburn to cast it anyway, or use New Day on the Sheet.` : "This spell is Lost until you rest - see the 🔒 badge below (click it to un-mark), or New Day on the Sheet.") : (isLost ? "Regaining this Lost spell via Spellburn - rolling still resolves as a normal Spell Check." : "Roll Spell Check")}">🎲</button>
+        <button class="hp-btn attack-roll-btn${rollBlocked ? " disabled" : ""}"${rollBlocked ? " disabled" : ""} title="${escapeHtml(rollBlocked
+          ? (isLost && !isRegainable
+            ? (spellLevelForBurn !== null
+              ? `This spell is Lost - burn ${spellLevelForBurn} point${spellLevelForBurn === 1 ? "" : "s"} via 🩸 Spellburn to cast it anyway, or use New Day on the Sheet.`
+              : "This spell is Lost until you rest - see the 🔒 badge below (click it to un-mark), or New Day on the Sheet.")
+            : "Invoke Patron requires spellburning at least 1 point of an ability score first (DCC RPG core rulebook) - use the 🩸 Spellburn button below, then roll.")
+          : (isLost ? "Regaining this Lost spell via Spellburn - rolling still resolves as a normal Spell Check." : "Roll Spell Check"))}">🎲</button>
       </div>
       ${burnHtml}
       ${reversedHtml}
@@ -15852,6 +15910,14 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
       showStatus(msg, true);
       return;
     }
+  }
+  // Invoke Patron's own mandatory Spellburn cost - see the Sheet's own
+  // rollSpellAttackRow for the rule itself; same defense-in-depth guard.
+  if (effectiveName === "Invoke patron" && burnPoints < 1) {
+    const msg = `${item.name || "Token"}: Invoke Patron requires spellburning at least 1 point of an ability score first - use 🩸 Spellburn, then roll.`;
+    showTrackerStatus(msg, true);
+    showStatus(msg, true);
+    return;
   }
   // Spellburn: spending a full 20 points in one declaration automatically
   // treats this check as a natural max, no die actually rolled - takes
