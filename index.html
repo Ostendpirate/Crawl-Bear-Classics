@@ -1490,7 +1490,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 17:33</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 17:41</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1806,8 +1806,7 @@
           </div>
           <div id="pc-deity-wrap" style="display:none">
             <label>Deity (Cleric)</label>
-            <input type="hidden" id="pc-deity" />
-            <select id="pc-deity-select" title="A cleric's deity is chosen from the sample deities matching their own Alignment - the list here refilters automatically if Alignment changes. Which weapons this cleric is trained in (Table 4-1's untrained-weapon penalty) and which creatures count as unholy for Turn Unholy both follow the SAME Alignment, shared by every deity in that group - this pick itself is flavor/roleplay only."></select>
+            <input type="text" id="pc-deity" placeholder="e.g. a Lawful war-god" title="Free text - type this cleric's own deity (from your rulebook's Sample Deities appendix, or a homebrew one) here. Which weapons this cleric is trained in (Table 4-1's untrained-weapon penalty) and which creatures count as unholy for Turn Unholy both follow this character's ALIGNMENT rather than the specific deity picked - see the fields above." />
           </div>
         </div>
 
@@ -4533,40 +4532,16 @@ function updatePcDeedDieVisibility() {
   wrap.style.display = pcClassHasDeedDieLive() ? "" : "none";
 }
 
-// Rebuilds the Deity <select>'s options for the given Alignment code
-// ("L"/"N"/"C") and pre-selects whichever option matches currentValue - so
-// switching Alignment (or loading a token that already had one recorded)
-// doesn't silently blank a still-valid pick, same "keep the selection only
-// if it's still on the list" contract populateFavoriteWeaponSelect follows
-// for Warrior/Dwarf's own dropdown. No Alignment (or one with nothing in
-// DCC_CLERIC_DEITIES) just empties the list - nothing to pick from yet.
-function populateClericDeitySelect(alignment, currentValue) {
-  const selectEl = document.getElementById("pc-deity-select");
-  if (!selectEl) return;
-  const group = DCC_CLERIC_DEITIES[alignment];
-  const gods = group ? group.gods : [];
-  selectEl.innerHTML = [`<option value="">— (pick a deity)</option>`]
-    .concat(gods.map(name => `<option value="${escapeHtml(name)}"${name === currentValue ? " selected" : ""}>${escapeHtml(name)}</option>`))
-    .join("");
-}
-
-// Shows the Deity field for a Cleric only (everyone else has no deity-
-// based weapon training/Turn Unholy target list to pick a flavor deity
-// for), and keeps its option list matching the CURRENT Alignment - called
-// on every render (renderPcStatline) so it's correct right after loading a
-// different token, and directly from the Alignment change handler too
-// (that one doesn't otherwise trigger a full re-render pass the way a
-// Class change's own cfgRenderFromCurrentForm call does).
+// Shows the free-text Deity field for a Cleric only (everyone else has no
+// deity-based weapon training/Turn Unholy target list to name a deity
+// for) - called on every render (renderPcStatline) so it's correct right
+// after loading a different token, and directly from the Class change
+// handler for immediate feedback (mirrors updatePcDeedDieVisibility).
 function updatePcDeityVisibility() {
   const wrap = document.getElementById("pc-deity-wrap");
   if (!wrap) return;
   const classEl = document.getElementById("pc-class");
-  const isCleric = classEl && classEl.value === "Cleric";
-  wrap.style.display = isCleric ? "" : "none";
-  if (!isCleric) return;
-  const alignmentEl = document.getElementById("pc-alignment");
-  const deityEl = document.getElementById("pc-deity");
-  populateClericDeitySelect(alignmentEl ? alignmentEl.value : "", deityEl ? deityEl.value : "");
+  wrap.style.display = classEl && classEl.value === "Cleric" ? "" : "none";
 }
 
 // A handful of Table 1-3 "Trained Weapon" flavor names don't map to a
@@ -4628,55 +4603,33 @@ const CLASS_WEAPON_TRAINING = {
   Halfling: ["club", "crossbow", "dagger", "handaxe", "javelin", "shortbow", "short sword", "sling", "staff"],
 };
 
-// Sample Deities (DCC RPG core rulebook Appendix) - user-supplied table,
-// not independently verified against the published book the way the free
-// Reference Booklet's own tables were (see the copyright-rulebook-content
-// memory's own note on this feature - flagged to the user rather than
-// silently assumed correct). Keyed by the same "L"/"N"/"C" codes
-// pc-alignment's own <option> values use. `gods` is flavor/roleplay only -
-// which specific deity within an Alignment a cleric follows doesn't change
-// any of the app's own math. `weapons` (already normalized the same way
-// CLASS_WEAPON_TRAINING's own lists are - see dccWeaponTrainingKey) and
-// `unholyCreatures` are shared by every deity in the group, straight from
-// the table's own Alignment-level Weapons/Unholy Creatures columns - a
-// cleric's weapon training and Turn Unholy target list follow their
-// ALIGNMENT, not their individual deity (isWeaponUntrained's Cleric case,
-// renderTurnUnholyModalResult's unholy-creatures note).
+// Cleric weapon training/Turn Unholy targets by Alignment (DCC RPG core
+// rulebook - a cleric's deity determines both, and every deity of a given
+// Alignment shares the same Weapons/Unholy Creatures list). Keyed by the
+// same "L"/"N"/"C" codes pc-alignment's own <option> values use. This used
+// to also carry a `gods` array of sample deity names for a dropdown, but
+// that list (verified via web search - see the copyright-rulebook-content
+// memory's own note) turned out to be reproduced from the PAID core
+// rulebook's own Sample Deities appendix, not the free Reference Booklet
+// this app's other tables are safely sourced from - removed for that
+// reason. The specific deity a cleric follows is flavor/roleplay only
+// (doesn't change any of the app's own math) and is now a free-text field
+// (#pc-deity) instead, same "player supplies it from their own legally-
+// owned book" pattern the 0-level Trained Weapon field already uses.
+// `weapons` (already normalized the same way CLASS_WEAPON_TRAINING's own
+// lists are - see dccWeaponTrainingKey) and `unholyCreatures` themselves
+// are kept - categorical game-mechanic data (which weapon/creature TYPES),
+// not the reproduced creative names, so they don't carry the same risk.
 const DCC_CLERIC_DEITIES = {
   L: {
-    gods: [
-      "Shul, god of the moon",
-      "Klazath, god of war",
-      "Ulesh, god of peace",
-      "Choranus, the Seer Father, lord of creation",
-      "Daenthar, the Mountain Lord, greater god of earth and industry",
-      "Gorhan, the Helmed Vengeance, god of valor and chivalry",
-      "Justicia, goddess of justice and mercy",
-      "Aristemis, the Insightful One, demi-goddess of true seeing and strategy",
-    ],
     weapons: ["club", "mace", "sling", "staff", "warhammer"],
     unholyCreatures: "Un-dead, demons, devils, chaotic extraplanar creatures, monsters (e.g., basilisk or medusa), Chaos Primes, chaotic humanoids (e.g., orcs), chaotic dragons",
   },
   N: {
-    gods: [
-      "Amun Tor, god of mysteries and riddles",
-      "Ildavir, goddess of nature",
-      "Pelagia, goddess of the sea",
-      "Cthulhu, priest of the Old Ones",
-    ],
     weapons: ["dagger", "mace", "sling", "staff", "longsword", "short sword", "two-handed sword"],
     unholyCreatures: "Mundane animals, un-dead, demons, devils, monsters (e.g., basilisk or medusa), lycanthropes, perversions of nature (e.g., otyughs and slimes)",
   },
   C: {
-    gods: [
-      "Ahriman, god of death and disease",
-      "Hidden Lord, god of secrets",
-      "Azi Dahaka, demon prince of storms and waste",
-      "Bobugbubilz, demon lord of evil amphibians",
-      "Cadixtat, chaos titan",
-      "Nimlurun, the unclean one, lord of filth and pollution",
-      "Malotoch, the carrion crow god",
-    ],
     weapons: ["battleaxe", "handaxe", "longbow", "shortbow", "dagger", "dart", "flail"],
     unholyCreatures: "Angels, paladins, lawful dragons, Lords of Law, Lawful Primes, and Law-aligned humanoids (e.g., goblins)",
   },
@@ -6576,22 +6529,6 @@ if (pcTrainedWeaponSyncBtn) {
     cfgRenderFromCurrentForm("pc");
   });
 }
-const pcDeitySelectEl = document.getElementById("pc-deity-select");
-if (pcDeitySelectEl) {
-  // Same "dropdown writes into the underlying persisted field" contract
-  // as the Favorite Weapon dropdown above (pcTrainedWeaponSelectEl) - the
-  // visible select is rebuilt from DCC_CLERIC_DEITIES on every render
-  // (updatePcDeityVisibility) and can't itself survive a save/load
-  // round-trip (its <option>s don't exist until Alignment/Class are
-  // already known), so the actual saved value lives in the hidden
-  // #pc-deity input instead.
-  pcDeitySelectEl.addEventListener("change", () => {
-    const deityEl = document.getElementById("pc-deity");
-    if (deityEl) deityEl.value = pcDeitySelectEl.value;
-    scheduleSave();
-  });
-}
-
 ["hp-current", "hp-max", "pc-hp-current", "pc-hp-max"].forEach(id => {
   document.getElementById(id).addEventListener("input", scheduleSave);
 });
@@ -12105,12 +12042,6 @@ document.getElementById("pc-alignment").addEventListener("change", () => {
   // A Cleric's Lay on Hands/Cause Wounds row also depends on Alignment
   // (Turn Unholy/Divine Aid don't) - see syncClericAbilityRows's own comment.
   syncClericAbilityRows(false);
-  // A Cleric's Deity list is Alignment-filtered (DCC_CLERIC_DEITIES) -
-  // refilter it now rather than waiting for the next unrelated render pass
-  // (updatePcDeityVisibility is otherwise only called passively from
-  // renderPcStatline, same gap a Class change fills via its own
-  // cfgRenderFromCurrentForm call at the end of that handler).
-  updatePcDeityVisibility();
   // A Cleric's weapon training is ALSO Alignment-based now
   // (DCC_CLERIC_DEITIES.weapons, see isWeaponUntrained's Cleric case) -
   // every row's Untrained badge needs a fresh look at the new Alignment,
