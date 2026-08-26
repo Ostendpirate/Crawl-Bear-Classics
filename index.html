@@ -798,7 +798,7 @@
      auto-width/padded treatment .backstab-toggle-btn already gets for the
      same reason. */
   .spell-attack-burn-btn, .tracker-burn-btn, .newday-modal-recover, #pc-corruption-btn, #pc-disapproval-btn,
-  .spell-attack-reversed-btn, .tracker-reversed-btn, #pc-luck-check-btn {
+  .spell-attack-reversed-btn, .tracker-reversed-btn, #pc-luck-check-btn, .roll-language-btn {
     width: auto;
     height: auto;
     padding: 3px 8px;
@@ -1467,7 +1467,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 10:17</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 10:46</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1889,6 +1889,7 @@
           <legend>Languages</legend>
           <div class="fumble-die-note" id="pc-languages-note" style="margin-bottom:6px;"></div>
           <textarea id="pc-languages" placeholder="Common, Elvish"></textarea>
+          <button type="button" class="hp-btn roll-language-btn" id="pc-roll-language-btn" style="margin-top:6px;" title="Roll d100 on Appendix L (% Chance to Know Language, by Class) for one more known language, and append it below. Alignment tongue resolves to your own Chaos/Law/Neutrality; duplicates re-roll automatically.">🎲 Roll Language</button>
         </fieldset>
 
         <fieldset>
@@ -9914,7 +9915,7 @@ function computePcLanguagesText(cls, intScore, intMod) {
   const racialNote = isDemihuman && intScore >= 8
     ? " Also automatically knows their own racial language (Int 8+)."
     : "";
-  return `Languages known: Common${zeroLevelBonus ? ` + ${zeroLevelBonus} bonus (Int modifier, 0-level)` : ""}${firstLevelNote} = ${total} total.${racialNote} Pick specific languages from Appendix L (centaur, giant, gnome, goblin, kobold are common; Wizards may also know magical languages/animal tongues).`;
+  return `Languages known: Common${zeroLevelBonus ? ` + ${zeroLevelBonus} bonus (Int modifier, 0-level)` : ""}${firstLevelNote} = ${total} total.${racialNote} Click 🎲 Roll Language below to fill in the rest from Appendix L.`;
 }
 
 function refreshPcLanguagesNote() {
@@ -9927,6 +9928,126 @@ function refreshPcLanguagesNote() {
   el.textContent = text;
   el.style.display = text ? "" : "none";
 }
+
+// Appendix L: "% Chance to Know Language, by Class" - independently
+// verified against the user's own Core Rulebook scan (two passes, plus a
+// per-column contiguous-range cross-check to catch transcription errors -
+// every column reads as a single unbroken 01-100 run across the rows it
+// applies to, which wouldn't hold if a range had been misread). Columns
+// match pc-class's own values directly ("" = 0-Level Human); this app
+// tracks race+class as one field (Dwarf/Elf/Halfling ARE the class), so
+// the table's own dagger footnote ("use the elf/dwarf/halfling column for
+// 0-level demi-humans") is already satisfied by that direct mapping - no
+// separate race field to special-case. Each row stores only the top of
+// its range per column (null = "–", not offered to that class) - the
+// bottom is implicitly the previous populated row's own top + 1, same
+// "ranges are contiguous, just walk to the first non-null max the roll
+// doesn't exceed" shape lookupTableRow already uses for Crit/Fumble.
+const LANGUAGE_TABLE_COLUMNS = ["", "Warrior", "Cleric", "Thief", "Wizard", "Halfling", "Elf", "Dwarf"];
+const LANGUAGE_TABLE = [
+  { language: "Alignment tongue", isAlignmentTongue: true, max: [20, 20, 20, 15, 10, 25, 20, 20] },
+  { language: "Chaos", isRivalAlignment: true, max: [null, null, null, 20, 13, null, 25, null] },
+  { language: "Law", isRivalAlignment: true, max: [null, null, null, 25, 16, null, 30, null] },
+  { language: "Neutrality", isRivalAlignment: true, max: [null, null, null, 30, 19, null, 35, null] },
+  { language: "Dwarf", max: [30, 30, 25, 32, 21, 35, 40, null] },
+  { language: "Elf", max: [35, 35, 30, 34, 23, 40, null, 25] },
+  { language: "Halfling", max: [40, 38, 35, 44, 25, null, 45, 35] },
+  { language: "Gnome", max: [45, null, 40, 49, 27, 50, null, 40] },
+  { language: "Bugbear", max: [47, 43, 45, 54, 29, 55, null, 45] },
+  { language: "Goblin", max: [57, 53, 55, 64, 35, 70, 48, 55] },
+  { language: "Gnoll", max: [60, 58, 60, 69, 39, null, 50, 60] },
+  { language: "Harpy", max: [null, 63, null, 71, 41, null, 52, null] },
+  { language: "Hobgoblin", max: [65, 70, 65, 74, 45, 80, 54, 65] },
+  { language: "Kobold", max: [75, 78, 75, 78, 49, 90, 57, 75] },
+  { language: "Lizardman", max: [80, 81, 78, 79, 53, null, 58, null] },
+  { language: "Minotaur", max: [81, 83, null, null, 55, null, 59, 76] },
+  { language: "Ogre", max: [83, 88, 80, null, 57, null, 60, 81] },
+  { language: "Orc", max: [93, 95, 82, null, 62, null, 63, 86] },
+  { language: "Serpent-man", max: [null, 96, 83, 81, 65, null, 64, null] },
+  { language: "Troglodyte", max: [99, 98, 88, 83, 68, null, 65, 91] },
+  { language: "Angelic (a.k.a. Celestial)", max: [null, null, 92, null, 72, null, 70, null] },
+  { language: "Centaur", max: [null, null, 93, null, 73, null, 75, null] },
+  { language: "Demonic (a.k.a. Infernal/Abyssal)", max: [null, null, 97, 84, 79, null, 80, null] },
+  { language: "Doppelganger", max: [null, null, null, 85, 80, null, null, null] },
+  { language: "Dragon", max: [null, null, 98, 87, 84, null, 85, 93] },
+  { language: "Pixie", max: [null, null, 99, 89, 86, 93, 90, null] },
+  { language: "Giant", max: [100, 100, 100, 91, 88, null, null, 97] },
+  { language: "Griffon", max: [null, null, null, null, 89, null, null, null] },
+  { language: "Naga", max: [null, null, null, null, 90, null, 92, null] },
+  { language: "Bear", max: [null, null, null, null, 92, null, null, 98] },
+  { language: "Eagle", max: [null, null, null, null, 94, null, 94, null] },
+  { language: "Ferret", max: [null, null, null, null, null, 98, null, null] },
+  { language: "Horse", max: [null, null, null, null, 96, null, 96, null] },
+  { language: "Wolf", max: [null, null, null, null, 98, null, null, null] },
+  { language: "Spider", max: [null, null, null, null, 99, null, null, null] },
+  { language: "Undercommon", max: [null, null, null, 100, 100, 100, 100, 100] },
+];
+
+// "Chaos, Law, or Neutrality depending on character's alignment" - maps
+// this app's own pc-alignment values (L/N/C) to the table's Alignment
+// tongue row's actual resolved name.
+function pcAlignmentTongueName(alignment) {
+  return { L: "Law", N: "Neutrality", C: "Chaos" }[alignment] || null;
+}
+
+// Looks up one d100 roll against `cls`'s own column - same "walk rows in
+// order, first non-null max the roll doesn't exceed wins" shape
+// lookupTableRow uses. Returns null if the class isn't a recognized
+// column (shouldn't happen; pc-class's own options match
+// LANGUAGE_TABLE_COLUMNS exactly, aside from "Other/Homebrew" which maps
+// nowhere - see rollPcLanguage's own guard).
+function lookupLanguageTableRow(cls, roll) {
+  const col = LANGUAGE_TABLE_COLUMNS.indexOf(cls);
+  if (col === -1) return null;
+  for (const row of LANGUAGE_TABLE) {
+    const max = row.max[col];
+    if (max !== null && roll <= max) return row;
+  }
+  return null;
+}
+
+// Rolls once on Appendix L for this character's own Class, resolves
+// "Alignment tongue" to their own Chaos/Law/Neutrality tongue (see
+// pcAlignmentTongueName), and appends the result to the Languages field -
+// silently rerolling (footnote: "Re-roll if this duplicates a result of
+// the character's alignment tongue") whenever the resolved name is
+// already sitting in the field, capped at a handful of attempts so a
+// character with almost nothing left to roll can't hang the button.
+function rollPcLanguage() {
+  const classEl = document.getElementById("pc-class");
+  const cls = classEl ? classEl.value : "";
+  if (LANGUAGE_TABLE_COLUMNS.indexOf(cls) === -1) {
+    showStatus("Appendix L doesn't cover \"Other/Homebrew\" - pick a listed Class (0-level/blank counts as its own column) to roll a language.", true, 6000);
+    return;
+  }
+  const alignmentEl = document.getElementById("pc-alignment");
+  const ownAlignmentTongue = pcAlignmentTongueName(alignmentEl ? alignmentEl.value : "");
+  const langEl = document.getElementById("pc-languages");
+  const known = (langEl.value || "").split("\n").map(l => l.trim().toLowerCase()).filter(Boolean);
+
+  let rolled, row, name;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    rolled = Math.floor(Math.random() * 100) + 1;
+    row = lookupLanguageTableRow(cls, rolled);
+    if (!row) { showStatus("Roll landed outside this Class's column - try again.", true, 4000); return; }
+    name = row.isAlignmentTongue ? (ownAlignmentTongue || "their Alignment tongue") : row.language;
+    if (row.isRivalAlignment && row.language === ownAlignmentTongue) continue; // footnote **
+    if (known.includes(name.toLowerCase())) continue;
+    break;
+  }
+
+  if (!ownAlignmentTongue && row.isAlignmentTongue) {
+    showStatus(`Rolled d100 (${rolled}) → Alignment tongue, but no Alignment is set - pick one first, then roll again.`, true, 6000);
+    return;
+  }
+  const lines = (langEl.value || "").split("\n");
+  while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
+  langEl.value = lines.length ? [...lines, name].join("\n") : name;
+  scheduleSave();
+  showStatus(`Rolled Language: d100 (${rolled}) → ${name}.`, false, 5000);
+}
+
+document.getElementById("pc-roll-language-btn").addEventListener("click", rollPcLanguage);
 
 // Occupation dropdown (Table 1-3) + hover tooltip with suggested skill
 // checks. The actual saved value still lives in the hidden #pc-occupation
