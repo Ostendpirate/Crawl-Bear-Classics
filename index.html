@@ -1490,7 +1490,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 17:55</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 18:44</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -9525,6 +9525,51 @@ function pcSpellCheckModifierBreakdownForStats(stats, atk, spellburnPoints = 0, 
   return { cls, abilityId, level, abilityMod, penalty, sides, modifier, breakdown, spellburnPoints, attemptReversed };
 }
 
+// Stats-based sibling of the Bonus math turnUnholyRowHtml/rollTurnUnholyRow
+// compute live off the Sheet DOM - needed so the Combat Tracker can roll
+// Turn Unholy for any Cleric token, not just whichever one is open on the
+// Sheet tab (same "ForStats" reasoning as pcSpellCheckModifierBreakdownForStats
+// just above). Returns null for a non-Cleric - nothing to compute.
+function turnUnholyModifierForStats(stats) {
+  if ((stats.data.class || "").trim() !== "Cleric") return null;
+  const level = parseLevelNumber(stats.data.level) || 0;
+  const perMod = abilityModifierFromRaw(stats.data.per);
+  const luckMod = abilityModifierFromRaw(stats.data.lck);
+  return { level, perMod, luckMod, modifier: level + perMod + luckMod };
+}
+
+// Stats-based sibling of layOnHandsRowHtml/rollLayOnHandsRow's own Bonus
+// math - gated the same Lawful/Neutral-only way (see that function's own
+// comment on why Chaotic clerics are excluded here, not just displayed
+// differently). Returns null when not applicable.
+function layOnHandsModifierForStats(stats) {
+  if ((stats.data.class || "").trim() !== "Cleric") return null;
+  if ((stats.data.alignment || "").trim() === "C") return null;
+  const level = parseLevelNumber(stats.data.level) || 0;
+  const perMod = abilityModifierFromRaw(stats.data.per);
+  return { level, perMod, modifier: level + perMod };
+}
+
+// Stats-based sibling of causeWoundsRowHtml/rollCauseWoundsRow's own Bonus
+// math - the mirror gate of layOnHandsModifierForStats just above (Chaotic
+// only).
+function causeWoundsModifierForStats(stats) {
+  if ((stats.data.class || "").trim() !== "Cleric") return null;
+  if ((stats.data.alignment || "").trim() !== "C") return null;
+  const level = parseLevelNumber(stats.data.level) || 0;
+  const perMod = abilityModifierFromRaw(stats.data.per);
+  return { level, perMod, modifier: level + perMod };
+}
+
+// Stats-based sibling of divineAidRowHtml/rollDivineAidRow's own Bonus
+// math - Cleric only, any Alignment (see DIVINE_AID_KEY's own comment).
+function divineAidModifierForStats(stats) {
+  if ((stats.data.class || "").trim() !== "Cleric") return null;
+  const level = parseLevelNumber(stats.data.level) || 0;
+  const perMod = abilityModifierFromRaw(stats.data.per);
+  return { level, perMod, modifier: level + perMod };
+}
+
 function emptySpellItem() {
   return { id: "g" + Math.random().toString(36).slice(2, 9), name: "", mercurial: null, mercurialNote: "", mercurialBonus: "", mercurialDieSteps: "", manifestation: "", concentration: false, lost: false, level: "", range: "", duration: "", castingTime: "", save: "", effectRows: [] };
 }
@@ -12462,6 +12507,24 @@ function computeSkillRowTotal(row) {
   return { isDie: false, classBonus: row.classBonus, abilityMod, penalty, total: row.classBonus + abilityMod + penalty };
 }
 
+// Stats-based sibling of computeSkillRowTotal just above - needed so the
+// Combat Tracker can roll a Thief Skill Check line for any token, not just
+// whichever one is open on the Sheet tab (same "ForStats" reasoning as
+// pcSpellCheckModifierBreakdownForStats). armor Check Penalty is computed
+// inline off stats.data.armorItems rather than a shared helper, same
+// pattern pcSpellCheckModifierBreakdownForStats's own penalty line already
+// uses (no reusable "ForStats" Check Penalty function exists elsewhere).
+function computeSkillRowTotalForStats(stats, row) {
+  const abilityMod = row.ability ? abilityModifierFromRaw(stats.data[row.ability]) : 0;
+  let penalty = 0;
+  if (row.checkPenaltyApplies) {
+    const equippedItems = (stats.data.armorItems || []).filter(item => item.equipped);
+    penalty = equippedItems.reduce((sum, item) => sum + (parseInt(item.checkPenalty, 10) || 0), 0);
+  }
+  if (row.isDie) return { isDie: true, sides: row.classBonus, abilityMod, penalty };
+  return { isDie: false, classBonus: row.classBonus, abilityMod, penalty, total: row.classBonus + abilityMod + penalty };
+}
+
 function skillRowValueText(row) {
   const c = computeSkillRowTotal(row);
   return c.isDie ? `d${c.sides}` : formatSignedNumber(c.total);
@@ -12497,6 +12560,29 @@ function skillRowTitle(row) {
   const abbrev = SKILL_ABILITY_ABBREV[row.ability] || "";
   const c = computeSkillRowTotal(row);
   const autoNote = `Auto-fills from Level/Alignment${row.ability ? `/${abbrev}` : ""}${row.checkPenaltyApplies ? "/armor Check Penalty" : ""}. Type over it any time; ↻ resets it back to auto.`;
+  const dcNote = THIEF_SKILL_DC_GUIDANCE[row.key] ? ` ${THIEF_SKILL_DC_GUIDANCE[row.key]}` : "";
+  if (c.isDie) {
+    const dieParts = [];
+    if (row.ability) dieParts.push(`your ${abbrev} modifier (currently ${formatSignedNumber(c.abilityMod)})`);
+    if (row.checkPenaltyApplies && c.penalty) dieParts.push(`the armor Check Penalty (${formatSignedNumber(c.penalty)})`);
+    const modNote = dieParts.length ? ` Roll 1d${c.sides} plus ${dieParts.join(" and ")}.` : ` Roll 1d${c.sides}.`;
+    return `${modNote} ${autoNote}${dcNote}`;
+  }
+  const parts = [`${formatSignedNumber(c.classBonus)} class`];
+  if (row.ability) parts.push(`${formatSignedNumber(c.abilityMod)} ${abbrev}`);
+  if (row.checkPenaltyApplies && c.penalty) parts.push(`${formatSignedNumber(c.penalty)} armor Check Penalty`);
+  return `${formatSignedNumber(c.total)} (${parts.join(", ")}). ${autoNote}${dcNote}`;
+}
+
+// Stats-based sibling of skillRowTitle just above - needed so the Combat
+// Tracker's own Thief Skill Check line (thiefSkillTrackerLineHtml) shows
+// the correct breakdown for whichever token was clicked, not whatever
+// happens to be open on the Sheet tab (skillRowTitle calls
+// computeSkillRowTotal, which reads live Sheet DOM either way).
+function skillRowTitleForStats(stats, row) {
+  const abbrev = SKILL_ABILITY_ABBREV[row.ability] || "";
+  const c = computeSkillRowTotalForStats(stats, row);
+  const autoNote = `Auto-fills from Level/Alignment${row.ability ? `/${abbrev}` : ""}${row.checkPenaltyApplies ? "/armor Check Penalty" : ""}.`;
   const dcNote = THIEF_SKILL_DC_GUIDANCE[row.key] ? ` ${THIEF_SKILL_DC_GUIDANCE[row.key]}` : "";
   if (c.isDie) {
     const dieParts = [];
@@ -14187,6 +14273,56 @@ function deriveTrackerLines(item, stats) {
     });
   }
 
+  // Turn Unholy/Lay on Hands/Cause Wounds/Divine Aid (Cleric-only Actions
+  // rows) - each ability enforces "exactly one row" the same way Cast a
+  // Spell does (syncClericAbilityRows), so a single such row expands into
+  // one Tracker line per Action Die, mirroring the spell block just above.
+  // Always a straight d20 regardless of which Action Die slot rolls it
+  // (see each ability's own Sheet-side comment - none of these are tied to
+  // a spellcasting slot's own die size the way a Spell Check is), unlike a
+  // weapon/spell line's dieSides.
+  const turnUnholyAtk = stats.attacks.find(a => a.weapon === TURN_UNHOLY_KEY);
+  if (turnUnholyAtk && actDieOptions.length > 0) {
+    actDieOptions.forEach(opt => {
+      lines.push({ atk: turnUnholyAtk, attackId: turnUnholyAtk.id, slotKey: opt.value, isTw: false, isTurnUnholy: true, label: `🛡️ Turn Unholy — ${opt.label.replace(/\s*\(d\d+\)$/, "")}`, dieSides: 20 });
+    });
+  }
+  const layOnHandsAtk = stats.attacks.find(a => a.weapon === LAY_ON_HANDS_KEY);
+  if (layOnHandsAtk && actDieOptions.length > 0) {
+    actDieOptions.forEach(opt => {
+      lines.push({ atk: layOnHandsAtk, attackId: layOnHandsAtk.id, slotKey: opt.value, isTw: false, isLayOnHands: true, label: `🩹 Lay on Hands — ${opt.label.replace(/\s*\(d\d+\)$/, "")}`, dieSides: 20 });
+    });
+  }
+  const causeWoundsAtk = stats.attacks.find(a => a.weapon === CAUSE_WOUNDS_KEY);
+  if (causeWoundsAtk && actDieOptions.length > 0) {
+    actDieOptions.forEach(opt => {
+      lines.push({ atk: causeWoundsAtk, attackId: causeWoundsAtk.id, slotKey: opt.value, isTw: false, isCauseWounds: true, label: `🩸 Cause Wounds — ${opt.label.replace(/\s*\(d\d+\)$/, "")}`, dieSides: 20 });
+    });
+  }
+  const divineAidAtk = stats.attacks.find(a => a.weapon === DIVINE_AID_KEY);
+  if (divineAidAtk && actDieOptions.length > 0) {
+    actDieOptions.forEach(opt => {
+      lines.push({ atk: divineAidAtk, attackId: divineAidAtk.id, slotKey: opt.value, isTw: false, isDivineAid: true, label: `🙏 Divine Aid — ${opt.label.replace(/\s*\(d\d+\)$/, "")}`, dieSides: 20 });
+    });
+  }
+
+  // Thief Skill Check rows (THIEF_SKILL_ACTION_KEY) - unlike the four
+  // above, a Thief/Halfling can add MULTIPLE such rows (one per skill they
+  // want readily rollable this round), so each existing row becomes
+  // exactly ONE line using whatever Action Die it already has declared on
+  // the Sheet, same "remaining weapons" single-line-per-row pattern the
+  // ordinary attack rows above follow - never auto-expanded across every
+  // Action Die the way the four fixed-formula abilities just above are.
+  // Skipped entirely for a row with no skill picked yet (nothing to roll).
+  const thiefSkillAttacks = stats.attacks.filter(a => a.weapon === THIEF_SKILL_ACTION_KEY && (a.name || "").trim());
+  thiefSkillAttacks.forEach(atk => {
+    const slotKey = actDieOptions.some(o => o.value === atk.actionDieIndex) ? atk.actionDieIndex : "0";
+    const skillRows = activeSkillRowDefs(cls, level, stats.data.alignment).rows || [];
+    const skillRow = skillRows.find(r => r.label === atk.name && r.rollable !== false);
+    const dieSides = skillRow && skillRow.isDie ? skillRow.classBonus : 20;
+    lines.push({ atk, attackId: atk.id, slotKey, isTw: false, isThiefSkill: true, label: `🗝️ ${atk.name}`, dieSides });
+  });
+
   return lines.map(tagUsed);
 }
 
@@ -14335,6 +14471,14 @@ function trackerLineHtml(item, stats, line) {
   // pattern attackRowHtml's own spell short-circuit already uses on the
   // Sheet.
   if (line.isSpell) return spellTrackerLineHtml(item, stats, line);
+  // Same short-circuit for each of the five Cleric/Thief Actions-row
+  // types (see TURN_UNHOLY_KEY etc.'s own comments) - none of them are
+  // structurally weapon-shaped either.
+  if (line.isTurnUnholy) return turnUnholyTrackerLineHtml(item, stats, line);
+  if (line.isLayOnHands) return layOnHandsTrackerLineHtml(item, stats, line);
+  if (line.isCauseWounds) return causeWoundsTrackerLineHtml(item, stats, line);
+  if (line.isDivineAid) return divineAidTrackerLineHtml(item, stats, line);
+  if (line.isThiefSkill) return thiefSkillTrackerLineHtml(item, stats, line);
   const atk = line.atk;
   const entry = stats.mode === "pc" ? dccWeaponEntry(atk.weapon) : null;
   const isThief = stats.mode === "pc" && (stats.data.class || "").trim() === "Thief";
@@ -14530,6 +14674,106 @@ function spellTrackerLineHtml(item, stats, line) {
       ${burnHtml}
       ${reversedHtml}
       ${badges.length ? `<div class="attack-detail-badges">${badges.join(" ")}</div>` : ""}
+    </div>`;
+}
+
+// One rollable line for a Turn Unholy Actions row (see deriveTrackerLines'
+// own comment) - much simpler than spellTrackerLineHtml above: no known-
+// spell picker, no Spellburn/Reversing Spells/Lost badges, just the
+// already-resolved Bonus and a roll button. Same attack-detail-row-wrap/
+// attack-roll-btn shape every other line uses, so it's picked up by
+// attachTrackerRowListeners' generic wiring with no changes there.
+function turnUnholyTrackerLineHtml(item, stats, line) {
+  const mod = turnUnholyModifierForStats(stats);
+  const bonusText = mod ? formatSignedNumber(mod.modifier) : "+0";
+  const bonusTooltip = mod
+    ? `Turn Unholy = d20 + Level ${formatSignedNumber(mod.level)} + Personality ${formatSignedNumber(mod.perMod)} + Luck ${formatSignedNumber(mod.luckMod)}.`
+    : "Only Cleric has Turn Unholy.";
+  return `
+    <div class="attack-detail-row-wrap">
+      <div class="attack-detail-row" data-attack-id="${line.attackId}" data-slot-key="${line.slotKey || ""}">
+        <span class="attack-detail-meta">
+          <span class="attack-detail-meta-part" title="${escapeHtml(bonusTooltip)}">${escapeHtml(line.label)} <b>${escapeHtml(bonusText)}</b></span>
+        </span>
+        <button class="hp-btn attack-roll-btn" title="Roll Turn Unholy (Table 4-4) - opens the lookup modal on the Sheet once rolled there; from the Tracker this just posts the total.">🎲</button>
+      </div>
+    </div>`;
+}
+
+// Same shape as turnUnholyTrackerLineHtml above, for a Lay on Hands row.
+function layOnHandsTrackerLineHtml(item, stats, line) {
+  const mod = layOnHandsModifierForStats(stats);
+  const bonusText = mod ? formatSignedNumber(mod.modifier) : "+0";
+  const bonusTooltip = mod
+    ? `Lay on Hands = d20 + Level ${formatSignedNumber(mod.level)} + Personality ${formatSignedNumber(mod.perMod)}.`
+    : "Only a Lawful or Neutral Cleric has Lay on Hands - Chaotic clerics get Cause Wounds instead.";
+  return `
+    <div class="attack-detail-row-wrap">
+      <div class="attack-detail-row" data-attack-id="${line.attackId}" data-slot-key="${line.slotKey || ""}">
+        <span class="attack-detail-meta">
+          <span class="attack-detail-meta-part" title="${escapeHtml(bonusTooltip)}">${escapeHtml(line.label)} <b>${escapeHtml(bonusText)}</b></span>
+        </span>
+        <button class="hp-btn attack-roll-btn" title="Roll Lay on Hands - see the lookup modal on the Sheet for the actual healing table.">🎲</button>
+      </div>
+    </div>`;
+}
+
+// Same shape again, for a Cause Wounds row.
+function causeWoundsTrackerLineHtml(item, stats, line) {
+  const mod = causeWoundsModifierForStats(stats);
+  const bonusText = mod ? formatSignedNumber(mod.modifier) : "+0";
+  const bonusTooltip = mod
+    ? `Cause Wounds = d20 + Level ${formatSignedNumber(mod.level)} + Personality ${formatSignedNumber(mod.perMod)}.`
+    : "Only a Chaotic Cleric has Cause Wounds - Lawful/Neutral clerics get Lay on Hands instead.";
+  return `
+    <div class="attack-detail-row-wrap">
+      <div class="attack-detail-row" data-attack-id="${line.attackId}" data-slot-key="${line.slotKey || ""}">
+        <span class="attack-detail-meta">
+          <span class="attack-detail-meta-part" title="${escapeHtml(bonusTooltip)}">${escapeHtml(line.label)} <b>${escapeHtml(bonusText)}</b></span>
+        </span>
+        <button class="hp-btn attack-roll-btn" title="Roll Cause Wounds - see the lookup modal on the Sheet for the actual damage table.">🎲</button>
+      </div>
+    </div>`;
+}
+
+// Same shape again, for a Divine Aid row - no lookup table at all (the
+// Judge narrates the result), see DIVINE_AID_KEY's own comment.
+function divineAidTrackerLineHtml(item, stats, line) {
+  const mod = divineAidModifierForStats(stats);
+  const bonusText = mod ? formatSignedNumber(mod.modifier) : "+0";
+  const bonusTooltip = mod
+    ? `Divine Aid = d20 + Level ${formatSignedNumber(mod.level)} + Personality ${formatSignedNumber(mod.perMod)}. Always imparts a cumulative +10 penalty to future Disapproval Range, win or lose.`
+    : "Only Cleric has Divine Aid.";
+  return `
+    <div class="attack-detail-row-wrap">
+      <div class="attack-detail-row" data-attack-id="${line.attackId}" data-slot-key="${line.slotKey || ""}">
+        <span class="attack-detail-meta">
+          <span class="attack-detail-meta-part" title="${escapeHtml(bonusTooltip)}">${escapeHtml(line.label)} <b>${escapeHtml(bonusText)}</b></span>
+        </span>
+        <button class="hp-btn attack-roll-btn" title="Roll Divine Aid (Simple requests DC 10, extraordinary requests DC 18+). Always costs +10 Disapproval Range.">🎲</button>
+      </div>
+    </div>`;
+}
+
+// One rollable line for a Thief Skill Check row - same shape as the four
+// above, resolved via computeSkillRowTotalForStats (thiefSkillActionRows'
+// own stats-based sibling) against whichever skill this row has picked
+// (line.atk.name).
+function thiefSkillTrackerLineHtml(item, stats, line) {
+  const cls = (stats.data.class || "").trim();
+  const skillRows = activeSkillRowDefs(cls, stats.data.level, stats.data.alignment).rows || [];
+  const skillRow = skillRows.find(r => r.label === line.atk.name && r.rollable !== false);
+  const c = skillRow ? computeSkillRowTotalForStats(stats, skillRow) : null;
+  const bonusText = c ? (c.isDie ? `d${c.sides}` : formatSignedNumber(c.total)) : "+0";
+  const bonusTooltip = skillRow ? skillRowTitleForStats(stats, skillRow) : "This skill isn't available for the current Class/Level/Alignment.";
+  return `
+    <div class="attack-detail-row-wrap">
+      <div class="attack-detail-row" data-attack-id="${line.attackId}" data-slot-key="${line.slotKey || ""}">
+        <span class="attack-detail-meta">
+          <span class="attack-detail-meta-part" title="${escapeHtml(bonusTooltip)}">${escapeHtml(line.label)} <b>${escapeHtml(bonusText)}</b></span>
+        </span>
+        <button class="hp-btn attack-roll-btn"${skillRow ? "" : " disabled"} title="${escapeHtml(skillRow ? `Roll ${skillRow.label}` : "This skill isn't available for the current Class/Level/Alignment.")}">🎲</button>
+      </div>
     </div>`;
 }
 
@@ -15546,6 +15790,29 @@ async function checkAndWidenDisapprovalForStats(itemId, rolled, abilityId) {
   return triggeredRange;
 }
 
+// Widens the Disapproval Range, unconditionally, by `amount` (default 1) -
+// the Tracker-tab sibling of the Sheet's own widenPcDisapprovalRangeOnce,
+// used by Turn Unholy/Lay on Hands/Cause Wounds's total<=11 EXTRA rule and
+// Divine Aid's own guaranteed +10-per-use cost (see each Tracker roll
+// function's own comment). Returns the range that was just widened FROM,
+// same contract as checkAndWidenDisapprovalForStats above.
+async function widenPcDisapprovalRangeOnceForStats(itemId, amount = 1) {
+  let rangeBefore = 1;
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      if (mode !== "pc") return;
+      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+      const existingRange = data.disapprovalRange !== undefined && data.disapprovalRange !== "" ? parseInt(data.disapprovalRange, 10) : NaN;
+      const range = Number.isFinite(existingRange) && existingRange >= 1 ? existingRange : 1;
+      rangeBefore = range;
+      data.disapprovalRange = String(range + amount);
+      item.metadata[PC_METADATA_KEY] = data;
+    });
+  });
+  return rangeBefore;
+}
+
 // Clears a line's pending Spellburn total once rollSpellAttackForTracker
 // has applied it to a roll - mirrors the Sheet's own post-roll cleanup in
 // rollSpellAttackRow, just written through metadata instead of a DOM
@@ -16011,6 +16278,29 @@ async function rollAttackForTrackerRow(itemId, attackId, slotKey) {
     rollSpellAttackForTracker(itemId, attackId, slotKey);
     return;
   }
+  // Same "route to its own roll function first" treatment for each of the
+  // five Cleric/Thief Actions-row types (see TURN_UNHOLY_KEY etc.'s own
+  // comments) - none of these are weapon-roll-machinery-shaped either.
+  if (atk && atk.weapon === TURN_UNHOLY_KEY) {
+    rollTurnUnholyForTracker(itemId, attackId, slotKey);
+    return;
+  }
+  if (atk && atk.weapon === LAY_ON_HANDS_KEY) {
+    rollLayOnHandsForTracker(itemId, attackId, slotKey);
+    return;
+  }
+  if (atk && atk.weapon === CAUSE_WOUNDS_KEY) {
+    rollCauseWoundsForTracker(itemId, attackId, slotKey);
+    return;
+  }
+  if (atk && atk.weapon === DIVINE_AID_KEY) {
+    rollDivineAidForTracker(itemId, attackId, slotKey);
+    return;
+  }
+  if (atk && atk.weapon === THIEF_SKILL_ACTION_KEY) {
+    rollThiefSkillForTracker(itemId, attackId, slotKey);
+    return;
+  }
   // A Primary/Off-hand weapon row's OWN "tw" line (see deriveTrackerLines)
   // is the only one that actually routes through the combined two-weapon
   // roll - a character with extra Action Dice from level also gets one or
@@ -16032,6 +16322,201 @@ async function rollAttackForTrackerRow(itemId, attackId, slotKey) {
     }
   }
   rollAttackFor(itemId, attackId, slotKey);
+}
+
+// Rolls a Turn Unholy line for whichever token was clicked - Tracker-tab
+// sibling of the Sheet's own rollTurnUnholyRow, resolved off this token's
+// saved stats (turnUnholyModifierForStats) rather than the live Sheet DOM,
+// same reasoning every other Tracker roll here follows. Same disapproval
+// rules as the Sheet version: a natural roll landing in the current
+// Disapproval Range widens it by 1 (checkAndWidenDisapprovalForStats), OR
+// (not also) a flat-out failed check (total<=11, Table 4-4's own universal
+// No Effect row) widens it by 1 regardless of the natural roll
+// (widenPcDisapprovalRangeOnceForStats) - never opens the Table 4-4 lookup
+// modal the way the Sheet's own button does (there's no Sheet UI to open
+// it in from here), it just posts the total as text, same as
+// rollSpellAttackForTracker does for a Spell Check.
+async function rollTurnUnholyForTracker(itemId, attackId, slotKey) {
+  const [item] = await OBR.scene.items.getItems([itemId]);
+  if (!item) return;
+  const stats = getStatsForItem(item);
+  const mod = turnUnholyModifierForStats(stats);
+  if (!mod) {
+    const msg = `${item.name || "Token"}: Only Cleric has Turn Unholy.`;
+    showTrackerStatus(msg, true);
+    showStatus(msg, true);
+    return;
+  }
+  const forcedD20 = consumeForcedD20();
+  const rolled = forcedD20 !== null ? forcedD20 : (Math.floor(Math.random() * 20) + 1);
+  const total = rolled + mod.modifier;
+  let note = rolled === 1 ? ` ${markFumbleAlert("💀 FAILURE")} Natural 1 always fails.` : "";
+  const disapprovalRange = await checkAndWidenDisapprovalForStats(itemId, rolled, "per");
+  if (disapprovalRange !== null) {
+    note += ` ${markFumbleAlert("😇 DISAPPROVAL")} - natural ${rolled} fell within this cleric's Disapproval Range (1${disapprovalRange > 1 ? `-${disapprovalRange}` : ""}) - roll on Table 5-7. Range now widens to 1-${disapprovalRange + 1} for the rest of the day.`;
+  } else if (total <= 11) {
+    const widenedFrom = await widenPcDisapprovalRangeOnceForStats(itemId, 1);
+    note += ` ${markFumbleAlert("😇 DISAPPROVAL")} - the check failed (${total} ≤ 11, no effect regardless of HD) - roll on Table 5-7. Range now widens to 1-${widenedFrom + 1} for the rest of the day.`;
+  }
+  const text = `Turn Unholy: d20 (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(mod.level)}(level) ${formatSignedNumber(mod.perMod)}(Per) ${formatSignedNumber(mod.luckMod)}(Luck) = ${markRollTotal(total)}${note}`;
+  await markActionSlotsUsed(itemId, [actionSlotKey(stats.mode, attackId, slotKey)]);
+  const duration = note ? 9000 : 4000;
+  showTrackerStatus(`${item.name || "Token"} — ${text}`, false, duration);
+  showStatus(`${item.name || "Token"} — ${text}`, false, duration);
+  await appendChatLog({ kind: "skill", tokenName: item.name || "Token", text, gmOnly: isGmOnlyRoll(stats.mode, item) });
+  broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: 20, value: rolled }], modifier: mod.modifier, notation: "d20", total, label: "Turn Unholy" });
+}
+
+// Same shape as rollTurnUnholyForTracker above, for Lay on Hands - same
+// gate as the Sheet's own rollLayOnHandsRow (Lawful/Neutral only).
+async function rollLayOnHandsForTracker(itemId, attackId, slotKey) {
+  const [item] = await OBR.scene.items.getItems([itemId]);
+  if (!item) return;
+  const stats = getStatsForItem(item);
+  const mod = layOnHandsModifierForStats(stats);
+  if (!mod) {
+    const msg = `${item.name || "Token"}: Only a Lawful or Neutral Cleric has Lay on Hands.`;
+    showTrackerStatus(msg, true);
+    showStatus(msg, true);
+    return;
+  }
+  const forcedD20 = consumeForcedD20();
+  const rolled = forcedD20 !== null ? forcedD20 : (Math.floor(Math.random() * 20) + 1);
+  const total = rolled + mod.modifier;
+  let note = rolled === 1 ? ` ${markFumbleAlert("💀 FAILURE")} Natural 1 always fails.` : "";
+  const disapprovalRange = await checkAndWidenDisapprovalForStats(itemId, rolled, "per");
+  if (disapprovalRange !== null) {
+    note += ` ${markFumbleAlert("😇 DISAPPROVAL")} - natural ${rolled} fell within this cleric's Disapproval Range (1${disapprovalRange > 1 ? `-${disapprovalRange}` : ""}) - roll on Table 5-7. Range now widens to 1-${disapprovalRange + 1} for the rest of the day.`;
+  } else if (total <= 11) {
+    const widenedFrom = await widenPcDisapprovalRangeOnceForStats(itemId, 1);
+    note += ` ${markFumbleAlert("😇 DISAPPROVAL")} - the check failed (${total} ≤ 11, no healing) - roll on Table 5-7. Range now widens to 1-${widenedFrom + 1} for the rest of the day.`;
+  }
+  const text = `Lay on Hands: d20 (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(mod.level)}(level) ${formatSignedNumber(mod.perMod)}(Per) = ${markRollTotal(total)}${note}`;
+  await markActionSlotsUsed(itemId, [actionSlotKey(stats.mode, attackId, slotKey)]);
+  const duration = note ? 9000 : 4000;
+  showTrackerStatus(`${item.name || "Token"} — ${text}`, false, duration);
+  showStatus(`${item.name || "Token"} — ${text}`, false, duration);
+  await appendChatLog({ kind: "skill", tokenName: item.name || "Token", text, gmOnly: isGmOnlyRoll(stats.mode, item) });
+  broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: 20, value: rolled }], modifier: mod.modifier, notation: "d20", total, label: "Lay on Hands" });
+}
+
+// Same shape again, for Cause Wounds - same gate as the Sheet's own
+// rollCauseWoundsRow (Chaotic only).
+async function rollCauseWoundsForTracker(itemId, attackId, slotKey) {
+  const [item] = await OBR.scene.items.getItems([itemId]);
+  if (!item) return;
+  const stats = getStatsForItem(item);
+  const mod = causeWoundsModifierForStats(stats);
+  if (!mod) {
+    const msg = `${item.name || "Token"}: Only a Chaotic Cleric has Cause Wounds.`;
+    showTrackerStatus(msg, true);
+    showStatus(msg, true);
+    return;
+  }
+  const forcedD20 = consumeForcedD20();
+  const rolled = forcedD20 !== null ? forcedD20 : (Math.floor(Math.random() * 20) + 1);
+  const total = rolled + mod.modifier;
+  let note = rolled === 1 ? ` ${markFumbleAlert("💀 FAILURE")} Natural 1 always fails.` : "";
+  const disapprovalRange = await checkAndWidenDisapprovalForStats(itemId, rolled, "per");
+  if (disapprovalRange !== null) {
+    note += ` ${markFumbleAlert("😇 DISAPPROVAL")} - natural ${rolled} fell within this cleric's Disapproval Range (1${disapprovalRange > 1 ? `-${disapprovalRange}` : ""}) - roll on Table 5-7. Range now widens to 1-${disapprovalRange + 1} for the rest of the day.`;
+  } else if (total <= 11) {
+    const widenedFrom = await widenPcDisapprovalRangeOnceForStats(itemId, 1);
+    note += ` ${markFumbleAlert("😇 DISAPPROVAL")} - the check failed (${total} ≤ 11, no damage) - roll on Table 5-7. Range now widens to 1-${widenedFrom + 1} for the rest of the day.`;
+  }
+  const text = `Cause Wounds: d20 (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(mod.level)}(level) ${formatSignedNumber(mod.perMod)}(Per) = ${markRollTotal(total)}${note}`;
+  await markActionSlotsUsed(itemId, [actionSlotKey(stats.mode, attackId, slotKey)]);
+  const duration = note ? 9000 : 4000;
+  showTrackerStatus(`${item.name || "Token"} — ${text}`, false, duration);
+  showStatus(`${item.name || "Token"} — ${text}`, false, duration);
+  await appendChatLog({ kind: "skill", tokenName: item.name || "Token", text, gmOnly: isGmOnlyRoll(stats.mode, item) });
+  broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: 20, value: rolled }], modifier: mod.modifier, notation: "d20", total, label: "Cause Wounds" });
+}
+
+// Same shape again, for Divine Aid - Cleric only, any Alignment, and the
+// guaranteed +10 Disapproval Range cost applies regardless of the check's
+// result, same as the Sheet's own rollDivineAidRow.
+async function rollDivineAidForTracker(itemId, attackId, slotKey) {
+  const [item] = await OBR.scene.items.getItems([itemId]);
+  if (!item) return;
+  const stats = getStatsForItem(item);
+  const mod = divineAidModifierForStats(stats);
+  if (!mod) {
+    const msg = `${item.name || "Token"}: Only Cleric has Divine Aid.`;
+    showTrackerStatus(msg, true);
+    showStatus(msg, true);
+    return;
+  }
+  const forcedD20 = consumeForcedD20();
+  const rolled = forcedD20 !== null ? forcedD20 : (Math.floor(Math.random() * 20) + 1);
+  const total = rolled + mod.modifier;
+  let note = rolled === 1 ? ` ${markFumbleAlert("💀 FAILURE")} Natural 1 always fails.` : "";
+  const disapprovalRange = await checkAndWidenDisapprovalForStats(itemId, rolled, "per");
+  if (disapprovalRange !== null) {
+    note += ` ${markFumbleAlert("😇 DISAPPROVAL")} - natural ${rolled} fell within this cleric's Disapproval Range (1${disapprovalRange > 1 ? `-${disapprovalRange}` : ""}) - roll on Table 5-7. Range widens by 1.`;
+  }
+  // The guaranteed +10 cost - see rollDivineAidRow's own comment - applies
+  // AFTER whatever the natural-roll trigger just did above; reading the
+  // range fresh here means its own "widened FROM" value already reflects
+  // that +1 if it happened.
+  const rangeBeforeDivineAidCost = await widenPcDisapprovalRangeOnceForStats(itemId, 10);
+  note += ` ${markFumbleAlert("😇 DIVINE AID")} - requesting aid always imparts a cumulative +10 penalty to Disapproval Range regardless of the check's result. Range now widens to 1-${rangeBeforeDivineAidCost + 10} for the rest of the day.`;
+  const text = `Divine Aid: d20 (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(mod.level)}(level) ${formatSignedNumber(mod.perMod)}(Per) = ${markRollTotal(total)} - the Judge narrates the result (Simple requests DC 10, extraordinary requests DC 18+).${note}`;
+  await markActionSlotsUsed(itemId, [actionSlotKey(stats.mode, attackId, slotKey)]);
+  showTrackerStatus(`${item.name || "Token"} — ${text}`, false, 9000);
+  showStatus(`${item.name || "Token"} — ${text}`, false, 9000);
+  await appendChatLog({ kind: "skill", tokenName: item.name || "Token", text, gmOnly: isGmOnlyRoll(stats.mode, item) });
+  broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: 20, value: rolled }], modifier: mod.modifier, notation: "d20", total, label: "Divine Aid" });
+}
+
+// Rolls a Thief Skill Check line for whichever token was clicked -
+// Tracker-tab sibling of the Sheet's own rollThiefSkillActionRow, resolved
+// off this token's saved stats (activeSkillRowDefs/computeSkillRowTotalForStats)
+// instead of the live Sheet DOM. Same Disable Trap natural-1 rule and
+// Burn-Luck caching (setSkillLuckLastRollForStats, already metadata-based
+// - see its own comment) as the Sheet version.
+async function rollThiefSkillForTracker(itemId, attackId, slotKey) {
+  const [item] = await OBR.scene.items.getItems([itemId]);
+  if (!item) return;
+  const stats = getStatsForItem(item);
+  const atk = stats.attacks.find(a => a.id === attackId);
+  const label = atk && atk.name ? atk.name.trim() : "";
+  if (!label) return;
+  const cls = (stats.data.class || "").trim();
+  const skillRows = activeSkillRowDefs(cls, stats.data.level, stats.data.alignment).rows || [];
+  const skillRow = skillRows.find(r => r.label === label && r.rollable !== false);
+  if (!skillRow) {
+    const msg = `${item.name || "Token"}: This skill isn't available for the current Class/Level/Alignment.`;
+    showTrackerStatus(msg, true);
+    showStatus(msg, true);
+    return;
+  }
+  const c = computeSkillRowTotalForStats(stats, skillRow);
+  const forcedD20 = consumeForcedD20();
+  const luckTargets = [{ type: "skill", itemId, skillKey: skillRow.key, label }];
+  await markActionSlotsUsed(itemId, [actionSlotKey(stats.mode, attackId, slotKey)]);
+  if (c.isDie) {
+    const rolled = forcedD20 !== null ? Math.min(forcedD20, c.sides) : (Math.floor(Math.random() * c.sides) + 1);
+    const modifier = c.abilityMod + c.penalty;
+    const total = rolled + modifier;
+    const text = `${label}: d${c.sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(modifier)} = ${markRollTotal(total)}`;
+    showTrackerStatus(`${item.name || "Token"} — ${text}`, false, 4000);
+    showStatus(`${item.name || "Token"} — ${text}`, false, 4000);
+    await appendChatLog({ kind: "skill", tokenName: item.name || "Token", text, gmOnly: isGmOnlyRoll(stats.mode, item), luckTargets });
+    broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: c.sides, value: rolled }], modifier, notation: `d${c.sides}`, total, label });
+    await setSkillLuckLastRollForStats(itemId, skillRow.key, total, label);
+    return;
+  }
+  const rolled = forcedD20 !== null ? forcedD20 : (Math.floor(Math.random() * 20) + 1);
+  const total = rolled + c.total;
+  const trapTriggerNote = (skillRow.key === "disableTrap" && rolled === 1) ? " ⚠️ Natural 1 - the trap triggers!" : "";
+  const text = `${label}: d20 (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(c.total)} = ${markRollTotal(total)}${trapTriggerNote}`;
+  const duration = trapTriggerNote ? 6000 : 4000;
+  showTrackerStatus(`${item.name || "Token"} — ${text}`, rolled === 1 && skillRow.key === "disableTrap", duration);
+  showStatus(`${item.name || "Token"} — ${text}`, rolled === 1 && skillRow.key === "disableTrap", duration);
+  await appendChatLog({ kind: "skill", tokenName: item.name || "Token", text, gmOnly: isGmOnlyRoll(stats.mode, item), luckTargets });
+  broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: 20, value: rolled }], modifier: c.total, notation: "d20", total, label });
+  await setSkillLuckLastRollForStats(itemId, skillRow.key, total, label);
 }
 
 // Rolls a Concentration Save (DC 11 Will) for whichever token was clicked
