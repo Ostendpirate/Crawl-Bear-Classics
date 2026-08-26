@@ -1490,7 +1490,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 15:01</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 15:08</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1884,7 +1884,7 @@
             <div class="spell-section-header">Disapproval Range</div>
             <div class="stat-badge disapproval-range-badge" id="pc-disapproval-range-note"></div>
             <button type="button" class="hp-btn disapproval-range-btn" id="pc-disapproval-range-minus" title="Manually narrow the Disapproval Range by 1 (minimum natural 1 only) - e.g. correcting a mistaken widen.">−1 Range</button>
-            <button type="button" class="hp-btn disapproval-range-btn" id="pc-disapproval-range-plus" title="Manually widen the Disapproval Range by 1 - e.g. a Turn Unholy result you're ruling a failure even though the total was over 11 (Table 4-4 still came up No Effect against that target's HD) - rollTurnUnholyRow only auto-widens on a flat total of 11 or under.">+1 Range</button>
+            <button type="button" class="hp-btn disapproval-range-btn" id="pc-disapproval-range-plus" title="Manually widen the Disapproval Range by 1 - e.g. a Turn Unholy result you're ruling a failure even though the total was over 11 (Table 4-4 still came up No Effect against that target's Hit Dice) - rollTurnUnholyRow only auto-widens on a flat total of 11 or under.">+1 Range</button>
           </div>
           <input type="hidden" id="pc-disapprovalRange" value="" />
         </fieldset>
@@ -2239,7 +2239,7 @@
       <div class="tables-modal-header">
         <div>
           <div class="tables-modal-title">Turn Unholy</div>
-          <div class="tables-modal-subtitle">Table 4-4 - result depends on the Spell Check total AND the target creature's HD. A turned creature gets a Will save (DC = the Spell Check total) to resist unless marked "no save", and otherwise flees or cowers for 3d10 minutes.</div>
+          <div class="tables-modal-subtitle">Table 4-4 - result depends on the Spell Check total AND the target creature's Hit Dice. A turned creature gets a Will save (equal to the Spell Check total) to resist unless the result says otherwise, and otherwise flees or cowers for 3d10 minutes.</div>
         </div>
         <button type="button" class="tables-modal-close" id="turn-unholy-modal-close" title="Close">×</button>
       </div>
@@ -2250,7 +2250,7 @@
             <input type="number" id="turn-unholy-modal-total-input" min="0" value="1" />
           </label>
           <label class="roll-modal-field">
-            <span class="roll-modal-field-label">Target HD</span>
+            <span class="roll-modal-field-label">Target Hit Dice</span>
             <select id="turn-unholy-modal-hd-select">
               <option value="1">1</option>
               <option value="2">2</option>
@@ -2263,6 +2263,8 @@
           </label>
         </div>
         <div class="roll-modal-result" id="turn-unholy-modal-result"></div>
+        <button type="button" class="btn-next" id="turn-unholy-modal-roll-effect-btn" style="margin-top:8px; display:none;">🎲 Roll Result</button>
+        <div class="roll-modal-result" id="turn-unholy-modal-roll-result"></div>
       </div>
     </div>
   </div>
@@ -7562,12 +7564,87 @@ function rollTurnUnholyRow() {
   openTurnUnholyModal(total);
 }
 
+// Rolls one dice spec like "1d6" (roll 1d6) or a bare flat number like "1"
+// (no "d" - just that many, nothing to roll) - shared by the creature-
+// count and damage rolls below.
+function rollTurnUnholyDiceSpec(spec) {
+  const m = spec && spec.match(/^(\d+)(?:d(\d+))?$/);
+  if (!m) return 0;
+  const count = parseInt(m[1], 10);
+  if (!m[2]) return count;
+  const sides = parseInt(m[2], 10);
+  let total = 0;
+  for (let i = 0; i < count; i++) total += Math.floor(Math.random() * sides) + 1;
+  return total;
+}
+
+// Parses one Table 4-4 cell (TURN_UNHOLY_TABLE's own byHd codes, e.g.
+// "T1d8+CL, D1d4 (no save)", "K1d8+CL (no save)", "T1", "NE") into
+// structured pieces this modal both describes in plain language and
+// actually rolls - reading the table's own already-verified strings
+// directly rather than re-transcribing them into a second parallel
+// structured table, which is exactly where a typo could quietly diverge
+// from the verified source.
+function parseTurnUnholyCell(code) {
+  if (!code || code === "NE") return { type: "none" };
+  const noSave = /\(no save\)/.test(code);
+  const clean = code.replace(/\s*\(no save\)\s*/, "").trim();
+  const [countPart, damagePart] = clean.split(",").map(s => s.trim());
+  const countMatch = countPart.match(/^([TK])(\d+)(?:d(\d+))?(\+CL)?$/);
+  if (!countMatch) return { type: "none" };
+  const type = countMatch[1] === "K" ? "kill" : "turn";
+  const countSpec = countMatch[3] ? `${countMatch[2]}d${countMatch[3]}` : countMatch[2];
+  const plusCasterLevel = !!countMatch[4];
+  let damageSpec = null;
+  if (damagePart) {
+    const dm = damagePart.match(/^D(\d+)(?:d(\d+))?$/);
+    if (dm) damageSpec = dm[2] ? `${dm[1]}d${dm[2]}` : dm[1];
+  }
+  return { type, countSpec, plusCasterLevel, damageSpec, noSave };
+}
+
+// Builds the plain-language description of one Table 4-4 cell - no T/D/K/
+// NE/CL abbreviations, spelled out in full sentences instead - plus the
+// parsed data the "Roll Result" button's own click handler needs to
+// actually roll it.
+function describeTurnUnholyCell(code, level, total) {
+  const parsed = parseTurnUnholyCell(code);
+  if (parsed.type === "none") return { text: "No effect on creatures of this Hit Dice at this Spell Check total.", parsed };
+  // A flat count (no dice, e.g. "T1") is known exactly even before rolling
+  // anything, so it gets correct singular/plural agreement ("1 creature");
+  // a dice-based count ("1d6", or with the caster Level bonus folded in)
+  // can't be pinned down until it's actually rolled, so it stays plural as
+  // a general description of the formula, same as the table's own "T ="
+  // footnote text does.
+  const isFlatCount = /^\d+$/.test(parsed.countSpec) && !parsed.plusCasterLevel;
+  const creatureWord = isFlatCount && parseInt(parsed.countSpec, 10) === 1 ? "creature" : "creatures";
+  const countLabel = parsed.plusCasterLevel
+    ? `${parsed.countSpec} plus this cleric's own caster Level (currently ${level})`
+    : `${parsed.countSpec}`;
+  const saveText = parsed.noSave
+    ? "No saving throw is allowed."
+    : `Each affected creature may attempt a Will save (DC ${total}) to resist.`;
+  if (parsed.type === "kill") {
+    return { text: `Destroys ${countLabel} ${creatureWord} of this Hit Dice outright. ${saveText}`, parsed };
+  }
+  let text = `Turns ${countLabel} ${creatureWord} of this Hit Dice - each flees at maximum speed, or cowers if unable to retreat, for 3d10 minutes.`;
+  if (parsed.damageSpec) text += ` Each affected creature also takes ${parsed.damageSpec} damage immediately.`;
+  text += ` ${saveText}`;
+  return { text, parsed };
+}
+
 // Turn Unholy Table (Table 4-4) lookup modal - takes a Spell Check total
 // (pre-filled from the roll above, but freely re-editable) and a target
-// HD bracket, and shows Table 4-4's own Turn Range/Holy Smite/effect for
-// that combination. Kept re-usable rather than roll-and-discard since one
-// check total can apply to several different-HD creatures in a mixed
-// group.
+// HD bracket, and describes Table 4-4's own Turn Range/Holy Smite/effect
+// for that combination in plain language, live as either field changes.
+// Kept re-usable rather than roll-and-discard since one check total can
+// apply to several different-HD creatures in a mixed group. The actual
+// creature count (and damage, where it applies) is rolled separately, on
+// demand, via the Roll Result button below the description - NOT re-rolled
+// on every keystroke the way the description itself is, since that would
+// make the number change under the Judge's feet just from nudging the HD
+// dropdown to compare two possible targets.
+let turnUnholyModalParsed = null;
 function openTurnUnholyModal(prefillTotal) {
   const inputEl = document.getElementById("turn-unholy-modal-total-input");
   if (inputEl && typeof prefillTotal === "number") inputEl.value = String(prefillTotal);
@@ -7582,13 +7659,27 @@ function renderTurnUnholyModalResult() {
   const hd = document.getElementById("turn-unholy-modal-hd-select").value;
   const row = lookupTableRow(TURN_UNHOLY_TABLE, total);
   const resultEl = document.getElementById("turn-unholy-modal-result");
+  const rollBtn = document.getElementById("turn-unholy-modal-roll-effect-btn");
+  const rollResultEl = document.getElementById("turn-unholy-modal-roll-result");
+  // A previously-rolled count belongs to whatever Total/HD it was rolled
+  // for - once either changes, it no longer applies, so it's cleared
+  // rather than left sitting there looking like it still matches.
+  if (rollResultEl) rollResultEl.innerHTML = "";
   if (!resultEl) return;
   if (!row) {
     resultEl.innerHTML = "";
+    turnUnholyModalParsed = null;
+    if (rollBtn) rollBtn.style.display = "none";
     return;
   }
-  const effect = row.byHd[hd] || "NE";
-  resultEl.innerHTML = `<span class="roll-modal-result-roll">Check ${total} vs ${escapeHtml(hd)} HD</span> — <b>${escapeHtml(effect)}</b><br>Turn Range: ${escapeHtml(row.turnRange)} · Holy Smite: ${escapeHtml(row.holySmite)}`;
+  const levelEl = document.getElementById("pc-level");
+  const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
+  const { text, parsed } = describeTurnUnholyCell(row.byHd[hd] || "NE", level, total);
+  turnUnholyModalParsed = parsed;
+  const rangeText = row.turnRange && row.turnRange !== "-" ? `Turn Range ${row.turnRange}` : "No Turn Range at this total";
+  const smiteText = row.holySmite && row.holySmite !== "-" ? `Holy Smite: ${row.holySmite}` : "No Holy Smite at this total";
+  resultEl.innerHTML = `<span class="roll-modal-result-roll">Check ${total} vs ${escapeHtml(hd)} Hit Dice</span><br>${escapeHtml(text)}<br>${escapeHtml(rangeText)} · ${escapeHtml(smiteText)}`;
+  if (rollBtn) rollBtn.style.display = parsed.type === "none" ? "none" : "";
 }
 document.getElementById("turn-unholy-modal-close").addEventListener("click", closeTurnUnholyModal);
 document.getElementById("turn-unholy-modal-backdrop").addEventListener("click", (e) => {
@@ -7596,9 +7687,29 @@ document.getElementById("turn-unholy-modal-backdrop").addEventListener("click", 
 });
 document.getElementById("turn-unholy-modal-hd-select").addEventListener("change", renderTurnUnholyModalResult);
 // Live-updates as the Total is typed, same as the HD dropdown's own
-// "change" listener above - no separate Look Up button needed now that
-// both fields resolve Table 4-4 live.
+// "change" listener above.
 document.getElementById("turn-unholy-modal-total-input").addEventListener("input", renderTurnUnholyModalResult);
+// Actually rolls the creature count (and damage, if this cell has any)
+// using whichever cell renderTurnUnholyModalResult most recently parsed -
+// see openTurnUnholyModal's own comment for why this is a separate,
+// on-demand action rather than something the live description itself does.
+document.getElementById("turn-unholy-modal-roll-effect-btn").addEventListener("click", () => {
+  const parsed = turnUnholyModalParsed;
+  if (!parsed || parsed.type === "none") return;
+  const levelEl = document.getElementById("pc-level");
+  const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
+  const count = rollTurnUnholyDiceSpec(parsed.countSpec) + (parsed.plusCasterLevel ? level : 0);
+  const creatureWord = count === 1 ? "creature" : "creatures";
+  let text = parsed.type === "kill"
+    ? `Rolled result: ${count} ${creatureWord} destroyed outright.`
+    : `Rolled result: ${count} ${creatureWord} turned.`;
+  if (parsed.damageSpec) {
+    const damage = rollTurnUnholyDiceSpec(parsed.damageSpec);
+    text += ` Each also takes ${damage} damage.`;
+  }
+  const rollResultEl = document.getElementById("turn-unholy-modal-roll-result");
+  if (rollResultEl) rollResultEl.innerHTML = `<span class="roll-modal-result-roll">${escapeHtml(text)}</span>`;
+});
 
 // Maps each derived field to the ability field that feeds it, and (for
 // the three saves) the matching key into a DCC_CLASS_TABLES level row.
