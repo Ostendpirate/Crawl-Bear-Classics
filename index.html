@@ -1490,7 +1490,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 20:20</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-26 20:38</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1880,6 +1880,10 @@
         <fieldset id="pc-spells-fieldset">
           <legend>Spells</legend>
           <button type="button" class="open-spells-btn" id="open-spells-btn">🔮 Open Spells<span class="open-spells-count" id="open-spells-count"></span></button>
+          <div id="pc-patron-wrap" style="display:none; margin-top:8px;">
+            <div class="spell-section-header">Patron <span class="spell-section-hint">optional</span></div>
+            <input type="text" id="pc-patron" placeholder="e.g. a lord of a hidden fey court" title="Free text - which patron this Wizard/Elf is bonded to (DCC RPG core rulebook - specific patron names/write-ups are paid content, so this is player-filled like the Cleric Deity field). Knowing/casting Invoke Patron or Patron Bond (pick either from the spell list below - Table 5-8's own ** footnote: rolling either one grants BOTH, but they only cost one spell slot together) lets that patron's own three personal spells be picked too, grouped by name in the spell-name dropdown." />
+          </div>
           <div id="pc-corruption-notes-wrap" style="display:none; margin-top:8px;">
             <div class="spell-section-header">Corruption Effects <span class="spell-section-hint">optional</span></div>
             <textarea id="pc-corruption-notes" class="manifestation-note" placeholder="What each Corruption roll actually did to this character - permanent and cumulative, unlike a Spell Check's other one-off results." rows="2"></textarea>
@@ -2208,6 +2212,7 @@
           <button type="button" class="btn-next" id="corruption-modal-roll-btn">🎲 Roll</button>
         </div>
         <div class="roll-modal-result" id="corruption-modal-result"></div>
+        <button type="button" class="hp-btn" id="corruption-modal-luck-burn-btn" style="margin-top:8px; display:none;" title="Permanently burn 1 Luck to avoid this Corruption result entirely (DCC RPG core rulebook). Only works against Corruption itself - never a spell misfire.">🍀 Burn 1 Luck to Avoid</button>
       </div>
     </div>
   </div>
@@ -2439,7 +2444,7 @@ const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al", "montype"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-deity","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto"];
+const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-deity","pc-patron","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
 const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
@@ -6909,6 +6914,32 @@ function refreshPcLuckMaxNote() {
   noteEl.style.display = "";
 }
 
+// Burns 1 point of Luck live off the Sheet DOM - used by the Corruption
+// modal's own "🍀 Burn 1 Luck to Avoid" button (DCC RPG core rulebook: "A
+// wizard may burn 1 Luck, after seeing the result, to avoid it entirely" -
+// "Patron taint is considered corruption for these purposes" too, per the
+// same page). Snapshots pc-luckMax the same way applySpellburnLive
+// snapshots pc-spellburnMax, EXCEPT Luck already has its own single-number
+// field for this rather than a per-ability map (see refreshPcLuckMaxNote/
+// luckRecoverable) - so Thief/Halfling can still recover this same point
+// back on a later New Day, same as any other burned Luck. Returns the new
+// score, or null if there's no Luck score on file to burn.
+function burnPcLuckLive() {
+  const el = document.getElementById("pc-lck");
+  if (!el) return null;
+  const current = parseAbilityScore(el.value);
+  if (current === null) return null;
+  const maxEl = document.getElementById("pc-luckMax");
+  const existingMax = maxEl && maxEl.value !== "" ? parseInt(maxEl.value, 10) : NaN;
+  if (maxEl && !Number.isFinite(existingMax)) maxEl.value = String(current);
+  const newScore = current - 1;
+  el.value = `${newScore} (${formatSignedNumber(dccAbilityModifier(newScore))})`;
+  refreshDerivedPcFields();
+  refreshPcLuckMaxNote();
+  scheduleSave();
+  return newScore;
+}
+
 // Luck-specific sibling of spellburnRecoverableAbilities/recoverSpellburnAbility
 // - Thief and Halfling are the only classes with a DEFINED nightly Luck
 // recovery rate (DCC RPG core rulebook, their own class descriptions:
@@ -7752,10 +7783,20 @@ document.getElementById("luckburn-modal-backdrop").addEventListener("click", (e)
 document.getElementById("luckburn-modal-minus").addEventListener("click", luckBurnModalMinusClick);
 
 let corruptionModalTier = "minor";
+// The most recently rolled result's own display line (roll breakdown +
+// table text), kept so the Burn Luck button below can splice an "AVOIDED"
+// note onto the END of the SAME line rather than replacing it outright -
+// the roll itself still happened and still shows what it would have been,
+// same "the number is real, only its consequence is undone" spirit as
+// every other avoid/negate result elsewhere in this app. Cleared whenever
+// a fresh roll (or the modal reopening) makes the old one stale.
+let corruptionModalLastResultLine = "";
 
 function openCorruptionModal() {
   document.getElementById("corruption-modal-luck").textContent = formatSignedNumber(pcLuckModifierLive());
   document.getElementById("corruption-modal-result").innerHTML = "";
+  corruptionModalLastResultLine = "";
+  document.getElementById("corruption-modal-luck-burn-btn").style.display = "none";
   document.getElementById("corruption-modal-backdrop").style.display = "flex";
 }
 function closeCorruptionModal() {
@@ -7779,9 +7820,33 @@ document.getElementById("corruption-modal-roll-btn").addEventListener("click", (
   const total = d10 - level + luckMod;
   const table = CORRUPTION_TABLES[corruptionModalTier];
   const row = lookupTableRow(table, total);
-  document.getElementById("corruption-modal-result").innerHTML = row
+  const resultEl = document.getElementById("corruption-modal-result");
+  const burnBtn = document.getElementById("corruption-modal-luck-burn-btn");
+  corruptionModalLastResultLine = row
     ? `<span class="roll-modal-result-roll">d10 ${d10} − ${level} + ${luckMod} = ${total}</span> — ${escapeHtml(row.text)}`
     : "";
+  resultEl.innerHTML = corruptionModalLastResultLine;
+  // A wizard may burn 1 Luck, AFTER seeing the result, to avoid it
+  // entirely (this modal's own subtitle text) - "Patron taint is
+  // considered corruption for these purposes" too (same free-booklet page
+  // as Table 5-3), so this covers both. Only offered once there's an
+  // actual result to avoid.
+  burnBtn.style.display = row ? "" : "none";
+});
+document.getElementById("corruption-modal-luck-burn-btn").addEventListener("click", () => {
+  if (!corruptionModalLastResultLine) return;
+  const newScore = burnPcLuckLive();
+  if (newScore === null) {
+    showStatus("No Luck score on file to burn.", true, 4000);
+    return;
+  }
+  const resultEl = document.getElementById("corruption-modal-result");
+  resultEl.innerHTML = `${corruptionModalLastResultLine}<br><span class="roll-modal-result-roll">🍀 AVOIDED</span> - 1 Luck burned (now ${newScore}). This Corruption result does not apply.`;
+  // One burn per rolled result - same "can't double-dip the same roll"
+  // contract every other Burn Luck flow in this app follows.
+  corruptionModalLastResultLine = "";
+  document.getElementById("corruption-modal-luck-burn-btn").style.display = "none";
+  showStatus(`Burned 1 Luck to avoid Corruption (now ${newScore}).`, false, 6000);
 });
 
 // A Cleric's Disapproval Range (DCC RPG core rulebook, Cleric class
@@ -9133,7 +9198,7 @@ function dccSpellOptionsHtml(spellList, selectedValue, { extraKnownNames = [], e
   const groups = levels.map(level => {
     const disabledReason = isLevelDisabled ? isLevelDisabled(level) : null;
     const opts = spellList.filter(s => s.level === level).map(s => {
-      const label = `${s.name}${s.cleric ? "*" : ""} (p.${s.page})`;
+      const label = `${s.name}${s.cleric ? "*" : ""}${s.patron ? "**" : ""} (p.${s.page})`;
       const isSelected = s.name === selectedValue;
       const disabledAttr = disabledReason && !isSelected ? ` disabled title="${escapeHtml(disabledReason)}"` : "";
       return `<option value="${escapeHtml(s.name)}"${isSelected ? " selected" : ""}${disabledAttr}>${escapeHtml(label)}</option>`;
@@ -9815,7 +9880,7 @@ function spellRowHtml(item, index, allItems) {
     <div class="attack-row pc-attack-row" data-id="${item.id}" data-mercurial="${item.mercurial || ""}">
       <div class="attack-weapon-line">
         ${toggleBtnHtml}
-        <select class="attack-name spell-row-select"${isCustom ? ' style="display:none"' : ""}>${optionsHtml}</select>
+        <select class="attack-name spell-row-select"${isCustom ? ' style="display:none"' : ""} title="* = as per the cleric spell of the same name, at a different spell level (a -2 Spell Check penalty may apply - see that spell's own write-up). ** = Invoke Patron/Patron Bond (DCC RPG core rulebook) - rolling or picking either one grants BOTH spells, but the pair only costs a single spell slot together; picking one lets that patron's own personal spells (grouped further down the list) be picked too.">${optionsHtml}</select>
         <input type="text" class="attack-name spell-row-custom-name" placeholder="Custom spell name"${isCustom ? "" : ' style="display:none"'} value="${escapeHtml(isCustom ? item.name : "")}" />
         <button type="button" class="hp-btn spell-row-custom-back"${isCustom ? "" : ' style="display:none"'} title="Back to spell list">↩</button>
         ${mercurialBtnHtml}
@@ -10274,7 +10339,13 @@ document.getElementById("add-spell-pc").addEventListener("click", () => {
       capMessageForAdd = `Known Spells allotment reached (${capForAdd} total across all spell Levels, Table 1-5: Cleric) - remove one below before adding another, or the allotment grows with Level.`;
     }
   }
-  if (capForAdd !== null && readSpellItems().length >= capForAdd) {
+  // pcPatronSpellSlotDiscount: Invoke Patron + Patron Bond only cost one
+  // slot together once both are named (Table 5-8's own ** footnote) - see
+  // that function's own comment. Applied here the same way
+  // updateOpenSpellsCount applies it to the displayed count, so the two
+  // can't disagree about how much room is actually left.
+  const itemsForAdd = readSpellItems();
+  if (capForAdd !== null && (itemsForAdd.length - pcPatronSpellSlotDiscount(itemsForAdd)) >= capForAdd) {
     showStatus(capMessageForAdd, true, 6000);
     return;
   }
@@ -10340,6 +10411,18 @@ function recalcPcSpellSection() {
     corruptionNotesWrap.style.display = abilityId === "int" ? "" : "none";
     if (abilityId === "int") autoResizeTextarea(document.getElementById("pc-corruption-notes"));
   }
+  // Patron (DCC RPG core rulebook, Wizard/Elf only) - same Int-caster gate
+  // as Corruption just above (both are Wizard/Elf-specific consequences of
+  // spellcasting; Cleric has a deity instead - see pc-deity-wrap). Free
+  // text, not a fixed list - the actual named patrons/their write-ups are
+  // paid core-rulebook content (same reasoning DCC_CLERIC_DEITIES' own
+  // comment gives for why Deity is free text too), but this character's
+  // known Invoke Patron/Patron Bond spell and any of that patron's own
+  // personal spells (DCC_PATRON_SPELLS - name+page only, confirmed free)
+  // are already pickable from the ordinary spell-name dropdown regardless
+  // of whether this field is filled in.
+  const patronWrap = document.getElementById("pc-patron-wrap");
+  if (patronWrap) patronWrap.style.display = abilityId === "int" ? "" : "none";
   // Disapproval Range (see refreshPcDisapprovalRangeNote's own comment) -
   // same Cleric-only gate as the button itself, same passive every-render
   // refresh as Corruption Effects above (a range widened via a Tracker-tab
@@ -10374,6 +10457,21 @@ function recalcPcSpellSection() {
 // "(N/total)" with a per-spell-Level breakdown in the title instead, since
 // its cap is per-level rather than one pooled number (see
 // clericSpellsKnownAllotment).
+// Table 5-8's own ** footnote (DCC RPG core rulebook): rolling or picking
+// either Invoke Patron or Patron Bond grants BOTH spells, but the pair
+// only costs a single spell slot together (see dccSpellOptionsHtml's own
+// "**" marker on these two entries). Once both are named among a Wizard/
+// Elf's known spells, one slot's worth should be given back against
+// whatever count is being checked against the Known Spells allotment
+// (Table 1-12/1-16) - shared by updateOpenSpellsCount's own display and
+// the add-spell-pc button's cap check below, so the two can't disagree.
+// Never applies to Cleric (their spell list has neither name) or while
+// only one of the pair is named (the rule only kicks in once both are).
+function pcPatronSpellSlotDiscount(items) {
+  const named = items.filter(s => s.name && s.name.trim()).map(s => s.name.trim());
+  return (named.includes("Invoke patron") && named.includes("Patron bond")) ? 1 : 0;
+}
+
 function updateOpenSpellsCount() {
   const countEl = document.getElementById("open-spells-count");
   if (!countEl) return;
@@ -10386,14 +10484,15 @@ function updateOpenSpellsCount() {
     return;
   }
   const items = readSpellItems();
-  const known = items.filter(s => s.name && s.name.trim()).length;
+  const known = items.filter(s => s.name && s.name.trim()).length - pcPatronSpellSlotDiscount(items);
   const levelEl = document.getElementById("pc-level");
   if (cls === "Wizard" || cls === "Elf") {
     const allotment = intCasterSpellsKnownAllotment(cls, levelEl ? levelEl.value : "", abilityModifierFromField("pc-int"));
     if (allotment) {
       const tableCite = cls === "Wizard" ? "Table 1-12: Wizard" : "Table 1-16: Elf";
+      const patronDiscountNote = pcPatronSpellSlotDiscount(items) ? " Invoke Patron + Patron Bond only cost one slot together (Table 5-8's own ** footnote), already reflected in this count." : "";
       countEl.textContent = ` (${known}/${allotment.known})`;
-      countEl.title = `Known Spells (${tableCite}) - ${allotment.known} allowed at this Level + Intelligence modifier (${known} currently picked below). Max Spell Level you're eligible for: ${allotment.maxLevel}.`;
+      countEl.title = `Known Spells (${tableCite}) - ${allotment.known} allowed at this Level + Intelligence modifier (${known} currently picked below).${patronDiscountNote} Max Spell Level you're eligible for: ${allotment.maxLevel}.`;
       return;
     }
   } else if (cls === "Cleric") {
