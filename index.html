@@ -1516,7 +1516,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 14:34</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 15:32</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1869,6 +1869,12 @@
             </div>
           </div>
         </div>
+
+        <input type="hidden" id="pc-dying-state" value="" />
+        <input type="hidden" id="pc-dying-deadline-round" value="" />
+        <input type="hidden" id="pc-body-recovery-attempted" value="" />
+        <div class="fumble-die-note" id="pc-dying-note" style="display:none;"></div>
+        <button type="button" class="hp-btn" id="pc-recover-body-btn" style="display:none; margin-bottom:8px;" title="Recovering the Body (DCC RPG core rulebook) - if a dead ally reaches your body within one hour, you may make a Luck check (1d20 ≤ your Luck score) to find you were only badly hurt.">🎲 Recover the Body (Luck Check)</button>
 
         <div class="saves pc-saves">
           <div class="save-box">
@@ -2297,6 +2303,28 @@
     </div>
   </div>
 
+  <div id="recover-body-modal-backdrop" class="tables-modal-backdrop" style="display:none">
+    <div class="tables-modal">
+      <div class="tables-modal-header">
+        <div>
+          <div class="tables-modal-title">Recover the Body</div>
+          <div class="tables-modal-subtitle">Luck Check: roll 1d20, succeed on a result ≤ your Luck score (DCC RPG core rulebook). Only offered if a dead ally reaches your body within one hour of death - the judge's call, not enforced here. One attempt only.</div>
+        </div>
+        <button type="button" class="tables-modal-close" id="recover-body-modal-close" title="Close">×</button>
+      </div>
+      <div class="tables-modal-body">
+        <div class="roll-modal-inputs">
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">Luck Score</span>
+            <span class="roll-modal-static" id="recover-body-modal-luck">0</span>
+          </label>
+          <button type="button" class="btn-next" id="recover-body-modal-roll-btn">🎲 Roll</button>
+        </div>
+        <div class="roll-modal-result" id="recover-body-modal-result"></div>
+      </div>
+    </div>
+  </div>
+
   <div id="disapproval-modal-backdrop" class="tables-modal-backdrop" style="display:none">
     <div class="tables-modal">
       <div class="tables-modal-header">
@@ -2524,7 +2552,7 @@ const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al", "montype"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-luck-augur-roll","pc-luck-augur-mod","pc-luck-augur-hp-bonus-applied","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-favorite-weapon-luck","pc-elf-luck-spell-luck","pc-deity","pc-patron","pc-familiar-name","pc-familiar-category","pc-familiar-config","pc-familiar-personality","pc-familiar-hp","pc-familiar-hp-bonus-applied","pc-familiar-token-id","pc-familiar-unlocked","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto"];
+const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-luck-augur-roll","pc-luck-augur-mod","pc-luck-augur-hp-bonus-applied","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-favorite-weapon-luck","pc-elf-luck-spell-luck","pc-deity","pc-patron","pc-familiar-name","pc-familiar-category","pc-familiar-config","pc-familiar-personality","pc-familiar-hp","pc-familiar-hp-bonus-applied","pc-familiar-token-id","pc-familiar-unlocked","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto","pc-dying-state","pc-dying-deadline-round","pc-body-recovery-attempted"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
 const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level", "pc-elf-luck-spell"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
@@ -6483,6 +6511,12 @@ function renderPcStatline(d) {
   // contract as the rest of this block.
   refreshBirthAugurNote();
   applyLuckAugurHpBonus();
+  // Death/Bleeding Out (DCC RPG core rulebook) - same every-render-pass
+  // contract, so a cross-client HP change (Tracker, or another client's
+  // edit synced back via OBR) still gets caught even though the reactive
+  // calls in adjustHp/the hp-current input listener only fire for a
+  // LOCAL edit.
+  refreshPcDyingState();
   // Same reasoning, for the Deed Die row - Warrior/Dwarf only (see
   // updatePcDeedDieVisibility).
   updatePcDeedDieVisibility();
@@ -6791,13 +6825,17 @@ if (pcTrainedWeaponSyncBtn) {
   });
 }
 ["hp-current", "hp-max", "pc-hp-current", "pc-hp-max"].forEach(id => {
-  document.getElementById(id).addEventListener("input", scheduleSave);
+  document.getElementById(id).addEventListener("input", () => {
+    if (id === "pc-hp-current" || id === "pc-hp-max") refreshPcDyingState();
+    scheduleSave();
+  });
 });
 
 function adjustHp(curId, maxId, delta) {
   const el = document.getElementById(curId);
   const max = Number(document.getElementById(maxId).value) || Infinity;
   el.value = Math.max(0, Math.min(max, (Number(el.value) || 0) + delta));
+  if (curId === "pc-hp-current") refreshPcDyingState();
   scheduleSave();
 }
 
@@ -6805,6 +6843,185 @@ document.getElementById("hp-minus").addEventListener("click", () => adjustHp("hp
 document.getElementById("hp-plus").addEventListener("click", () => adjustHp("hp-current", "hp-max", 1));
 document.getElementById("pc-hp-minus").addEventListener("click", () => adjustHp("pc-hp-current", "pc-hp-max", -1));
 document.getElementById("pc-hp-plus").addEventListener("click", () => adjustHp("pc-hp-current", "pc-hp-max", 1));
+
+// "A character or monster dies when it reaches 0 hit points... a 1st-
+// level character that reaches 0 hit points collapses and begins
+// bleeding out" (DCC RPG core rulebook, Bleeding Out) - PC-only (a
+// monster's own hp-current/hp-max pair never runs through this). Level-
+// triggered rather than edge-triggered, so it doesn't matter HOW
+// pc-hp-current got to its current value (typed, the +/- buttons, or a
+// Tracker/OBR sync reflecting back onto this Sheet) - only its CURRENT
+// value plus whatever dying-state is already on file matters. Called
+// both reactively (adjustHp/the input listener above) and passively on
+// every render pass (see renderPcStatline's own call), the same "resync
+// every render" pattern refreshBirthAugurNote/syncFavoriteWeaponLuckSnapshot
+// already use, so a cross-client HP change still gets caught.
+function refreshPcDyingState() {
+  const hpEl = document.getElementById("pc-hp-current");
+  const hpMaxEl = document.getElementById("pc-hp-max");
+  const stateEl = document.getElementById("pc-dying-state");
+  const deadlineEl = document.getElementById("pc-dying-deadline-round");
+  const attemptedEl = document.getElementById("pc-body-recovery-attempted");
+  if (!hpEl || !hpMaxEl || !stateEl || !deadlineEl) return;
+  // Only meaningful once the character actually has HP on file - an
+  // in-progress sheet (blank hp-current/hp-max during character
+  // creation, where Number("") || 0 would otherwise read as "0 hp") must
+  // never look like "just reduced to 0 hp."
+  const hpMax = Number(hpMaxEl.value);
+  if (hpEl.value === "" || !Number.isFinite(hpMax) || hpMax <= 0) {
+    updatePcDyingBadge();
+    return;
+  }
+  const hp = Number(hpEl.value) || 0;
+  const state = stateEl.value || "";
+
+  if (hp <= 0 && state === "") {
+    // 0-level (or an unset/blank Level, treated the same way) is instant
+    // and irrevocable per RAW; 1st level+ instead starts the Bleeding Out
+    // countdown - "for each level past the first, one more round of
+    // bleeding" means the character can be saved through round
+    // (dropped-on-round + level), permanently dead once that's exceeded.
+    const levelEl = document.getElementById("pc-level");
+    const level = parseInt(levelEl ? levelEl.value : "", 10);
+    if (attemptedEl) attemptedEl.value = "";
+    if (Number.isFinite(level) && level >= 1) {
+      const deadline = (sceneState.round || 1) + level;
+      stateEl.value = "bleeding";
+      deadlineEl.value = String(deadline);
+      showStatus(`🩸 Reduced to 0 hp - bleeding out! Heal by round ${deadline} (${level} round${level === 1 ? "" : "s"}) or die permanently.`, true, 9000);
+    } else {
+      stateEl.value = "dead";
+      deadlineEl.value = "";
+      showStatus("💀 A 0-level character reduced to 0 hp is instantly, irrevocably killed.", true, 9000);
+    }
+    scheduleSave();
+  } else if (hp > 0 && state === "bleeding") {
+    // Saved in time - permanent trauma (DCC RPG core rulebook: "anyone
+    // who is saved from bleeding out suffers a permanent loss of 1 point
+    // of Stamina... and gains a terrible scar").
+    stateEl.value = "";
+    deadlineEl.value = "";
+    const newSta = applyPermanentAbilityPenaltyLive("sta", 1);
+    showStatus(`🩸 Saved from bleeding out! Permanent -1 Stamina${newSta !== null ? ` (now ${newSta})` : ""} and a terrible scar remain.`, true, 9000);
+    scheduleSave();
+  } else if (hp <= 0 && state === "bleeding") {
+    const deadline = parseInt(deadlineEl.value, 10);
+    const round = sceneState.round || 1;
+    if (Number.isFinite(deadline) && round > deadline) {
+      stateEl.value = "dead";
+      showStatus("💀 Bleeding out ran out - permanently killed.", true, 9000);
+      scheduleSave();
+    }
+  } else if (hp > 0 && state === "dead") {
+    // Something (a manual edit, an undo) put HP back above 0 without
+    // going through Recover the Body below - drop the stale 💀 marker
+    // rather than leaving it showing over a living character.
+    stateEl.value = "";
+    scheduleSave();
+  }
+  updatePcDyingBadge();
+}
+
+function updatePcDyingBadge() {
+  const noteEl = document.getElementById("pc-dying-note");
+  const btnEl = document.getElementById("pc-recover-body-btn");
+  if (!noteEl || !btnEl) return;
+  const stateEl = document.getElementById("pc-dying-state");
+  const deadlineEl = document.getElementById("pc-dying-deadline-round");
+  const attemptedEl = document.getElementById("pc-body-recovery-attempted");
+  const state = stateEl ? stateEl.value : "";
+  const attempted = attemptedEl ? attemptedEl.value === "1" : false;
+  if (state === "bleeding") {
+    const deadline = parseInt(deadlineEl ? deadlineEl.value : "", 10);
+    const round = sceneState.round || 1;
+    const roundsLeft = Number.isFinite(deadline) ? Math.max(0, deadline - round) : null;
+    noteEl.style.display = "";
+    noteEl.textContent = `🩸 Bleeding out - collapsed at 0 hp. Must be healed by round ${Number.isFinite(deadline) ? deadline : "?"}${roundsLeft !== null ? ` (${roundsLeft} round${roundsLeft === 1 ? "" : "s"} left)` : ""} or die permanently.`;
+    btnEl.style.display = "none";
+  } else if (state === "dead") {
+    noteEl.style.display = "";
+    noteEl.textContent = attempted ? "💀 Dead. (Recovering the Body already attempted.)" : "💀 Dead.";
+    btnEl.style.display = attempted ? "none" : "";
+  } else if (state === "groggy") {
+    noteEl.style.display = "";
+    noteEl.innerHTML = `😵 Revived, groggy from the ordeal - -4 to all rolls until the GM calls it an hour later. <button type="button" class="hp-btn" id="pc-clear-groggy-btn" style="margin-left:6px;">Clear</button>`;
+    btnEl.style.display = "none";
+  } else {
+    noteEl.style.display = "none";
+    noteEl.textContent = "";
+    btnEl.style.display = "none";
+  }
+}
+document.getElementById("pc-dying-note").addEventListener("click", (e) => {
+  if (e.target && e.target.id === "pc-clear-groggy-btn") {
+    const stateEl = document.getElementById("pc-dying-state");
+    if (stateEl) stateEl.value = "";
+    scheduleSave();
+    updatePcDyingBadge();
+  }
+});
+
+// Recovering the Body (DCC RPG core rulebook) - a stand-alone Luck check
+// (1d20 ≤ current Luck score), distinct from every other Luck mechanic in
+// this app (Burn Luck spends points to boost an ALREADY-rolled result;
+// this is a fresh roll against the raw score itself, same "roll equal to
+// or less than the character's Luck score on 1d20" language Table 1-2's
+// own text uses for a generic Luck check). Modeled on the Corruption
+// modal (openCorruptionModal) - a small fixed modal, no OBR-item cache
+// needed since this only ever acts on the currently-open Sheet's own
+// character.
+function openRecoverBodyModal() {
+  const luckScore = parseAbilityScore(document.getElementById("pc-lck").value);
+  document.getElementById("recover-body-modal-luck").textContent = luckScore === null ? "?" : String(luckScore);
+  document.getElementById("recover-body-modal-result").innerHTML = "";
+  document.getElementById("recover-body-modal-roll-btn").style.display = "";
+  document.getElementById("recover-body-modal-backdrop").style.display = "flex";
+}
+function closeRecoverBodyModal() {
+  document.getElementById("recover-body-modal-backdrop").style.display = "none";
+}
+document.getElementById("pc-recover-body-btn").addEventListener("click", openRecoverBodyModal);
+document.getElementById("recover-body-modal-close").addEventListener("click", closeRecoverBodyModal);
+document.getElementById("recover-body-modal-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "recover-body-modal-backdrop") closeRecoverBodyModal();
+});
+document.getElementById("recover-body-modal-roll-btn").addEventListener("click", () => {
+  const luckScore = parseAbilityScore(document.getElementById("pc-lck").value);
+  const resultEl = document.getElementById("recover-body-modal-result");
+  const rollBtn = document.getElementById("recover-body-modal-roll-btn");
+  if (luckScore === null) {
+    resultEl.innerHTML = "No Luck score on file to check against.";
+    return;
+  }
+  const d20 = Math.floor(Math.random() * 20) + 1;
+  const success = d20 <= luckScore;
+  const attemptedEl = document.getElementById("pc-body-recovery-attempted");
+  if (attemptedEl) attemptedEl.value = "1";
+  if (success) {
+    const hpEl = document.getElementById("pc-hp-current");
+    if (hpEl) hpEl.value = "1";
+    const stateEl = document.getElementById("pc-dying-state");
+    const deadlineEl = document.getElementById("pc-dying-deadline-round");
+    if (stateEl) stateEl.value = "groggy";
+    if (deadlineEl) deadlineEl.value = "";
+    // "A permanent -1 penalty to Strength, Agility, or Stamina
+    // (determine randomly)" - DCC RPG core rulebook.
+    const abilities = ["str", "agi", "sta"];
+    const pick = abilities[Math.floor(Math.random() * abilities.length)];
+    const abilityLabel = { str: "Strength", agi: "Agility", sta: "Stamina" }[pick];
+    const newScore = applyPermanentAbilityPenaltyLive(pick, 1);
+    resultEl.innerHTML = `🎲 d20 ${d20} vs Luck ${luckScore} — <strong>SUCCESS!</strong> Not truly dead - just badly hurt. Revived to 1 hp, groggy (-4 to all rolls) for the next hour, and a permanent -1 ${abilityLabel}${newScore !== null ? ` (now ${newScore})` : ""}.`;
+    showStatus(`🎲 Recover the Body: SUCCESS! Revived to 1 hp, permanent -1 ${abilityLabel}.`, false, 9000);
+  } else {
+    resultEl.innerHTML = `🎲 d20 ${d20} vs Luck ${luckScore} — Failed. They're truly gone.`;
+  }
+  // Refresh the Sheet's own badge/button either way - a failed attempt
+  // still needs to hide the (now one-shot-spent) Recover the Body button,
+  // not just a successful one.
+  updatePcDyingBadge();
+  rollBtn.style.display = "none";
+  scheduleSave();
+});
 
 // ---- DCC ability modifiers & derived-stat automation (Player mode) ----
 //
@@ -7384,6 +7601,26 @@ function applyFailedSpellburnLoss(ability) {
   refreshSpellAttackRows();
   scheduleSave();
   showStatus(`Failed Spellburn: ${spellburnAbilityLabel(ability)} permanently drops to ${newScore} (natural 1 while Spellburning).`, true, 8000);
+}
+
+// Permanently decrements one ability score - shared by Bleeding Out's
+// "saved but scarred" -1 Stamina and Recovering the Body's own random
+// stat drain (DCC RPG core rulebook, both cases). Same read/reformat
+// mechanics as applyFailedSpellburnLoss above, but NOT tied to
+// pc-spellburnMax's recovery-ceiling bookkeeping - this is a true
+// permanent loss, not a point burned FOR Spellburn that a later "New
+// Day" recovery pass should ever restore. Returns the new score, or null
+// if there's no score on file to reduce.
+function applyPermanentAbilityPenaltyLive(ability, amount) {
+  const el = document.getElementById(`pc-${ability}`);
+  if (!el) return null;
+  const current = parseAbilityScore(el.value);
+  if (current === null) return null;
+  const newScore = current - amount;
+  el.value = `${newScore} (${formatSignedNumber(dccAbilityModifier(newScore))})`;
+  refreshDerivedPcFields();
+  scheduleSave();
+  return newScore;
 }
 
 document.getElementById("failed-spellburn-modal-close").addEventListener("click", closeFailedSpellburnModal);
@@ -16612,6 +16849,10 @@ async function rollAttackFor(itemId, attackId, slotKey) {
       const critReasonText = backstabActive ? "🗡️ Backstab attack" : `Natural ${d20Roll}${wasForced ? " (GM-forced)" : ""}`;
       critLine = ` ${markCritAlert("💥 CRITICAL HIT!")} ${critReasonText}${autoHitNote}. ${critDieText ? `${critDieText} — ` : ""}${rowText}`;
     }
+    // "A successful attack always inflicts a minimum of 1 point of damage,
+    // even if the attacker has a negative Strength modifier" (DCC RPG core
+    // rulebook) - floored after every bonus (including a crit's) is added.
+    if (dmgTotal !== null) dmgTotal = Math.max(1, dmgTotal);
 
     const backstabModText = backstabActive && backstabBonus ? `${formatModifier(backstabBonus)}(backstab)` : "";
     const augurDamageModText = augurDamageMod ? `${formatModifier(augurDamageMod)}(Birth Augur)` : "";
@@ -16930,6 +17171,10 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
       const critReasonText = backstabActive ? "🗡️ Backstab attack" : `Natural ${roll}${forcedNote}`;
       critLine = ` ${markCritAlert("💥 CRITICAL HIT!")} ${critReasonText}${autoHitNote}. ${critDieText ? `${critDieText} — ` : ""}${rowText}`;
     }
+    // "A successful attack always inflicts a minimum of 1 point of damage,
+    // even if the attacker has a negative Strength modifier" (DCC RPG core
+    // rulebook) - see rollAttackFor's own identical comment.
+    if (dmgTotal !== null) dmgTotal = Math.max(1, dmgTotal);
 
     const backstabModText = backstabActive && backstabBonus ? `${formatModifier(backstabBonus)}(backstab)` : "";
     const augurDamageModText = augurDamageMod ? `${formatModifier(augurDamageMod)}(Birth Augur)` : "";
