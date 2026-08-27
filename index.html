@@ -1506,7 +1506,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 12:00</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 12:54</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -12492,6 +12492,18 @@ function pcLanguagesBonusCounts(cls, intMod, level) {
   if (isClassed && cls === "Wizard" && intMod > 0) {
     firstLevelBonus = intMod;
     firstLevelNote = `, +${firstLevelBonus} more at 1st level (Wizard: 1 per Int modifier point)`;
+  } else if (isClassed && cls === "Dwarf") {
+    // "A dwarf knows one additional language for every point of Int
+    // modifier" (DCC RPG core rulebook, Dwarf's own Languages entry) - ON
+    // TOP OF the flat "plus one additional randomly determined language"
+    // that same entry also grants, so a Dwarf's 1st-level bonus is
+    // 1 + Int modifier, not just the flat +1 every OTHER demi-human gets
+    // below - confirmed race-specific by the user's own pasted rule text,
+    // not an oversight to fold back into the generic case.
+    firstLevelBonus = 1 + Math.max(0, intMod);
+    firstLevelNote = intMod > 0
+      ? `, +${firstLevelBonus} more at 1st level (Dwarf: 1 randomly determined + 1 per Int modifier point)`
+      : ", +1 more at 1st level (Dwarf: 1 randomly determined language)";
   } else if (isClassed && isDemihuman) {
     firstLevelBonus = 1;
     firstLevelNote = ", +1 more at 1st level (Demi-human)";
