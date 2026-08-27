@@ -1506,7 +1506,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 11:48</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 12:00</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1819,6 +1819,8 @@
               <select id="pc-trained-weapon-select" style="display:none" title="A Warrior/Dwarf picks their Favorite Weapon from what they're actually trained in - adds their Luck modifier to the attack roll (not damage) whenever they use it."></select>
               <button type="button" class="derived-sync-btn" id="pc-trained-weapon-sync-btn" title="Set to this Occupation's Trained Weapon (Table 1-3)">↻</button>
             </div>
+            <div class="fumble-die-note" id="pc-favorite-weapon-luck-note" style="display:none; margin-top:4px;"></div>
+            <input type="hidden" id="pc-favorite-weapon-luck" value="" />
           </div>
           <div id="pc-deity-wrap" style="display:none">
             <label>Deity (Cleric)</label>
@@ -2501,7 +2503,7 @@ const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al", "montype"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-deity","pc-patron","pc-familiar-name","pc-familiar-category","pc-familiar-config","pc-familiar-personality","pc-familiar-hp","pc-familiar-hp-bonus-applied","pc-familiar-token-id","pc-familiar-unlocked","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto"];
+const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-favorite-weapon-luck","pc-deity","pc-patron","pc-familiar-name","pc-familiar-category","pc-familiar-config","pc-familiar-personality","pc-familiar-hp","pc-familiar-hp-bonus-applied","pc-familiar-token-id","pc-familiar-unlocked","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
 const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
@@ -4854,6 +4856,64 @@ function isFavoriteWeaponMatchLive(atk) {
   return isFavoriteWeaponMatch({ mode: "pc", data: { class: classEl ? classEl.value : "", "trained-weapon": favEl ? favEl.value : "" } }, atk);
 }
 
+// A Favorite Weapon's Luck bonus (DCC RPG core rulebook, Table 1-10/1-14
+// "Luck"): "chosen at first level and the modifier is fixed at its
+// starting value - neither the weapon nor the modifier changes over the
+// course of the warrior's career." pc-favorite-weapon-luck holds that
+// frozen value (see syncFavoriteWeaponLuckSnapshot for where it gets
+// captured); this reads it back, falling back to the character's current
+// live Luck only if nothing's been snapshotted yet (shouldn't normally
+// happen once the passive resync has run at least once, but a fresh
+// render before that first pass still needs SOME number to show).
+function favoriteWeaponLuckModLive() {
+  const frozenEl = document.getElementById("pc-favorite-weapon-luck");
+  if (frozenEl && frozenEl.value.trim() !== "") {
+    const n = parseInt(frozenEl.value, 10);
+    if (Number.isFinite(n)) return n;
+  }
+  return pcLuckModifierLive();
+}
+// Stats-based sibling of favoriteWeaponLuckModLive, for the Combat
+// Tracker (trackerLineHtml) - same frozen-value contract, sourced from
+// the token's own saved data instead of the live Sheet DOM.
+function favoriteWeaponLuckModForStats(stats) {
+  const raw = stats.data["favorite-weapon-luck"];
+  if (raw !== undefined && raw !== null && String(raw).trim() !== "") {
+    const n = parseInt(raw, 10);
+    if (Number.isFinite(n)) return n;
+  }
+  return abilityModifierFromRaw(stats.data.lck);
+}
+// Captures pc-favorite-weapon-luck the first time a Favorite Weapon is on
+// file with nothing snapshotted yet - passive, every-render-pass resync
+// (called alongside updatePcTrainedWeaponVisibility) rather than only on
+// the <select>'s own change event, so an already-saved character
+// (Favorite Weapon picked before this snapshot existed) gets backfilled
+// with their CURRENT Luck as the best available stand-in for whatever it
+// truly was back at level 1 - same "can't know the real historical
+// value, so snapshot what's on file now" approach pc-spellburnMax already
+// uses for a Wizard's true (pre-Spellburn) ability scores. Also keeps the
+// small note under the dropdown in sync with whatever's actually locked
+// in, or hidden entirely when there's nothing to show yet.
+function syncFavoriteWeaponLuckSnapshot() {
+  const noteEl = document.getElementById("pc-favorite-weapon-luck-note");
+  const classEl = document.getElementById("pc-class");
+  const cls = classEl ? classEl.value.trim() : "";
+  const favEl = document.getElementById("pc-trained-weapon");
+  const frozenEl = document.getElementById("pc-favorite-weapon-luck");
+  if (!FAVORITE_WEAPON_CLASSES.includes(cls) || !favEl || !favEl.value.trim()) {
+    if (noteEl) noteEl.style.display = "none";
+    return;
+  }
+  if (frozenEl && frozenEl.value.trim() === "") {
+    frozenEl.value = String(pcLuckModifierLive());
+  }
+  if (noteEl) {
+    noteEl.style.display = "";
+    noteEl.textContent = `Locked Luck bonus for this weapon: ${formatSignedNumber(favoriteWeaponLuckModLive())} (fixed since first chosen - doesn't change even if Luck does later).`;
+  }
+}
+
 // Combines an ability modifier with this class/level's Attack bonus into
 // the text that goes in an attack row's Bonus field. Cleric/Thief/
 // Halfling/Wizard/Elf have a flat numeric Attack bonus that adds straight
@@ -4874,7 +4934,7 @@ function composedAttackBonusText(abilityFieldId, atk) {
   const abilityMod = abilityModifierFromField(abilityFieldId);
   const entry = currentClassLevelEntry();
   const classAttack = entry && typeof entry.attack === "number" ? entry.attack : 0;
-  const luckMod = atk && isFavoriteWeaponMatchLive(atk) ? abilityModifierFromField("pc-lck") : 0;
+  const luckMod = atk && isFavoriteWeaponMatchLive(atk) ? favoriteWeaponLuckModLive() : 0;
   return formatSignedNumber(abilityMod + classAttack + luckMod);
 }
 
@@ -4905,7 +4965,7 @@ function attackBonusBreakdownTooltip(atk, abilitySourceId, currentBonusText, isA
   const isDeedClass = entry && typeof entry.attack === "string";
   const classAttack = entry && typeof entry.attack === "number" ? entry.attack : 0;
   const isFav = isFavoriteWeaponMatchLive(atk);
-  const lckMod = isFav ? abilityModifierFromField("pc-lck") : 0;
+  const lckMod = isFav ? favoriteWeaponLuckModLive() : 0;
 
   const sumParts = [`${abilityLabel} ${formatSignedNumber(abilityMod)}`];
   if (clsLabel && lvlLabel && entry && !isDeedClass) {
@@ -4940,7 +5000,7 @@ function attackBonusBreakdownTooltipForStats(stats, atk) {
   const isDeedClass = classEntry && typeof classEntry.attack === "string";
   const classAttack = classEntry && typeof classEntry.attack === "number" ? classEntry.attack : 0;
   const isFav = isFavoriteWeaponMatch(stats, atk);
-  const lckMod = isFav ? abilityModifierFromRaw(stats.data.lck) : 0;
+  const lckMod = isFav ? favoriteWeaponLuckModForStats(stats) : 0;
 
   const sumParts = [`${abilityLabel} ${formatSignedNumber(abilityMod)}`];
   if (clsLabel && lvlLabel && classEntry && !isDeedClass) {
@@ -5327,9 +5387,9 @@ function attackRowHtml(atk, mode) {
   // field above) adds their Luck modifier to THIS attack's to-hit roll
   // only, never damage - see isFavoriteWeaponMatch.
   if (isFavoriteWeaponMatchLive(atk)) {
-    const lckMod = abilityModifierFromField("pc-lck");
+    const lckMod = favoriteWeaponLuckModLive();
     const lckModDisplay = lckMod >= 0 ? `+${lckMod}` : `${lckMod}`;
-    badges.push(`<span class="weapon-badge weapon-badge-favorite" title="Favorite weapon - adds this character's Luck modifier (${lckModDisplay}) to the attack roll, not damage.">Favorite (Lck${lckModDisplay})</span>`);
+    badges.push(`<span class="weapon-badge weapon-badge-favorite" title="Favorite weapon - adds this character's Luck modifier as it was when first chosen (${lckModDisplay}, fixed for their career) to the attack roll, not damage.">Favorite (Lck${lckModDisplay})</span>`);
   }
   const twSelectTitle = shieldEquipped
     ? "Two-weapon fighting (Table 4-3) is unavailable while a Shield is Equipped (Armor tab) - no free hand left for a second weapon."
@@ -6364,6 +6424,12 @@ function renderPcStatline(d) {
   // needs to run on every render, not just a Class change, so it's also
   // correct right after loading a different token.
   updatePcTrainedWeaponVisibility();
+  // Snapshots/displays the Favorite Weapon's frozen Luck bonus (see
+  // syncFavoriteWeaponLuckSnapshot's own comment) - same every-render-pass
+  // contract as updatePcTrainedWeaponVisibility just above, which this
+  // depends on having already run this pass (it reads the same Favorite
+  // Weapon value that call keeps current).
+  syncFavoriteWeaponLuckSnapshot();
   // Same reasoning, for the Deed Die row - Warrior/Dwarf only (see
   // updatePcDeedDieVisibility).
   updatePcDeedDieVisibility();
@@ -6635,6 +6701,16 @@ if (pcTrainedWeaponSelectEl) {
     if (pcTrainedWeaponEl) {
       pcTrainedWeaponEl.value = pcTrainedWeaponSelectEl.value;
       pcTrainedWeaponEl.dataset.autoSynced = "0";
+    }
+    // Blanking the pick (back to "— (pick a favorite weapon)") means
+    // nothing is locked in yet - clear the frozen Luck value too, so
+    // choosing one again captures a FRESH snapshot instead of reusing
+    // whatever got frozen for a previous, now-abandoned pick (see
+    // syncFavoriteWeaponLuckSnapshot, which only ever fills a blank
+    // frozen field, never overwrites one that's already set).
+    if (!pcTrainedWeaponSelectEl.value) {
+      const frozenEl = document.getElementById("pc-favorite-weapon-luck");
+      if (frozenEl) frozenEl.value = "";
     }
     // A new Favorite Weapon changes which row(s) get its Luck bonus folded
     // into their Bonus field (see composedAttackBonusText) - resync every
@@ -15304,8 +15380,8 @@ function trackerLineHtml(item, stats, line) {
       badges.push(`<span class="weapon-badge weapon-badge-poisoned" title="Poisoned blade - a natural 1 on an attack roll with this weapon also poisons the thief themself, on top of any Fumble result. Toggle it off on the Sheet's Attacks list once the blade's been wiped clean or the dose runs out.">☠️ Poisoned</span>`);
     }
     if (isFavoriteWeaponMatch(stats, atk)) {
-      const lckMod = abilityModifierFromRaw(stats.data.lck);
-      badges.push(`<span class="weapon-badge weapon-badge-favorite" title="Favorite weapon - adds this character's Luck modifier (${formatSignedNumber(lckMod)}) to the attack roll, not damage.">Favorite (Lck${formatSignedNumber(lckMod)})</span>`);
+      const lckMod = favoriteWeaponLuckModForStats(stats);
+      badges.push(`<span class="weapon-badge weapon-badge-favorite" title="Favorite weapon - adds this character's Luck modifier as it was when first chosen (${formatSignedNumber(lckMod)}, fixed for their career) to the attack roll, not damage.">Favorite (Lck${formatSignedNumber(lckMod)})</span>`);
     }
     // Ammo (opt-in per row - see ammoLineHtml on the Sheet). A blank Ammo
     // field means untracked/unlimited, so most ranged rows show nothing
