@@ -1595,7 +1595,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 16:03</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 17:08</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -13515,8 +13515,12 @@ function pcLanguagesBonusCounts(cls, intMod, level) {
   let firstLevelBonus = 0;
   let firstLevelNote = "";
   if (isClassed && cls === "Wizard" && intMod > 0) {
-    firstLevelBonus = intMod;
-    firstLevelNote = `, +${firstLevelBonus} more at 1st level (Wizard: 1 per Int modifier point)`;
+    // "A wizard knows two additional languages for every point of Int
+    // modifier" (DCC RPG core rulebook) - double the demi-human rate, and
+    // with no separate "+1 randomly determined" base bonus the way
+    // Dwarf/Elf/Halfling get.
+    firstLevelBonus = intMod * 2;
+    firstLevelNote = `, +${firstLevelBonus} more at 1st level (Wizard: 2 per Int modifier point)`;
   } else if (isClassed && isDemihuman) {
     // Each demi-human's own Languages entry (DCC RPG core rulebook -
     // Dwarf/Elf/Halfling all confirmed by the user's own pasted rule text
