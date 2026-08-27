@@ -1516,7 +1516,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 14:07</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 14:34</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -5165,7 +5165,7 @@ function weaponOptionsHtml(selectedKey) {
 }
 
 function emptyAttack() {
-  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false, deedType: "", deedCustom: "", actionDieIndex: "", lineDeeds: {}, ammo: "", poisoned: false, luckLastRoll: {} };
+  return { id: "a" + Math.random().toString(36).slice(2, 9), name: "", bonus: "", damage: "", weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "", damageStrApplies: false, twoWeaponRole: "", backstabActive: false, deedType: "", deedCustom: "", actionDieIndex: "", lineDeeds: {}, ammo: "", poisoned: false, luckLastRoll: {}, fumblePending: {} };
 }
 
 // Backstab (Thief, Table 3-1) and Mighty Deed of Arms (Warrior/Dwarf,
@@ -5482,9 +5482,14 @@ function attackRowHtml(atk, mode) {
   // that Log button to adjust, hence data-luck-last-roll below (round-
   // tripped by readAttacks() into atk.luckLastRoll, see its own comment).
   const luckLastRollAttr = escapeHtml(JSON.stringify(atk.luckLastRoll || {}));
+  // Table 4-2, Warrior/Dwarf only - same round-trip reasoning as
+  // luckLastRoll above, for the "burn 1 Luck to cancel this fumble"
+  // pending flag (weapon rows only - only rollAttackFor/rollTwoWeaponAttack
+  // ever set this, so no other row type needs it).
+  const fumblePendingAttr = escapeHtml(JSON.stringify(atk.fumblePending || {}));
 
   return `
-    <div class="attack-row pc-attack-row${atk.equipped ? " equipped" : ""}" data-id="${atk.id}" data-line-deeds="${lineDeedsAttr}" data-luck-last-roll="${luckLastRollAttr}">
+    <div class="attack-row pc-attack-row${atk.equipped ? " equipped" : ""}" data-id="${atk.id}" data-line-deeds="${lineDeedsAttr}" data-luck-last-roll="${luckLastRollAttr}" data-fumble-pending="${fumblePendingAttr}">
       <div class="attack-weapon-line">
         <input type="checkbox" class="attack-equipped" ${atk.equipped ? "checked" : ""} title="Currently wielded - normally one weapon at a time, but a configured two-weapon Primary+Off-hand pair can both be equipped - this is what determines your Initiative Die" />
         <select class="attack-weapon">${weaponOptionsHtml(atk.weapon)}</select>
@@ -5658,6 +5663,16 @@ function readAttacks(mode) {
         base.luckLastRoll = JSON.parse(row.dataset.luckLastRoll || "{}");
       } catch (e) {
         base.luckLastRoll = {};
+      }
+      // Table 4-2 (DCC RPG core rulebook), Warrior/Dwarf only - cached
+      // "this fumble hasn't been cancelled yet" flag, per Action Die slot,
+      // same round-trip reasoning as luckLastRoll just above (only ever
+      // set on a weapon row via data-fumble-pending - other row types
+      // never fumble, so this just defaults to {} for them).
+      try {
+        base.fumblePending = JSON.parse(row.dataset.fumblePending || "{}");
+      } catch (e) {
+        base.fumblePending = {};
       }
     }
     return base;
@@ -16358,6 +16373,12 @@ function fumbleDieForStats(stats) {
     : 4;
 }
 
+// "Warriors and dwarves, and only warriors and dwarves, may burn 1 point
+// of Luck to cancel a roll on table 4-2: Fumbles" (DCC RPG core rulebook).
+function fumbleCancelClassEligible(cls) {
+  return cls === "Warrior" || cls === "Dwarf";
+}
+
 // GM-only testing aid (Dice tab > "GM Testing") - lets the GM dictate the
 // next attack's d20 result instead of leaving it to Math.random(), so crit/
 // fumble outcomes (and the table lookups/alerts they trigger) can be
@@ -16489,28 +16510,39 @@ async function rollAttackFor(itemId, attackId, slotKey) {
   let text, label;
   // Burning Luck (DCC RPG core rulebook) - set below only on a genuine
   // hit-or-miss-but-not-fumble result (see setLuckLastRollForStats' own
-  // call site further down); a natural 1 never gets cached at all, since
-  // Luck has no power to override an automatic miss.
+  // call site further down); a natural 1 never gets cached for the
+  // "boost this total" Burn Luck flow, since Luck has no power to
+  // override an automatic miss. A fumble gets its own, different Luck
+  // hook instead - see fumbleCancelEligible below (Table 4-2's
+  // Warrior/Dwarf-only "burn 1 Luck to cancel the fumble table's
+  // effects" rule).
   let luckCacheTotal = null;
+  // Table 4-2 (DCC RPG core rulebook), Warrior/Dwarf only - whether THIS
+  // fumble (if it turns out to be one) offers the Log's "burn 1 Luck to
+  // cancel" button. See setFumblePendingForStats/handleFumbleCancelClick.
+  let fumbleCancelEligible = false;
 
   if (isFumble) {
     // Automatic miss - no damage is rolled at all, just the Fumble Die.
     const fumbleDie = fumbleDieForStats(stats);
     const fumbleRoll = rollDamage(`1d${fumbleDie}`);
-    const fumbleRow = fumbleRoll ? lookupTableRow(FUMBLE_TABLE, fumbleRoll.total) : null;
+    // Table 4-2 (DCC RPG core rulebook): "Because 'lower is better' on
+    // fumble table rolls, the roll is modified by the reverse of the
+    // character's Luck" (e.g. a +1 Luck modifier becomes -1 here).
+    // PC-only - a monster fumble has no Luck to reverse.
+    const fumbleLuckMod = stats.mode === "pc" ? -abilityModifierFromRaw(stats.data.lck) : 0;
+    const fumbleTotal = fumbleRoll !== null ? fumbleRoll.total + fumbleLuckMod : null;
+    const fumbleRow = fumbleTotal !== null ? lookupTableRow(FUMBLE_TABLE, fumbleTotal) : null;
     if (fumbleRoll) rollDice.push(...fumbleRoll.dice);
     const rowText = fumbleRow ? fumbleRow.text : "";
+    const fumbleLuckNote = fumbleLuckMod ? ` ${formatSignedNumber(fumbleLuckMod)} Luck` : "";
     // "On a natural 1 on any attack roll with a poisoned blade, the thief
     // automatically poisons themself, in addition to any fumble results" -
     // atk.poisoned is a persistent per-weapon flag (see attackRowHtml's
     // poisonedToggleHtml), independent of the Fumble Die/table above.
     const poisonNote = atk.poisoned ? " ☠️ The poisoned blade turns on its wielder too - you're poisoned!" : "";
-    // A natural 1 is an automatic miss regardless of modifiers, and DCC
-    // RAW gives Luck no power to override that - so this roll never gets
-    // cached for a later Burn Luck adjustment at all (see setLuckLastRollForStats
-    // below, skipped entirely on this branch); the button just tells the
-    // player to roll again if clicked right after a fumble.
-    text = `${atk.name || "Attack"}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${wasForced ? " (GM-forced)" : ""} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}).${untrainedNote} ${rowText}${poisonNote}`;
+    fumbleCancelEligible = stats.mode === "pc" && fumbleCancelClassEligible(stats.data.class);
+    text = `${atk.name || "Attack"}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${wasForced ? " (GM-forced)" : ""} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}${fumbleLuckNote}${fumbleTotal !== null ? ` = ${fumbleTotal}` : ""}).${untrainedNote} ${rowText}${poisonNote}`;
     label = "💀 FUMBLE! Natural 1 — automatic miss";
   } else {
     // Fresh Deed Die roll for THIS attack - see rollDeedDieForStats (no
@@ -16608,9 +16640,12 @@ async function rollAttackFor(itemId, attackId, slotKey) {
   // so a follow-up Burn Luck click can retroactively boost it (see
   // openLuckBurnModal's own comment on the after-the-roll design). Never
   // set on a fumble (luckCacheTotal stays null - see its own declaration
-  // above).
+  // above). A fumble instead sets the separate fumbleCancelPending flag,
+  // Warrior/Dwarf only (Table 4-2).
   if (luckCacheTotal !== null) {
     await setLuckLastRollForStats(itemId, attackId, effectiveSlotKey, luckCacheTotal, atk.name || "Attack");
+  } else if (fumbleCancelEligible) {
+    await setFumblePendingForStats(itemId, attackId, effectiveSlotKey);
   }
 
   // This attack's Action Die has now been spent this round - hide this
@@ -16637,12 +16672,12 @@ async function rollAttackFor(itemId, attackId, slotKey) {
   showTrackerStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
   showStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
   // luckTargets (see chatEntryHtml/attackOrSpellLuckBurnCtx's own comments)
-  // - lets this Log entry offer its own 🍀 Burn Luck button. Empty on a
-  // fumble, same "Luck can't override an automatic miss" reasoning
-  // luckCacheTotal itself follows above.
+  // - lets this Log entry offer its own 🍀 Burn Luck button. On a fumble
+  // this is instead a "fumbleCancel" target (Warrior/Dwarf only, Table
+  // 4-2) - see fumbleCancelEligible/handleFumbleCancelClick.
   const luckTargets = luckCacheTotal !== null
     ? [{ type: "attack", itemId, attackId, slotKey: effectiveSlotKey, chatKind: "attack", label: atk.name || "Attack" }]
-    : [];
+    : (fumbleCancelEligible ? [{ type: "fumbleCancel", itemId, attackId, slotKey: effectiveSlotKey, label: atk.name || "Attack" }] : []);
   await appendChatLog({
     kind: "attack",
     tokenName: item.name || "Token",
@@ -16749,6 +16784,15 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
   // can't override an automatic miss" reasoning single-weapon
   // rollAttackFor's own luckCacheTotal follows.
   const luckCacheQueue = [];
+  // Table 4-2 (DCC RPG core rulebook), Warrior/Dwarf only - whether this
+  // character can even be offered the "burn 1 Luck to cancel a fumble"
+  // button, checked once since it's the same character for both hands.
+  // Two-weapon fighting is PC-only, so stats.data.class is always
+  // meaningful here.
+  const twFumbleCancelEligible = fumbleCancelClassEligible(stats.data.class);
+  // Queued exactly like luckCacheQueue above, but for hands that FUMBLED
+  // rather than hit - see setFumblePendingForStats/handleFumbleCancelClick.
+  const fumbleCancelQueue = [];
 
   function resolveHand(atk, roll, sides, isPrimary) {
     const lineState = getLineDeedState(atk, slotKey);
@@ -16778,10 +16822,16 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
       anyFumble = true;
       const fumbleDie = fumbleDieForStats(stats);
       const fumbleRoll = rollDamage(`1d${fumbleDie}`);
-      const fumbleRow = fumbleRoll ? lookupTableRow(FUMBLE_TABLE, fumbleRoll.total) : null;
+      // Table 4-2 (DCC RPG core rulebook) - reverse-Luck modifier, see
+      // rollAttackFor's own identical comment.
+      const fumbleLuckMod = -abilityModifierFromRaw(stats.data.lck);
+      const fumbleTotal = fumbleRoll !== null ? fumbleRoll.total + fumbleLuckMod : null;
+      const fumbleRow = fumbleTotal !== null ? lookupTableRow(FUMBLE_TABLE, fumbleTotal) : null;
       if (fumbleRoll) rollDice.push(...fumbleRoll.dice);
       const rowText = fumbleRow ? fumbleRow.text : "";
-      return `${label}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${forcedNote} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}). ${rowText}${poisonNote}`;
+      const fumbleLuckNote = fumbleLuckMod ? ` ${formatSignedNumber(fumbleLuckMod)} Luck` : "";
+      if (twFumbleCancelEligible) fumbleCancelQueue.push({ attackId: atk.id, label: atk.name || label });
+      return `${label}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${forcedNote} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}${fumbleLuckNote}${fumbleTotal !== null ? ` = ${fumbleTotal}` : ""}). ${rowText}${poisonNote}`;
     }
     if (isPlainMiss) {
       return `${label}: Natural 1${forcedNote} — miss (Halfling two-weapon fighting: a lone natural 1 doesn't fumble by itself).${poisonNote}`;
@@ -16896,9 +16946,17 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     anyFumble = true;
     const fumbleDie = fumbleDieForStats(stats);
     const fumbleRoll = rollDamage(`1d${fumbleDie}`);
-    const fumbleRow = fumbleRoll ? lookupTableRow(FUMBLE_TABLE, fumbleRoll.total) : null;
+    // Table 4-2 (DCC RPG core rulebook) - reverse-Luck modifier, see
+    // rollAttackFor's own identical comment. No fumbleCancel queuing on
+    // this branch - it can only ever trigger for a Halfling (the only
+    // class with this double-fumble rule), and Halfling is never Warrior
+    // or Dwarf, so the cancel option never applies here.
+    const fumbleLuckMod = -abilityModifierFromRaw(stats.data.lck);
+    const fumbleTotal = fumbleRoll !== null ? fumbleRoll.total + fumbleLuckMod : null;
+    const fumbleRow = fumbleTotal !== null ? lookupTableRow(FUMBLE_TABLE, fumbleTotal) : null;
     if (fumbleRoll) rollDice.push(...fumbleRoll.dice);
     const rowText = fumbleRow ? fumbleRow.text : "";
+    const fumbleLuckNote = fumbleLuckMod ? ` ${formatSignedNumber(fumbleLuckMod)} Luck` : "";
     // Both hands rolled a natural 1 here, so either (or both) weapon's own
     // poison can turn on its wielder - same rule as resolveHand's own
     // poisonNote, just checked for each weapon independently since this
@@ -16913,7 +16971,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     // 1s resolve as ONE shared Fumble Die instead) - nothing gets queued
     // in luckCacheQueue for either hand, same "Luck can't override an
     // automatic miss" reasoning resolveHand's own fumble branch follows.
-    fumbleNote = `${markFumbleAlert("💀 FUMBLE!")} Both hands rolled natural 1s${wasForced ? " (primary GM-forced)" : ""} — automatic miss with both weapons (Halfling two-weapon fighting; Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}). ${rowText}${poisonNote}`;
+    fumbleNote = `${markFumbleAlert("💀 FUMBLE!")} Both hands rolled natural 1s${wasForced ? " (primary GM-forced)" : ""} — automatic miss with both weapons (Halfling two-weapon fighting; Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}${fumbleLuckNote}${fumbleTotal !== null ? ` = ${fumbleTotal}` : ""}). ${rowText}${poisonNote}`;
     primaryText = `${primaryAtk.name || "Primary hand"}: natural 1`;
     offhandText = `${offhandAtk.name || "Off-hand"}: natural 1`;
   } else {
@@ -16940,6 +16998,12 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
   for (const cached of luckCacheQueue) {
     await setLuckLastRollForStats(itemId, cached.attackId, slotKey, cached.total, cached.label);
   }
+  // Table 4-2 (DCC RPG core rulebook), Warrior/Dwarf only - same
+  // fumbleCancelPending flag as single-weapon rollAttackFor, one per hand
+  // that actually fumbled.
+  for (const cancel of fumbleCancelQueue) {
+    await setFumblePendingForStats(itemId, cancel.attackId, slotKey);
+  }
 
   // This whole pair-at-this-Action-Die has now been used this round - both
   // hands' lines (and any weapon/spell line sharing this same Action Die)
@@ -16956,8 +17020,13 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
   showStatus(`${item.name || "Token"} — ${text}`, false, rollDuration);
   // luckTargets (see chatEntryHtml's own comment) - up to one PER HAND
   // (luckCacheQueue), so a two-weapon Log entry can offer a separate 🍀
-  // button for each hand that actually connected.
-  const luckTargets = luckCacheQueue.map(cached => ({ type: "attack", itemId, attackId: cached.attackId, slotKey, chatKind: "attack", label: cached.label }));
+  // button for each hand that actually connected. A fumbled hand instead
+  // contributes a "fumbleCancel" target (fumbleCancelQueue), Warrior/Dwarf
+  // only.
+  const luckTargets = [
+    ...luckCacheQueue.map(cached => ({ type: "attack", itemId, attackId: cached.attackId, slotKey, chatKind: "attack", label: cached.label })),
+    ...fumbleCancelQueue.map(cancel => ({ type: "fumbleCancel", itemId, attackId: cancel.attackId, slotKey, label: cancel.label })),
+  ];
   await appendChatLog({
     kind: "attack",
     tokenName: item.name || "Token",
@@ -17289,6 +17358,80 @@ async function clearLuckLastRollForStats(itemId, attackId, slotKey) {
       item.metadata[PC_METADATA_KEY] = data;
     });
   });
+}
+
+// Table 4-2 (DCC RPG core rulebook), Warrior/Dwarf only - same
+// per-attack/per-slot cache shape as luckLastRoll above, but a plain
+// boolean flag rather than a {total,label} pair: there's nothing to
+// preview or boost here, just a one-time "has this specific fumble
+// already been resolved (cancelled, or never offered to begin with)"
+// gate, re-checked live on every click (see handleFumbleCancelClick) so a
+// stale/duplicated Log button can never burn Luck twice for the same
+// fumble.
+async function setFumblePendingForStats(itemId, attackId, slotKey) {
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      if (mode !== "pc") return;
+      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+      data.attacks = (data.attacks || []).map(a => {
+        if (a.id !== attackId) return a;
+        const byslot = { ...(a.fumblePending || {}) };
+        byslot[slotKey] = true;
+        return { ...a, fumblePending: byslot };
+      });
+      item.metadata[PC_METADATA_KEY] = data;
+    });
+  });
+}
+
+async function clearFumblePendingForStats(itemId, attackId, slotKey) {
+  await OBR.scene.items.updateItems([itemId], items => {
+    items.forEach(item => {
+      const mode = item.metadata[MODE_METADATA_KEY] || "monster";
+      if (mode !== "pc") return;
+      const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
+      data.attacks = (data.attacks || []).map(a => {
+        if (a.id !== attackId || !a.fumblePending || !(slotKey in a.fumblePending)) return a;
+        const byslot = { ...a.fumblePending };
+        delete byslot[slotKey];
+        return { ...a, fumblePending: byslot };
+      });
+      item.metadata[PC_METADATA_KEY] = data;
+    });
+  });
+}
+
+// Table 4-2 (DCC RPG core rulebook): "Warriors and dwarves, and only
+// warriors and dwarves, may burn 1 point of Luck to cancel a roll on
+// table 4-2: Fumbles. The natural 1 still results in a miss but by
+// burning a point of Luck they can avoid any further negative effects."
+// Unlike every other Burn Luck flow in this app (attackOrSpellLuckBurnCtx
+// et al, all "boost a cached total" via openLuckBurnModal), this is a
+// binary yes/no action with nothing to preview or adjust, so it fires
+// straight from the Log's own button (see chatEntryHtml's click handler)
+// instead of opening that modal - re-validating the fumblePending flag
+// live first so a stale button can't double-spend Luck.
+async function handleFumbleCancelClick(target) {
+  const { itemId, attackId, slotKey, label } = target;
+  const [item] = await OBR.scene.items.getItems([itemId]);
+  const atk = item ? getStatsForItem(item).attacks.find(a => a.id === attackId) : null;
+  if (!atk || !atk.fumblePending || !atk.fumblePending[slotKey]) {
+    showStatus("This fumble has already been resolved.", true, 4000);
+    return;
+  }
+  await clearFumblePendingForStats(itemId, attackId, slotKey);
+  const newScore = await applyLuckBurnPointForStats(itemId, 1);
+  if (newScore === null) {
+    showStatus("No Luck score on file to burn.", true, 4000);
+    return;
+  }
+  const rollerName = item.name || "Token";
+  const gmOnly = isGmOnlyRoll(getStatsForItem(item).mode, item);
+  const text = `🍀 Burn 1 Luck: ${label || "Fumble"} — Table 4-2 fumble effects avoided (the miss still stands). Luck now ${newScore}.`;
+  showTrackerStatus(text, false, 6000);
+  showStatus(text, false, 6000);
+  await appendChatLog({ kind: "attack", tokenName: rollerName, text, gmOnly });
 }
 
 // Posts a Burn Luck adjustment note to both status areas and the chat
@@ -18349,12 +18492,25 @@ async function appendChatLog(entry) {
 // couldn't be cached in the first place (a natural-1 weapon fumble/Spell
 // Check, or no token open for a Sheet-triggered roll) - clicking with
 // nothing rolled/cached just isn't offered at all, rather than showing a
-// button that would immediately refuse.
+// button that would immediately refuse. One target type is different: a
+// weapon fumble contributes a "fumbleCancel" target instead of "attack"
+// (Table 4-2, Warrior/Dwarf only) - a binary "burn 1 Luck to cancel the
+// fumble table's effects" action rather than the usual "boost a cached
+// total", see handleFumbleCancelClick.
 function chatEntryHtml(entry) {
   const time = new Date(entry.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const luckTargets = Array.isArray(entry.luckTargets) ? entry.luckTargets : [];
   const luckRowHtml = luckTargets.length
-    ? `<div class="chat-entry-luck-row">${luckTargets.map((t, i) => `<button type="button" class="chat-luck-burn-btn" data-luck-index="${i}" title="Burn Luck (DCC RPG core rulebook) - permanently spend Luck to boost this result.">🍀${luckTargets.length > 1 ? ` ${escapeHtml(t.label || "")}` : " Burn Luck"}</button>`).join("")}</div>`
+    ? `<div class="chat-entry-luck-row">${luckTargets.map((t, i) => {
+        const isFumbleCancel = t.type === "fumbleCancel";
+        const title = isFumbleCancel
+          ? "Burn 1 Luck (DCC RPG core rulebook, Table 4-2, Warrior/Dwarf only) to cancel this fumble's table effects - the attack still misses."
+          : "Burn Luck (DCC RPG core rulebook) - permanently spend Luck to boost this result.";
+        const buttonLabel = isFumbleCancel
+          ? "🍀 Burn 1 Luck to Cancel Fumble"
+          : `🍀${luckTargets.length > 1 ? ` ${escapeHtml(t.label || "")}` : " Burn Luck"}`;
+        return `<button type="button" class="chat-luck-burn-btn" data-luck-index="${i}" title="${title}">${buttonLabel}</button>`;
+      }).join("")}</div>`
     : "";
   return `
     <div class="chat-entry${entry.gmOnly ? " gm-only" : ""}" data-entry-id="${entry.id}">
@@ -18395,6 +18551,13 @@ document.getElementById("chat-log-list").addEventListener("click", e => {
   const entryEl = btn.closest(".chat-entry");
   const entry = entryEl ? lastChatLog.find(en => en.id === entryEl.dataset.entryId) : null;
   const target = entry && entry.luckTargets ? entry.luckTargets[parseInt(btn.dataset.luckIndex, 10)] : null;
+  if (!target) return;
+  // fumbleCancel is a direct, one-shot action (see handleFumbleCancelClick's
+  // own comment) rather than the usual "boost a total" modal flow.
+  if (target.type === "fumbleCancel") {
+    handleFumbleCancelClick(target);
+    return;
+  }
   const ctx = chatLuckBurnCtxFor(target);
   if (ctx) openLuckBurnModal(ctx);
 });
