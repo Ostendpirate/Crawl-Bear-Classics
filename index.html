@@ -1612,7 +1612,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 19:38</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 23:08</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2227,6 +2227,25 @@
         </div>
       </fieldset>
 
+      <fieldset class="gm-only-row" id="rulebook-import-row" style="display:none;">
+        <legend>Import Rulebook Data</legend>
+        <div class="fumble-die-note" style="margin-bottom:6px;">
+          Paste JSON you've personally transcribed from your own copy of the rulebook - spell Manifestation text and Effect Table rows, keyed by exact spell name. This is stored in THIS SCENE's own data (shared with everyone at this table, same as the roll log), never saved to this app's own source code or public repo. Format: <code>{"spells":{"Magic missile":{"manifestation":"...","effectRows":[{"range":"12-13","text":"..."}]}}}</code>. A spell row's own Manifestation/Effect Table only auto-fills when picked and currently blank - it never overwrites something already typed in.
+        </div>
+        <textarea id="rulebook-import-textarea" rows="4" placeholder='{"spells": {"Magic missile": {"manifestation": "...", "effectRows": [{"range": "12-13", "text": "..."}]}}}' style="width:100%; box-sizing:border-box; font-family:monospace; font-size:11px;"></textarea>
+        <div class="row" style="margin-top:6px;">
+          <div>
+            <label>Or load a .json file</label>
+            <input type="file" id="rulebook-import-file" accept="application/json,.json" />
+          </div>
+        </div>
+        <div class="roll-modal-inputs" style="margin-top:6px;">
+          <button type="button" class="btn-next" id="rulebook-import-btn">Import</button>
+          <button type="button" class="hp-btn" id="rulebook-import-clear-btn" title="Wipes ALL imported rulebook data from this scene - does not touch anything already auto-filled on a character's own Sheet.">Clear All</button>
+        </div>
+        <div class="fumble-die-note" id="rulebook-import-status" style="margin-top:6px;"></div>
+      </fieldset>
+
       <fieldset id="sitmod-row">
         <legend>Situational Modifiers (Table 4-1)</legend>
         <div class="row">
@@ -2829,6 +2848,12 @@ const SCENE_STATE_KEY = "com.claude.monster-sheet/combat-state";
 const DIM_OVERLAY_METADATA_KEY = "com.claude.monster-sheet/dim-overlay";
 const CHAT_LOG_METADATA_KEY = "com.claude.monster-sheet/chat-log";
 const CHAT_LOG_MAX_ENTRIES = 60;
+// Rulebook Data Import (see rulebook-import-row on the Dice tab) - a
+// GM-supplied, personally-transcribed JSON blob of paid-rulebook content
+// (spell Manifestation/Effect Table text, so far), stored in THIS
+// SCENE's own metadata - shared with everyone at this table exactly like
+// the chat log above, never written into this app's own source/repo.
+const RULEBOOK_DATA_METADATA_KEY = "com.claude.monster-sheet/rulebook-data";
 
 const EMPTY_STATE_DEFAULT_HTML = `Select a token on the map to view or edit its DCC character sheet.<br/><br/>Changes save automatically to the token so anyone in the room sees the same sheet.`;
 const EMPTY_STATE_NOT_OWNED_HTML = `This token isn't assigned to you.<br/><br/>Ask your GM to assign it to you, or pick one of your own tokens from the list above.`;
@@ -3055,6 +3080,24 @@ function fillForm(mode, data) {
   renderAttacks(mode, d.attacks || []);
   if (mode === "pc") renderArmorItems(d.armorItems || []);
   if (mode === "pc") renderSpellItems(d.pcSpells || []);
+  // Rulebook Data Import (see appendChatLog's neighboring comment) - a
+  // token loaded with spells ALREADY named, on a scene where data was
+  // imported after those spells were picked, never got the pick-time
+  // auto-fill hook (attachSpellRowListeners' own selectEl/customEl
+  // listeners) - catch that case here too, once per load.
+  if (mode === "pc") {
+    const listEl = spellsListEl();
+    if (listEl) {
+      listEl.querySelectorAll(".attack-row").forEach(row => {
+        const selectEl = row.querySelector(".spell-row-select");
+        const customEl = row.querySelector(".spell-row-custom-name");
+        const plainEl = row.querySelector(".spell-row-name");
+        const name = plainEl ? plainEl.value.trim()
+          : (selectEl && selectEl.value === SPELL_CUSTOM_KEY ? (customEl ? customEl.value.trim() : "") : (selectEl ? selectEl.value : ""));
+        applyRulebookDataToRow(row, name);
+      });
+    }
+  }
   if (mode === "pc") renderInjuries(d.injuries || []);
   // One-time migration for a token saved before Equipment was split into
   // Armor/Weapons/Adventuring Gear/Food & Drink/Treasure fields: the old
@@ -12110,6 +12153,41 @@ function attachEffectRowListeners(effectRow) {
   }
 }
 
+// Rulebook Data Import's own auto-fill (see appendChatLog's neighboring
+// comment for the storage side) - only ever fills in a row's Manifestation/
+// Effect Table when they're CURRENTLY BLANK, so a player's own typed-in
+// notes are never silently overwritten by a later import or a name
+// picked, then changed back. Operates directly on this row's own DOM
+// (not a data-level re-render) so it can reuse effectRowHtml/
+// attachEffectRowListeners exactly as the "+ Add Roll Range" button
+// already does, and auto-expands the row if it was collapsed so the
+// newly-filled content is actually visible.
+function applyRulebookDataToRow(row, spellName) {
+  if (!row || !spellName || !lastRulebookData || !lastRulebookData.spells) return false;
+  const entry = lastRulebookData.spells[spellName];
+  if (!entry) return false;
+  let changed = false;
+  const manifestationEl = row.querySelector(".manifestation-note");
+  if (manifestationEl && !manifestationEl.value.trim() && entry.manifestation) {
+    manifestationEl.value = entry.manifestation;
+    autoResizeTextarea(manifestationEl);
+    changed = true;
+  }
+  const rowsWrap = row.querySelector(".spell-effect-rows");
+  if (rowsWrap && rowsWrap.children.length === 0 && Array.isArray(entry.effectRows) && entry.effectRows.length) {
+    rowsWrap.innerHTML = entry.effectRows.map(r => effectRowHtml({ id: "g" + Math.random().toString(36).slice(2, 9), range: r.range || "", text: r.text || "" })).join("");
+    rowsWrap.querySelectorAll(".spell-effect-row").forEach(effectRow => attachEffectRowListeners(effectRow));
+    changed = true;
+  }
+  if (changed) {
+    const collapsibleEl = row.querySelector(".spell-row-collapsible");
+    const toggleBtn = row.querySelector(".spell-row-toggle-btn");
+    if (collapsibleEl && collapsibleEl.style.display === "none" && toggleBtn) toggleBtn.click();
+    scheduleSave();
+  }
+  return changed;
+}
+
 function attachSpellRowListeners() {
   const listEl = spellsListEl();
   if (!listEl) return;
@@ -12228,6 +12306,10 @@ function attachSpellRowListeners() {
         if (selectEl.value !== SPELL_CUSTOM_KEY) {
           const levelEl = row.querySelector(".spell-level");
           if (levelEl) levelEl.value = dccSpellLevelForName(selectEl.value);
+          // Rulebook Data Import (see appendChatLog's neighboring comment) -
+          // same "auto-fill from a lookup table on pick" treatment Level
+          // just got above.
+          applyRulebookDataToRow(row, selectEl.value);
         }
         // Table 5-8's own ** footnote: picking either Invoke Patron or
         // Patron Bond grants BOTH - auto-add whichever one this row didn't
@@ -12247,6 +12329,7 @@ function attachSpellRowListeners() {
         // spell - see ensureMercurialButton's own comment for why nothing
         // else adds it after the row's initial render.
         ensureMercurialButton(row);
+        applyRulebookDataToRow(row, customEl.value.trim());
         updateOpenSpellsCount();
         scheduleSave();
       });
@@ -15580,6 +15663,9 @@ document.getElementById("nav-chat").addEventListener("click", () => setView("cha
 let sceneState = { round: 1, activeId: null };
 let lastTrackerItems = [];
 let lastChatLog = [];
+// { spells: { "Spell Name": { manifestation, effectRows } } } once
+// something's been imported - see rulebook-import-row/applyRulebookDataToRow.
+let lastRulebookData = null;
 let currentPlayerRole = "PLAYER";
 let currentPlayerId = "";
 let lastRosterItems = [];
@@ -19897,6 +19983,74 @@ async function appendChatLog(entry) {
   }
 }
 
+// Rulebook Data Import (Dice tab, GM-only - see rulebook-import-row) - a
+// GM pastes/uploads JSON they've personally transcribed from their own
+// copy of the rulebook, stored in THIS SCENE's own metadata (shared with
+// everyone at this table, same mechanism the chat log above already
+// uses) - never written into this app's own source/repo, since the DATA
+// lives entirely in OBR's own scene storage, not in index.html. Merges
+// with (rather than replacing) whatever's already there, keyed by spell
+// name, so importing a second batch adds to the first instead of
+// clobbering it - re-importing the SAME spell overwrites just that entry.
+function refreshRulebookImportStatus() {
+  const el = document.getElementById("rulebook-import-status");
+  if (!el) return;
+  const count = lastRulebookData && lastRulebookData.spells ? Object.keys(lastRulebookData.spells).length : 0;
+  el.textContent = count > 0 ? `${count} spell${count === 1 ? "" : "s"} currently loaded for this scene.` : "Nothing imported yet.";
+}
+document.getElementById("rulebook-import-file").addEventListener("change", (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    document.getElementById("rulebook-import-textarea").value = String(reader.result || "");
+  };
+  reader.readAsText(file);
+});
+document.getElementById("rulebook-import-btn").addEventListener("click", async () => {
+  const el = document.getElementById("rulebook-import-status");
+  const raw = document.getElementById("rulebook-import-textarea").value.trim();
+  if (!raw) {
+    el.textContent = "Paste some JSON first (or load a .json file above).";
+    return;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    el.textContent = `Couldn't parse that as JSON: ${err.message}`;
+    return;
+  }
+  if (!parsed || typeof parsed !== "object" || !parsed.spells || typeof parsed.spells !== "object") {
+    el.textContent = `Expected a top-level "spells" object, e.g. {"spells":{"Magic missile":{"manifestation":"...","effectRows":[...]}}}.`;
+    return;
+  }
+  try {
+    const sceneMeta = await OBR.scene.getMetadata();
+    const existing = sceneMeta[RULEBOOK_DATA_METADATA_KEY] && sceneMeta[RULEBOOK_DATA_METADATA_KEY].spells ? sceneMeta[RULEBOOK_DATA_METADATA_KEY].spells : {};
+    const mergedSpells = { ...existing, ...parsed.spells };
+    const next = { spells: mergedSpells };
+    lastRulebookData = next;
+    await OBR.scene.setMetadata({ [RULEBOOK_DATA_METADATA_KEY]: next });
+    document.getElementById("rulebook-import-textarea").value = "";
+    refreshRulebookImportStatus();
+  } catch (err) {
+    console.error("DCC sheet: failed to import rulebook data", err);
+    el.textContent = `Import failed: ${err.message}`;
+  }
+});
+document.getElementById("rulebook-import-clear-btn").addEventListener("click", async () => {
+  const el = document.getElementById("rulebook-import-status");
+  try {
+    lastRulebookData = null;
+    await OBR.scene.setMetadata({ [RULEBOOK_DATA_METADATA_KEY]: null });
+    refreshRulebookImportStatus();
+  } catch (err) {
+    console.error("DCC sheet: failed to clear rulebook data", err);
+    el.textContent = `Clear failed: ${err.message}`;
+  }
+});
+
 // luckTargets (attached by rollAttackFor/rollTwoWeaponAttack/
 // rollSpellAttackRow/rollSpellAttackForTracker/rollPcSkill/
 // rollInitiativeFor/rollSaveFromField/rollPcAbilityCheck - see each one's
@@ -20159,6 +20313,14 @@ function refreshDiceGmRowVisibility() {
   if (row) row.style.display = currentPlayerRole === "GM" ? "flex" : "none";
   const forceRow = document.getElementById("gm-force-roll-row");
   if (forceRow) forceRow.style.display = currentPlayerRole === "GM" ? "block" : "none";
+  // Rulebook Data Import - same GM-only gate as GM Testing above. Anyone
+  // at the table still benefits from whatever's already been imported
+  // (the auto-fill hooks read it regardless of role) - only the IMPORT
+  // control itself is GM-only, so there's one clear owner of what gets
+  // added to a shared scene.
+  const importRow = document.getElementById("rulebook-import-row");
+  if (importRow) importRow.style.display = currentPlayerRole === "GM" ? "block" : "none";
+  if (currentPlayerRole === "GM") refreshRulebookImportStatus();
 }
 
 // Small in-popover animation, separate from the full-screen overlay. It's
@@ -20670,6 +20832,10 @@ OBR.onReady(async () => {
         renderChatLog();
       }
     }
+    if (metadata[RULEBOOK_DATA_METADATA_KEY]) {
+      lastRulebookData = metadata[RULEBOOK_DATA_METADATA_KEY];
+      refreshRulebookImportStatus();
+    }
   });
 
   OBR.scene.items.onChange(async (items) => {
@@ -20785,6 +20951,7 @@ OBR.onReady(async () => {
       const sceneMeta = await OBR.scene.getMetadata();
       sceneState = sceneMeta[SCENE_STATE_KEY] || { round: 1, activeId: null };
       lastChatLog = Array.isArray(sceneMeta[CHAT_LOG_METADATA_KEY]) ? sceneMeta[CHAT_LOG_METADATA_KEY] : [];
+      lastRulebookData = sceneMeta[RULEBOOK_DATA_METADATA_KEY] || null;
     } catch (err) {
       console.error("DCC sheet: scene change scene.getMetadata failed", err);
       sceneState = { round: 1, activeId: null };
@@ -20884,6 +21051,7 @@ OBR.onReady(async () => {
     const sceneMeta = await OBR.scene.getMetadata();
     sceneState = sceneMeta[SCENE_STATE_KEY] || { round: 1, activeId: null };
     lastChatLog = Array.isArray(sceneMeta[CHAT_LOG_METADATA_KEY]) ? sceneMeta[CHAT_LOG_METADATA_KEY] : [];
+    lastRulebookData = sceneMeta[RULEBOOK_DATA_METADATA_KEY] || null;
   } catch (err) {
     console.error("DCC sheet: initial scene.getMetadata failed", err);
     sceneState = { round: 1, activeId: null };
