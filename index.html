@@ -1612,7 +1612,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 18:34</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 19:00</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1835,6 +1835,8 @@
         </div>
 
         <div class="fumble-die-note" id="pc-racial-traits-note" style="margin-bottom:10px; display:none;"></div>
+        <div class="fumble-die-note" id="pc-ability-warnings-note" style="margin-bottom:10px; display:none;"></div>
+        <button type="button" class="hp-btn" id="pc-secret-doors-btn" style="margin-bottom:10px;" title="Detect Secret Doors (DCC RPG core rulebook) - d20 + Intelligence modifier (+4 for Elves, Heightened Senses) vs a DC your judge sets. Elves also get an automatic check just from passing within 10' of a secret door - not simulated here, just remember to ask your judge.">🔍 Detect Secret Doors</button>
 
         <fieldset>
           <legend>Abilities</legend>
@@ -2067,6 +2069,11 @@
             <div class="stat-badge disapproval-range-badge" id="pc-disapproval-range-note"></div>
             <button type="button" class="hp-btn disapproval-range-btn" id="pc-disapproval-range-minus" title="Manually narrow the Disapproval Range by 1 (minimum natural 1 only) - e.g. correcting a mistaken widen.">−1 Range</button>
             <button type="button" class="hp-btn disapproval-range-btn" id="pc-disapproval-range-plus" title="Manually widen the Disapproval Range by 1 - e.g. a Turn Unholy result you're ruling a failure even though the total was over 11 (Table 4-4 still came up No Effect against that target's Hit Dice) - rollTurnUnholyRow only auto-widens on a flat total of 11 or under.">+1 Range</button>
+          </div>
+          <div id="pc-patron-taint-wrap" style="display:none; margin-top:8px;">
+            <div class="spell-section-header">Patron Taint Chance</div>
+            <div class="stat-badge disapproval-range-badge" id="pc-patron-taint-note"></div>
+            <input type="hidden" id="pc-patron-taint-chance" value="" />
           </div>
           <input type="hidden" id="pc-disapprovalRange" value="" />
         </fieldset>
@@ -2693,6 +2700,7 @@
           <div style="margin-bottom:8px;">
             <button type="button" id="pc-corruption-btn" class="hp-btn" style="display:none;" title="Roll Corruption (Tables 5-3/5-4/5-5) - Wizard/Elf only.">☣ Corruption</button>
             <button type="button" id="pc-disapproval-btn" class="hp-btn" style="display:none;" title="Roll Disapproval (Table 5-7) - Cleric only.">😇 Disapproval</button>
+            <button type="button" id="pc-patron-taint-btn" class="hp-btn" style="display:none;" title="Roll Patron Taint Check (DCC RPG core rulebook) - Wizard/Elf only. Click after casting invoke patron, patron bond, or any other patron-based spell. Chance starts at 1% and rises by 1 point with each such casting that doesn't taint; a taint resets it back to 1%. On a taint, roll on your own patron's specific taint table (consult your book).">🔮 Patron Taint</button>
           </div>
           <div class="attack-list" id="pc-spells-list"></div>
           <button type="button" class="add-attack-btn" id="add-spell-pc">+ Add Spell</button>
@@ -2735,7 +2743,7 @@ const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al", "montype"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-luck-augur-roll","pc-luck-augur-mod","pc-luck-augur-hp-bonus-applied","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-favorite-weapon-luck","pc-elf-luck-spell-luck","pc-deity","pc-patron","pc-familiar-name","pc-familiar-category","pc-familiar-config","pc-familiar-personality","pc-familiar-hp","pc-familiar-hp-bonus-applied","pc-familiar-token-id","pc-familiar-unlocked","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto","pc-dying-state","pc-dying-deadline-round","pc-body-recovery-attempted"];
+const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-luck-augur-roll","pc-luck-augur-mod","pc-luck-augur-hp-bonus-applied","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-favorite-weapon-luck","pc-elf-luck-spell-luck","pc-deity","pc-patron","pc-familiar-name","pc-familiar-category","pc-familiar-config","pc-familiar-personality","pc-familiar-hp","pc-familiar-hp-bonus-applied","pc-familiar-token-id","pc-familiar-unlocked","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto","pc-dying-state","pc-dying-deadline-round","pc-body-recovery-attempted","pc-patron-taint-chance"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
 const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level", "pc-elf-luck-spell"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
@@ -4728,6 +4736,47 @@ function refreshPcRacialTraitsNote() {
   el.style.display = text ? "" : "none";
 }
 
+// Three ability-score threshold rules (DCC RPG core rulebook, Table 1-1's
+// own prose) that have no active button of their own, same reason the
+// Elf's own passive traits above were missed - recomputed live every
+// render pass, never persisted, same contract as the Racial Traits note.
+function computePcAbilityWarningsText() {
+  const strScore = parseAbilityScore(document.getElementById("pc-str").value);
+  const staScore = parseAbilityScore(document.getElementById("pc-sta").value);
+  const intScore = parseAbilityScore(document.getElementById("pc-int").value);
+  const parts = [];
+  if (strScore !== null && strScore <= 5) {
+    // "Characters with a Strength of 5 or less can carry a weapon or a
+    // shield but not both." This app already enforces a 2-hand capacity
+    // cap between weapons/shield generally (enforceShieldCapacityAfterWeaponEquip
+    // etc.), but not this LOWER Str<=5 cap specifically - flagged as a
+    // note rather than an enforced block, since a shield-only or
+    // weapon-only loadout is still perfectly valid and this is just
+    // telling the player which one they're allowed, not preventing
+    // anything.
+    const shieldOn = shieldEquippedLive();
+    const weaponOn = readAttacks("pc").some(a => a.equipped && !a.isSpell && !a.isTurnUnholy && !a.isLayOnHands && !a.isCauseWounds && !a.isDivineAid && !a.isThiefSkill);
+    const violated = shieldOn && weaponOn;
+    parts.push(`Strength 5 or less: may carry a weapon OR a shield, not both.${violated ? " ⚠️ Currently has BOTH equipped." : ""}`);
+  }
+  if (staScore !== null && staScore <= 5) {
+    parts.push("Stamina 5 or less: takes DOUBLE damage from all poisons and diseases.");
+  }
+  if (intScore !== null && intScore <= 5) {
+    parts.push("Intelligence 5 or less: cannot read or write (and speaks only Common, Int 7 or less).");
+  } else if (intScore !== null && intScore <= 7) {
+    parts.push("Intelligence 7 or less: speaks only Common.");
+  }
+  return parts.join(" ");
+}
+function refreshPcAbilityWarningsNote() {
+  const el = document.getElementById("pc-ability-warnings-note");
+  if (!el) return;
+  const text = computePcAbilityWarningsText();
+  el.textContent = text;
+  el.style.display = text ? "" : "none";
+}
+
 // Does this character's current class roll a Deed Die at all right now
 // (live Sheet form) - gates whether an attack row offers the Mighty Deed
 // declaration UI (see attackRowHtml). A Deed Die is a character-wide
@@ -6346,6 +6395,10 @@ function attachAttackRowListeners(mode) {
           scheduleSave();
           recalcPcInitiativeDie();
           syncWeaponsIntoEquipment();
+          // A weapon equip/unequip can cross the Str<=5 "weapon or shield,
+          // not both" line too (see computePcAbilityWarningsText's own
+          // comment) - PC-only, same as the note element itself.
+          if (mode === "pc") refreshPcAbilityWarningsNote();
         });
       }
       // Poisoned (☠️) toggle - the generic "any input schedules a save"
@@ -6627,6 +6680,11 @@ function renderPcStatline(d) {
   // matching the current Class/Level on every render, same as the note
   // below the Attacks list (updateTwoWeaponNote).
   refreshPcRacialTraitsNote();
+  // Same reasoning, for the Str/Sta/Int threshold warnings (Table 1-1) -
+  // these depend on equipment too (Str<=5's weapon-vs-shield note), so
+  // this also needs its own hook wherever Armor/Attacks change, same as
+  // Languages needs one wherever Int changes (see below).
+  refreshPcAbilityWarningsNote();
   // Keeps the Languages bonus-count note matching the current
   // Class/Intelligence on every render - same passive contract, though
   // it also needs its own hook in refreshDerivedPcFields below since
@@ -7345,6 +7403,41 @@ async function rollPcAbilityCheck(abilityId) {
     await setAbilityLuckLastRollForStats(currentItemId, abilityId, total, label);
   }
 }
+
+// Elf Heightened Senses (DCC RPG core rulebook) - a general Intelligence
+// check available to any class ("find secret doors" is its own Table 1-2
+// Birth Augur category, not class-restricted), with an Elf's own +4
+// folded in automatically. Also the thing that finally wires up the
+// "secretDoors" Birth Augur category - see DCC_LUCK_AUGUR_SUPPORTED's own
+// comment, which used to explain there was nothing to hook it into. Same
+// shape as rollPcAbilityCheck above, just with a synthetic "secretDoors"
+// abilityId (no real pc-secretDoors field exists, but
+// setAbilityLuckLastRollForStats/abilityLuckBurnCtx don't require one -
+// it's just a cache key) so this still gets its own Burn Luck button on
+// the Log entry, same as any other ability check.
+async function rollPcSecretDoorCheck() {
+  const intMod = abilityModifierFromField("pc-int");
+  const classEl = document.getElementById("pc-class");
+  const elfBonus = classEl && classEl.value === "Elf" ? 4 : 0;
+  const augurMod = luckAugurModLive(["secretDoors"]);
+  const mod = intMod + elfBonus + augurMod;
+  const label = "Detect Secret Doors";
+  const forcedD20 = consumeForcedD20();
+  const rolled = forcedD20 !== null ? forcedD20 : (Math.floor(Math.random() * 20) + 1);
+  const total = rolled + mod;
+  const elfText = elfBonus ? ` ${formatSignedNumber(elfBonus)}(Elf)` : "";
+  const augurText = augurMod ? ` ${formatSignedNumber(augurMod)}(Birth Augur)` : "";
+  const text = `${label}: d20 (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(intMod)}(Int)${elfText}${augurText} = ${markRollTotal(total)}`;
+  const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
+  showStatus(text, false, 4000);
+  const luckTargets = currentItemId ? [{ type: "ability", itemId: currentItemId, abilityId: "secretDoors", label }] : [];
+  appendChatLog({ kind: "ability", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId)), luckTargets });
+  broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: rolled }], modifier: mod, notation: "d20", total, label });
+  if (currentItemId) {
+    await setAbilityLuckLastRollForStats(currentItemId, "secretDoors", total, label);
+  }
+}
+document.getElementById("pc-secret-doors-btn").addEventListener("click", rollPcSecretDoorCheck);
 
 // Save roll - reads whatever's currently in the Fort/Ref/Will field
 // (already a flat "+N" bonus, not a raw ability score, so parseModifier
@@ -8280,23 +8373,26 @@ const DCC_LUCK_AUGUR_TABLE = [
 // startingWeapon (the 0-level Trained Weapon field is overwritten the
 // moment a character classes - see updatePcTrainedWeaponVisibility - so
 // there's no permanent record of "the starting weapon" left to check
-// against); secretDoors (no Search/secret-door mechanic exists, same gap
-// as the Elf's own Heightened Senses); spellDamage (a spell's damage, if
-// any, is free-text effect prose, not a rolled field); escapeTraps/
-// poisonSaves (this app only tracks the three general Fort/Ref/Will
-// saves, no finer per-circumstance categories to single out); critTables/
-// fumbles (there's no existing "Luck applies to crits/fumbles" baseline
-// in this app for either of these to double - see the Luck rules text's
-// own separate, unconditional "affects other rolls... critical hits,
-// fumbles, corruption" line, which this app also doesn't model as a
-// live-Luck bonus on those two); corruption (ALREADY gets live Luck
+// against); spellDamage (a spell's damage, if any, is free-text effect
+// prose, not a rolled field); escapeTraps/poisonSaves (this app only
+// tracks the three general Fort/Ref/Will saves, no finer per-circumstance
+// categories to single out); critTables (there's no existing "Luck
+// applies to crits" baseline in this app to double - see the Luck rules
+// text's own separate, unconditional "affects other rolls... critical
+// hits, fumbles, corruption" line); corruption (ALREADY gets live Luck
 // unconditionally, per that same separate rule - see openCorruptionModal
 // - so this augur category would be redundant with the baseline even if
-// wired, not a genuine gap).
+// wired, not a genuine gap). secretDoors WAS on this list too until
+// rollPcSecretDoorCheck existed - now wired below like any other category.
+// fumbles is now ALSO possible in principle (rollAttackFor/
+// rollTwoWeaponAttack's own reverse-Luck fumble modifier is a real
+// baseline as of the Table 4-2 fumble work), just not yet wired here -
+// unlike secretDoors this wasn't part of what was asked for, so it's left
+// alone rather than added unprompted.
 const DCC_LUCK_AUGUR_SUPPORTED = new Set([
   "allAttack", "meleeAttack", "missileAttack", "unarmedAttack",
   "allDamage", "meleeDamage", "missileDamage",
-  "skillChecks", "findDisableTraps", "spellChecks", "turnUnholy", "magicalHealing",
+  "skillChecks", "findDisableTraps", "secretDoors", "spellChecks", "turnUnholy", "magicalHealing",
   "allSaves", "reflexSaves", "fortitudeSaves", "willpowerSaves",
   "armorClass", "initiative", "hitPoints", "languages", "speed",
 ]);
@@ -8854,6 +8950,50 @@ function resetPcDisapprovalRange() {
   refreshPcDisapprovalRangeNote();
   return true;
 }
+
+// Patron Taint (DCC RPG core rulebook, Patrons chapter) - "The first time
+// a wizard casts invoke patron, patron bond, or any other patron-based
+// spell, there is a 1% chance that their spellcasting becomes tainted...
+// At each subsequent casting, that chance increases by 1%... Once a
+// patron taint is obtained, the chance... resets to 1%." Same shape as
+// Disapproval Range just above (a hidden field, blank means "still just
+// 1", widened by 1 on a non-event) - but resets on a TAINT roll, not on
+// New Day, and there's no automatic trigger the way rollTurnUnholyRow's
+// own total<=11 check is for Disapproval, since patron-based spells
+// aren't a modeled list this app could recognize generically - the
+// player clicks the button themselves after casting one.
+function pcPatronTaintChanceLive() {
+  const el = document.getElementById("pc-patron-taint-chance");
+  const val = el && el.value ? parseInt(el.value, 10) : NaN;
+  return Number.isFinite(val) && val >= 1 ? val : 1;
+}
+function refreshPcPatronTaintNote() {
+  const noteEl = document.getElementById("pc-patron-taint-note");
+  if (!noteEl) return;
+  const chance = pcPatronTaintChanceLive();
+  noteEl.innerHTML = `🔮 Chance <b>${chance}%</b>`;
+  noteEl.title = `A roll of ${chance} or less on d100 taints this casting (resets to 1% after) - widens by 1% with each patron-based spell cast that doesn't taint.`;
+}
+async function rollPatronTaintCheck() {
+  const chance = pcPatronTaintChanceLive();
+  const roll = Math.floor(Math.random() * 100) + 1;
+  const tainted = roll <= chance;
+  const chanceEl = document.getElementById("pc-patron-taint-chance");
+  if (tainted) {
+    if (chanceEl) chanceEl.value = "";
+  } else if (chanceEl) {
+    chanceEl.value = String(chance + 1);
+  }
+  refreshPcPatronTaintNote();
+  scheduleSave();
+  const text = tainted
+    ? `🔮 Patron Taint: d100 (${roll}) ≤ ${chance}% — TAINTED! Roll on your patron's own taint table (consult your book). Chance resets to 1%.`
+    : `🔮 Patron Taint: d100 (${roll}) > ${chance}% — no taint. Chance rises to ${chance + 1}% for next time.`;
+  showStatus(text, false, 8000);
+  const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
+  appendChatLog({ kind: "ability", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId)) });
+}
+document.getElementById("pc-patron-taint-btn").addEventListener("click", rollPatronTaintCheck);
 
 // Manual +1/-1 for the Disapproval Range (Spells section) - covers
 // whatever checkPcDisapprovalTrigger/rollTurnUnholyRow's own automatic
@@ -9905,6 +10045,9 @@ function refreshDerivedPcFields() {
   // An Intelligence edit changes the Languages bonus count too - see
   // refreshPcLanguagesNote's own comment.
   refreshPcLanguagesNote();
+  // Same reasoning - a Str/Sta/Int edit can cross one of Table 1-1's own
+  // threshold lines (see computePcAbilityWarningsText's own comment).
+  refreshPcAbilityWarningsNote();
   // An Intelligence edit can also cross the 0-level "Int 8+" racial-
   // language threshold (see pcRacialLanguageName) - same passive re-sync
   // as the note above, just for the actual field content. Also covers
@@ -10097,6 +10240,20 @@ function computePcRacialTraitsText(cls, levelRaw) {
     const bonusText = bonus !== null ? `a +${bonus} bonus (Table 1-18, this character's level)` : "a bonus that grows with level (Table 1-18)";
     parts.push(`Stealth: ${bonusText} to Sneak Silently and Hide in Shadows checks, on top of the normal Agility modifier.`);
   }
+  if (cls === "Elf") {
+    // DCC RPG core rulebook, Elf class - three passive traits with no
+    // active button of their own (unlike Weapon Training/Mithril/Luck
+    // Spell/Languages, all already implemented elsewhere), which is
+    // presumably why they were missed on a first pass. Heightened Senses'
+    // own +4 bonus is applied automatically by the "Detect Secret Doors"
+    // roll button (see rollPcSecretDoorCheck) - this note just explains
+    // where that +4 comes from, and the "automatic check within 10 feet"
+    // half of the rule, which nothing here can trigger on its own (no
+    // battlemap-position tracking).
+    parts.push("Immune to magical sleep and paralysis.");
+    parts.push("Iron sensitivity: may not wear iron armor or bear iron weapons for extended periods - prolonged contact causes 1 hp of damage per day of direct contact.");
+    parts.push("Heightened Senses: +4 bonus to detect secret doors (see the 🔍 Detect Secret Doors button below), plus an automatic check when simply passing within 10' of one.");
+  }
   return parts.join(" ");
 }
 
@@ -10227,6 +10384,9 @@ function attachArmorRowListeners() {
       recalcPcSpeed();
       recalcPcFumbleDie();
       syncArmorIntoEquipment();
+      // A Shield equip/unequip can cross the Str<=5 "weapon or shield, not
+      // both" line too (see computePcAbilityWarningsText's own comment).
+      refreshPcAbilityWarningsNote();
       // Equipping (or un-equipping) a Shield changes two-weapon fighting
       // eligibility (Table 4-3 - see shieldEquippedLive/twoWeaponRoleOptions)
       // - rebuild the attack rows immediately so the Primary/Off-hand
@@ -12009,6 +12169,16 @@ function recalcPcSpellSection() {
   if (corruptionBtn) corruptionBtn.style.display = abilityId === "int" ? "" : "none";
   const disapprovalBtn = document.getElementById("pc-disapproval-btn");
   if (disapprovalBtn) disapprovalBtn.style.display = abilityId === "per" ? "" : "none";
+  // Patron Taint (DCC RPG core rulebook, Patrons chapter) - same Wizard/
+  // Elf-only gate as Corruption above (both patron-casting classes can
+  // gain patron-based spells, so both can risk taint).
+  const patronTaintBtn = document.getElementById("pc-patron-taint-btn");
+  if (patronTaintBtn) patronTaintBtn.style.display = abilityId === "int" ? "" : "none";
+  const patronTaintWrap = document.getElementById("pc-patron-taint-wrap");
+  if (patronTaintWrap) {
+    patronTaintWrap.style.display = abilityId === "int" ? "" : "none";
+    if (abilityId === "int") refreshPcPatronTaintNote();
+  }
   // Turn Unholy itself now lives in the Actions list as its own row type
   // (TURN_UNHOLY_KEY/turnUnholyRowHtml) rather than a dedicated button
   // here - see rollTurnUnholyRow.
