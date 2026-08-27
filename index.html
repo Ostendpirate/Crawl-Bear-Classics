@@ -1516,7 +1516,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 13:21</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 13:29</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -10281,6 +10281,33 @@ function dccSpellLevelForName(name) {
   return entry && entry.level !== undefined ? String(entry.level) : "";
 }
 
+// Table 5-8's own ** footnote (DCC RPG core rulebook): picking either
+// Invoke Patron or Patron Bond grants BOTH spells. Given one of the pair,
+// this is the other one; null for anything else.
+function otherPatronPairSpellName(name) {
+  if (name === "Invoke patron") return "Patron bond";
+  if (name === "Patron bond") return "Invoke patron";
+  return null;
+}
+// Auto-adds `name` as a brand-new known-spell row (same shape add-spell-pc's
+// own click handler builds) if it isn't already on the roster - used to
+// grant Invoke Patron/Patron Bond's companion the moment either one is
+// picked (see the .spell-row-select change listener below), so the player
+// never has to remember to add the second one by hand. Deliberately
+// bypasses add-spell-pc's own Known Spells allotment cap check - the pair
+// is EXEMPT from counting as two separate picks in the first place (fully
+// free for an Elf, one shared slot for a Wizard - see
+// pcPatronSpellSlotDiscount), so there's no cap to enforce here.
+function addKnownSpellByName(name) {
+  if (pcKnownSpellNames().includes(name)) return;
+  const item = emptySpellItem();
+  item.name = name;
+  item.level = dccSpellLevelForName(name);
+  expandedSpellRows.add(item.id);
+  spellsListEl().insertAdjacentHTML("beforeend", spellRowHtml(item));
+  attachSpellRowListeners();
+}
+
 // A spell's own stat-block header (Level/Range/Duration/Casting Time/
 // Save) - plain persistent fields, same "app has no per-spell tables, so
 // this is just a place to write down whatever your own rulebook says"
@@ -10774,6 +10801,13 @@ function attachSpellRowListeners() {
           const levelEl = row.querySelector(".spell-level");
           if (levelEl) levelEl.value = dccSpellLevelForName(selectEl.value);
         }
+        // Table 5-8's own ** footnote: picking either Invoke Patron or
+        // Patron Bond grants BOTH - auto-add whichever one this row didn't
+        // just pick, if it isn't already on the roster elsewhere (see
+        // addKnownSpellByName's own comment on why this bypasses the
+        // normal Known Spells cap).
+        const companionName = otherPatronPairSpellName(selectEl.value);
+        if (companionName) addKnownSpellByName(companionName);
         updateOpenSpellsCount();
         scheduleSave();
       });
