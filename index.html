@@ -1516,7 +1516,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 13:36</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 14:07</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1749,6 +1749,11 @@
             <div class="save-box"><label class="roll-label" data-roll-ability="lck" title="Click to roll a Luck check: d20 + Luck modifier.">Lck</label><input type="text" id="pc-lck" placeholder="11 (+0)"/></div>
           </div>
           <div class="stat-badge luck-max-badge" id="pc-luck-max-note" style="display:none;"></div>
+          <div class="fumble-die-note" id="pc-luck-augur-note" style="display:none; margin-bottom:6px;"></div>
+          <button type="button" class="hp-btn" id="pc-luck-augur-btn" title="Table 1-2: Luck Score (DCC RPG core rulebook) - roll once, typically at 0-level character creation, to determine which single roll type this character's Luck modifier applies to for their whole career. That bonus is fixed at whatever Luck was AT THE MOMENT OF THIS ROLL - it never changes later even if Luck does.">🎲 Roll Birth Augur</button>
+          <input type="hidden" id="pc-luck-augur-roll" value="" />
+          <input type="hidden" id="pc-luck-augur-mod" value="" />
+          <input type="hidden" id="pc-luck-augur-hp-bonus-applied" value="" />
           <button type="button" id="pc-spellburn-newday-btn" class="newday-btn" title="A night's rest - every class. Heals 1 HP. Wizard/Elf: recovers 1 point to ONE Str/Agi/Sta ability spent on Spellburn (see the Cast a Spell row), up to what it was before any Spellburn - asks which to recover if more than one is eligible. Thief/Halfling: also recovers Luck equal to their Level, up to its own natural max. Also clears any Lost spells. Click once per in-game day that passes.">🌙 New Day</button>
           <input type="hidden" id="pc-spellburnMax" value="" />
           <input type="hidden" id="pc-luckMax" value="" />
@@ -2519,7 +2524,7 @@ const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al", "montype"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-favorite-weapon-luck","pc-elf-luck-spell-luck","pc-deity","pc-patron","pc-familiar-name","pc-familiar-category","pc-familiar-config","pc-familiar-personality","pc-familiar-hp","pc-familiar-hp-bonus-applied","pc-familiar-token-id","pc-familiar-unlocked","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto"];
+const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-luck-augur-roll","pc-luck-augur-mod","pc-luck-augur-hp-bonus-applied","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-favorite-weapon-luck","pc-elf-luck-spell-luck","pc-deity","pc-patron","pc-familiar-name","pc-familiar-category","pc-familiar-config","pc-familiar-personality","pc-familiar-hp","pc-familiar-hp-bonus-applied","pc-familiar-token-id","pc-familiar-unlocked","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
 const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level", "pc-elf-luck-spell"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
@@ -4951,7 +4956,12 @@ function composedAttackBonusText(abilityFieldId, atk) {
   const entry = currentClassLevelEntry();
   const classAttack = entry && typeof entry.attack === "number" ? entry.attack : 0;
   const luckMod = atk && isFavoriteWeaponMatchLive(atk) ? favoriteWeaponLuckModLive() : 0;
-  return formatSignedNumber(abilityMod + classAttack + luckMod);
+  // Birth Augur (Table 1-2) - same "folded into the Bonus field, not added
+  // again at roll time" treatment as the Favorite Weapon Luck bonus just
+  // above, so rollAttackFor/rollTwoWeaponAttack can keep trusting this
+  // field for the to-hit side without double-counting.
+  const augurMod = atk ? luckAugurModLive(luckAugurAttackCategories(dccWeaponEntry(atk.weapon))) : 0;
+  return formatSignedNumber(abilityMod + classAttack + luckMod + augurMod);
 }
 
 // Mouseover breakdown for a row's Bonus field - spells out every term that
@@ -4982,13 +4992,15 @@ function attackBonusBreakdownTooltip(atk, abilitySourceId, currentBonusText, isA
   const classAttack = entry && typeof entry.attack === "number" ? entry.attack : 0;
   const isFav = isFavoriteWeaponMatchLive(atk);
   const lckMod = isFav ? favoriteWeaponLuckModLive() : 0;
+  const augurMod = luckAugurModLive(luckAugurAttackCategories(dccWeaponEntry(atk.weapon)));
 
   const sumParts = [`${abilityLabel} ${formatSignedNumber(abilityMod)}`];
   if (clsLabel && lvlLabel && entry && !isDeedClass) {
     sumParts.push(`${clsLabel} lvl ${lvlLabel} Attack ${formatSignedNumber(classAttack)}`);
   }
   if (isFav) sumParts.push(`Favorite Weapon Luck ${formatSignedNumber(lckMod)}`);
-  const autoTotal = abilityMod + classAttack + lckMod;
+  if (augurMod) sumParts.push(`Birth Augur ${formatSignedNumber(augurMod)}`);
+  const autoTotal = abilityMod + classAttack + lckMod + augurMod;
 
   let tooltip = isAutoSynced
     ? `Bonus shown = ${sumParts.join(" + ")} = ${formatSignedNumber(autoTotal)}. This field is the total true to-hit bonus this attack rolls with.`
@@ -5017,13 +5029,15 @@ function attackBonusBreakdownTooltipForStats(stats, atk) {
   const classAttack = classEntry && typeof classEntry.attack === "number" ? classEntry.attack : 0;
   const isFav = isFavoriteWeaponMatch(stats, atk);
   const lckMod = isFav ? favoriteWeaponLuckModForStats(stats) : 0;
+  const augurMod = luckAugurModForStats(stats, luckAugurAttackCategories(entry));
 
   const sumParts = [`${abilityLabel} ${formatSignedNumber(abilityMod)}`];
   if (clsLabel && lvlLabel && classEntry && !isDeedClass) {
     sumParts.push(`${clsLabel} lvl ${lvlLabel} Attack ${formatSignedNumber(classAttack)}`);
   }
   if (isFav) sumParts.push(`Favorite Weapon Luck ${formatSignedNumber(lckMod)}`);
-  const autoTotal = abilityMod + classAttack + lckMod;
+  if (augurMod) sumParts.push(`Birth Augur ${formatSignedNumber(augurMod)}`);
+  const autoTotal = abilityMod + classAttack + lckMod + augurMod;
   const isAutoSynced = !!atk.bonusAuto;
 
   let tooltip = isAutoSynced
@@ -5076,9 +5090,11 @@ function initBreakdownTooltipForStats(stats) {
   const cls = (stats.data.class || "").trim();
   const lvl = String(stats.data.level || "").trim();
   const lvlBonus = pcInitLevelBonus(cls, stats.data.level);
+  const augurMod = luckAugurModForStats(stats, ["initiative"]);
   const sumParts = [`Agi ${formatSignedNumber(agiMod)}`];
   if (lvlBonus) sumParts.push(`Warrior lvl ${lvl} ${formatSignedNumber(lvlBonus)}`);
-  const autoTotal = agiMod + lvlBonus;
+  if (augurMod) sumParts.push(`Birth Augur ${formatSignedNumber(augurMod)}`);
+  const autoTotal = agiMod + lvlBonus + augurMod;
   const isAutoSynced = !!(stats.data.derivedAuto && stats.data.derivedAuto["pc-init"]);
 
   let tooltip = isAutoSynced
@@ -6446,6 +6462,12 @@ function renderPcStatline(d) {
   // depends on having already run this pass (it reads the same Favorite
   // Weapon value that call keeps current).
   syncFavoriteWeaponLuckSnapshot();
+  // Birth Augur (Table 1-2) note/button label, and its HP-per-level bonus
+  // (the one category that needs re-applying whenever Level changes, not
+  // just whenever the augur itself is rolled) - same every-render-pass
+  // contract as the rest of this block.
+  refreshBirthAugurNote();
+  applyLuckAugurHpBonus();
   // Same reasoning, for the Deed Die row - Warrior/Dwarf only (see
   // updatePcDeedDieVisibility).
   updatePcDeedDieVisibility();
@@ -7732,6 +7754,186 @@ function pcLuckModifierLive() {
   return score === null ? 0 : dccAbilityModifier(score);
 }
 
+// Table 1-2: Luck Score (DCC RPG core rulebook) - "roll on table 1-2 to
+// determine which roll is affected by the character's Luck modifier...
+// modified by the character's starting 0-level Luck modifier (for good
+// or bad) in addition to all other normal modifiers... does not change
+// over time as the character's Luck changes." Every entry here is this
+// app's OWN mechanical category label, not the book's own "Birth Augur"
+// flavor name (e.g. "Harsh winter", "The bull") - those are the book's
+// own creative content and, per the copyright memory note on the walked-
+// back Familiar Table 7-5/7-6 decision, deliberately not reproduced here;
+// only the functional rule itself (which roll type) is encoded. Index
+// 0 = d30 roll of 1, in table order.
+const DCC_LUCK_AUGUR_TABLE = [
+  { category: "allAttack", label: "All attack rolls" },
+  { category: "meleeAttack", label: "Melee attack rolls" },
+  { category: "missileAttack", label: "Missile fire attack rolls" },
+  { category: "unarmedAttack", label: "Unarmed attack rolls" },
+  { category: "mountedAttack", label: "Mounted attack rolls" },
+  { category: "allDamage", label: "Damage rolls" },
+  { category: "meleeDamage", label: "Melee damage rolls" },
+  { category: "missileDamage", label: "Missile fire damage rolls" },
+  { category: "startingWeapon", label: "Attack and damage rolls for 0-level starting weapon" },
+  { category: "skillChecks", label: "Skill checks (including thief skills)" },
+  { category: "findDisableTraps", label: "Find/disable traps" },
+  { category: "secretDoors", label: "Find secret doors" },
+  { category: "spellChecks", label: "Spell checks" },
+  { category: "spellDamage", label: "Spell damage" },
+  { category: "turnUnholy", label: "Turn Unholy checks" },
+  { category: "magicalHealing", label: "Magical healing" },
+  { category: "allSaves", label: "Saving throws" },
+  { category: "escapeTraps", label: "Saving throws to escape traps" },
+  { category: "poisonSaves", label: "Saving throws against poison" },
+  { category: "reflexSaves", label: "Reflex saving throws" },
+  { category: "fortitudeSaves", label: "Fortitude saving throws" },
+  { category: "willpowerSaves", label: "Willpower saving throws" },
+  { category: "armorClass", label: "Armor Class" },
+  { category: "initiative", label: "Initiative" },
+  { category: "hitPoints", label: "Hit points (applies at each level)" },
+  { category: "critTables", label: "Critical hit tables (modifier doubled)" },
+  { category: "corruption", label: "Corruption rolls" },
+  { category: "fumbles", label: "Fumbles (modifier doubled)" },
+  { category: "languages", label: "Number of languages" },
+  { category: "speed", label: "Speed" },
+];
+// Categories this app actually wires a bonus into somewhere. Everything
+// else in the table above is tracked (rolled, frozen, shown in the note)
+// but has no matching mechanic in this app to attach a number to - see
+// refreshBirthAugurNote's own "not currently wired" wording. Reasons,
+// category by category: mountedAttack (no mounted-combat system at all);
+// startingWeapon (the 0-level Trained Weapon field is overwritten the
+// moment a character classes - see updatePcTrainedWeaponVisibility - so
+// there's no permanent record of "the starting weapon" left to check
+// against); secretDoors (no Search/secret-door mechanic exists, same gap
+// as the Elf's own Heightened Senses); spellDamage (a spell's damage, if
+// any, is free-text effect prose, not a rolled field); escapeTraps/
+// poisonSaves (this app only tracks the three general Fort/Ref/Will
+// saves, no finer per-circumstance categories to single out); critTables/
+// fumbles (there's no existing "Luck applies to crits/fumbles" baseline
+// in this app for either of these to double - see the Luck rules text's
+// own separate, unconditional "affects other rolls... critical hits,
+// fumbles, corruption" line, which this app also doesn't model as a
+// live-Luck bonus on those two); corruption (ALREADY gets live Luck
+// unconditionally, per that same separate rule - see openCorruptionModal
+// - so this augur category would be redundant with the baseline even if
+// wired, not a genuine gap).
+const DCC_LUCK_AUGUR_SUPPORTED = new Set([
+  "allAttack", "meleeAttack", "missileAttack", "unarmedAttack",
+  "allDamage", "meleeDamage", "missileDamage",
+  "skillChecks", "findDisableTraps", "spellChecks", "turnUnholy", "magicalHealing",
+  "allSaves", "reflexSaves", "fortitudeSaves", "willpowerSaves",
+  "armorClass", "initiative", "hitPoints", "languages", "speed",
+]);
+function luckAugurEntry() {
+  const rollEl = document.getElementById("pc-luck-augur-roll");
+  const roll = rollEl ? parseInt(rollEl.value, 10) : NaN;
+  if (!Number.isFinite(roll) || roll < 1 || roll > 30) return null;
+  return DCC_LUCK_AUGUR_TABLE[roll - 1];
+}
+function luckAugurEntryForStats(stats) {
+  const roll = parseInt(stats.data["luck-augur-roll"], 10);
+  if (!Number.isFinite(roll) || roll < 1 || roll > 30) return null;
+  return DCC_LUCK_AUGUR_TABLE[roll - 1];
+}
+// Returns the frozen Birth Augur modifier if this character's own Table
+// 1-2 result matches ANY of `categories` (an attack roll, say, checks
+// both ["allAttack", "meleeAttack"] at once) - 0 otherwise. A character
+// only ever has ONE Table 1-2 result, so checking multiple categories at
+// once never double-counts; it's just "does the one result I have match
+// any of the ways this particular roll could qualify."
+function luckAugurModLive(categories) {
+  const entry = luckAugurEntry();
+  if (!entry || !categories.includes(entry.category)) return 0;
+  const modEl = document.getElementById("pc-luck-augur-mod");
+  const n = modEl ? parseInt(modEl.value, 10) : NaN;
+  return Number.isFinite(n) ? n : 0;
+}
+// Stats-based sibling of luckAugurModLive, for the Combat Tracker.
+function luckAugurModForStats(stats, categories) {
+  const entry = luckAugurEntryForStats(stats);
+  if (!entry || !categories.includes(entry.category)) return 0;
+  const n = parseInt(stats.data["luck-augur-mod"], 10);
+  return Number.isFinite(n) ? n : 0;
+}
+// Which Birth Augur categories a given weapon's ATTACK roll could match -
+// "All attack rolls" always applies alongside whichever more specific one
+// fits (melee/missile/unarmed); Table 1-2 has no "unarmed damage" entry,
+// so unarmedDamage deliberately isn't a category anywhere in the table.
+function luckAugurAttackCategories(entry) {
+  if (!entry) return ["allAttack"];
+  if (entry.key === "unarmed") return ["allAttack", "unarmedAttack"];
+  return entry.type === "ranged" ? ["allAttack", "missileAttack"] : ["allAttack", "meleeAttack"];
+}
+function luckAugurDamageCategories(entry) {
+  if (!entry || entry.key === "unarmed") return ["allDamage"];
+  return entry.type === "ranged" ? ["allDamage", "missileDamage"] : ["allDamage", "meleeDamage"];
+}
+// Updates the note under the 🎲 Roll Birth Augur button and the button's
+// own label - passive, every-render-pass resync (called from
+// renderPcStatline) same as every other derived note in this app.
+function refreshBirthAugurNote() {
+  const noteEl = document.getElementById("pc-luck-augur-note");
+  const btnEl = document.getElementById("pc-luck-augur-btn");
+  if (!noteEl || !btnEl) return;
+  const entry = luckAugurEntry();
+  if (!entry) {
+    noteEl.style.display = "none";
+    btnEl.textContent = "🎲 Roll Birth Augur";
+    return;
+  }
+  const rollEl = document.getElementById("pc-luck-augur-roll");
+  const modEl = document.getElementById("pc-luck-augur-mod");
+  const mod = modEl ? parseInt(modEl.value, 10) || 0 : 0;
+  const supported = DCC_LUCK_AUGUR_SUPPORTED.has(entry.category);
+  noteEl.style.display = "";
+  noteEl.textContent = `Birth Augur (Table 1-2): rolled ${rollEl.value} - Lucky Roll: ${entry.label}, ${formatSignedNumber(mod)} (fixed since this roll - doesn't change even if Luck does later).${supported ? "" : " Not currently wired to a mechanic in this app - tracked here for reference only."}`;
+  btnEl.textContent = "🎲 Reroll Birth Augur";
+}
+// "Bountiful harvest: Hit points (applies at each level)" - modeled as
+// frozen-Luck-modifier x current Level, recomputed (and the delta applied
+// to HP Max/Current) on every render pass rather than only once at
+// character creation, since this app has no discrete "level up" event to
+// hook - a Level EDIT is itself the only signal available that another
+// level's worth of the bonus should now apply. pc-luck-augur-hp-bonus-
+// applied tracks what's already been folded in, same delta-correction
+// pattern applyFamiliarHpBonusToWizard uses for a familiar's HP bonus.
+function applyLuckAugurHpBonus() {
+  const entry = luckAugurEntry();
+  const levelEl = document.getElementById("pc-level");
+  const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
+  const perLevelMod = entry && entry.category === "hitPoints" ? luckAugurModLive(["hitPoints"]) : 0;
+  const newBonus = perLevelMod * level;
+  const appliedEl = document.getElementById("pc-luck-augur-hp-bonus-applied");
+  if (!appliedEl) return;
+  const oldBonus = parseInt(appliedEl.value, 10) || 0;
+  const delta = newBonus - oldBonus;
+  appliedEl.value = String(newBonus);
+  if (!delta) return;
+  const maxEl = document.getElementById("pc-hp-max");
+  const curEl = document.getElementById("pc-hp-current");
+  const maxVal = maxEl ? parseInt(maxEl.value, 10) : NaN;
+  if (Number.isFinite(maxVal)) maxEl.value = String(maxVal + delta);
+  const curVal = curEl ? parseInt(curEl.value, 10) : NaN;
+  if (Number.isFinite(curVal)) curEl.value = String(Math.max(0, curVal + delta));
+}
+document.getElementById("pc-luck-augur-btn").addEventListener("click", () => {
+  const roll = Math.floor(Math.random() * 30) + 1;
+  const mod = pcLuckModifierLive();
+  document.getElementById("pc-luck-augur-roll").value = String(roll);
+  document.getElementById("pc-luck-augur-mod").value = String(mod);
+  scheduleSave();
+  // Full render pass - a new augur result can change a huge number of
+  // derived fields at once (attack/damage bonuses, skill totals, Spell
+  // Check, Turn Unholy, Lay on Hands, saves, Init, AC, Speed, Languages,
+  // HP) - see renderPcStatline's own refreshBirthAugurNote/
+  // applyLuckAugurHpBonus calls, run as part of this same pass.
+  cfgRenderFromCurrentForm("pc");
+  const entry = DCC_LUCK_AUGUR_TABLE[roll - 1];
+  const supported = DCC_LUCK_AUGUR_SUPPORTED.has(entry.category);
+  showStatus(`Birth Augur: rolled ${roll} - Lucky Roll: ${entry.label} (${formatSignedNumber(mod)}).${supported ? "" : " Not currently wired to a mechanic in this app."}`, false, 8000);
+});
+
 // Table 1-7's own Luck Die column (DCC RPG core rulebook) - independently
 // supplied by the user from their own copy of the table, same sourcing as
 // the class Titles/Known Spells tables. Die SIDES only, by Thief level.
@@ -8500,11 +8702,12 @@ function rollTurnUnholyRow(row) {
   const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
   const perMod = abilityModifierFromField("pc-per");
   const luckMod = pcLuckModifierLive();
+  const augurMod = luckAugurModLive(["turnUnholy"]);
   const actDieEl = row ? row.querySelector(".attack-action-die") : null;
   const sides = actionDieProfileForAttackLive({ actionDieIndex: actDieEl ? actDieEl.value : "0" }).sides;
   const forcedD20 = consumeForcedD20();
   const rolled = forcedD20 !== null ? Math.min(forcedD20, sides) : (Math.floor(Math.random() * sides) + 1);
-  const total = rolled + level + perMod + luckMod;
+  const total = rolled + level + perMod + luckMod + augurMod;
   let note = rolled === 1 ? ` ${markFumbleAlert("💀 FAILURE")} Natural 1 always fails.` : "";
   const disapprovalRange = checkPcDisapprovalTrigger(rolled, "per");
   if (disapprovalRange !== null) {
@@ -8514,10 +8717,11 @@ function rollTurnUnholyRow(row) {
     note += ` ${markFumbleAlert("😇 DISAPPROVAL")} - the check failed (${total} ≤ 11, no effect regardless of HD) - roll on Table 5-7. Range now widens to 1-${widenedFrom + 1} for the rest of the day.`;
   }
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
-  const text = `Turn Unholy: d${sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(level)}(level) ${formatSignedNumber(perMod)}(Per) ${formatSignedNumber(luckMod)}(Luck) = ${markRollTotal(total)}${note}`;
+  const augurText = augurMod ? ` ${formatSignedNumber(augurMod)}(Birth Augur)` : "";
+  const text = `Turn Unholy: d${sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(level)}(level) ${formatSignedNumber(perMod)}(Per) ${formatSignedNumber(luckMod)}(Luck)${augurText} = ${markRollTotal(total)}${note}`;
   showStatus(text, false, note ? 9000 : 4000);
   appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId)) });
-  broadcastDiceRoll({ rollerName, dice: [{ sides, value: rolled }], modifier: level + perMod + luckMod, notation: `d${sides}`, total, label: "Turn Unholy" });
+  broadcastDiceRoll({ rollerName, dice: [{ sides, value: rolled }], modifier: level + perMod + luckMod + augurMod, notation: `d${sides}`, total, label: "Turn Unholy" });
   openTurnUnholyModal(total);
 }
 
@@ -8710,11 +8914,12 @@ function rollLayOnHandsRow(row) {
   const levelEl = document.getElementById("pc-level");
   const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
   const perMod = abilityModifierFromField("pc-per");
+  const augurMod = luckAugurModLive(["magicalHealing"]);
   const actDieEl = row ? row.querySelector(".attack-action-die") : null;
   const sides = actionDieProfileForAttackLive({ actionDieIndex: actDieEl ? actDieEl.value : "0" }).sides;
   const forcedD20 = consumeForcedD20();
   const rolled = forcedD20 !== null ? Math.min(forcedD20, sides) : (Math.floor(Math.random() * sides) + 1);
-  const total = rolled + level + perMod;
+  const total = rolled + level + perMod + augurMod;
   let note = rolled === 1 ? ` ${markFumbleAlert("💀 FAILURE")} Natural 1 always fails.` : "";
   const disapprovalRange = checkPcDisapprovalTrigger(rolled, "per");
   if (disapprovalRange !== null) {
@@ -8724,10 +8929,11 @@ function rollLayOnHandsRow(row) {
     note += ` ${markFumbleAlert("😇 DISAPPROVAL")} - the check failed (${total} ≤ 11, no healing) - roll on Table 5-7. Range now widens to 1-${widenedFrom + 1} for the rest of the day.`;
   }
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
-  const text = `Lay on Hands: d${sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(level)}(level) ${formatSignedNumber(perMod)}(Per) = ${markRollTotal(total)}${note}`;
+  const augurText = augurMod ? ` ${formatSignedNumber(augurMod)}(Birth Augur)` : "";
+  const text = `Lay on Hands: d${sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(level)}(level) ${formatSignedNumber(perMod)}(Per)${augurText} = ${markRollTotal(total)}${note}`;
   showStatus(text, false, note ? 9000 : 4000);
   appendChatLog({ kind: "skill", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId)) });
-  broadcastDiceRoll({ rollerName, dice: [{ sides, value: rolled }], modifier: level + perMod, notation: `d${sides}`, total, label: "Lay on Hands" });
+  broadcastDiceRoll({ rollerName, dice: [{ sides, value: rolled }], modifier: level + perMod + augurMod, notation: `d${sides}`, total, label: "Lay on Hands" });
   openLayOnHandsModal(total);
 }
 
@@ -8988,17 +9194,29 @@ const PC_SAVE_FIELD_KEYS = {
 // since there's no class table row to add), or - for Init specifically -
 // a Warrior's flat level bonus (pcInitLevelBonus; 0 for every other
 // class).
+// Birth Augur (Table 1-2) categories for each save/Init field - "Lucky
+// sign: Saving throws" covers all three, plus each has its own more
+// specific entry too (a character only ever has ONE Table 1-2 result, so
+// checking both a save's own category and the umbrella one never double-
+// counts - see luckAugurModLive's own comment).
+const PC_SAVE_AUGUR_CATEGORIES = {
+  "pc-fort": ["allSaves", "fortitudeSaves"],
+  "pc-ref": ["allSaves", "reflexSaves"],
+  "pc-will": ["allSaves", "willpowerSaves"],
+};
 function derivedPcFieldValue(fieldId, sourceId) {
   const abilityMod = abilityModifierFromField(sourceId);
   if (fieldId === "pc-init") {
     const classEl = document.getElementById("pc-class");
     const levelEl = document.getElementById("pc-level");
     const lvlBonus = pcInitLevelBonus(classEl ? classEl.value : "", levelEl ? levelEl.value : "");
-    return formatSignedNumber(abilityMod + lvlBonus);
+    const augurMod = luckAugurModLive(["initiative"]);
+    return formatSignedNumber(abilityMod + lvlBonus + augurMod);
   }
   const saveKey = PC_SAVE_FIELD_KEYS[fieldId];
   if (!saveKey) return formatSignedNumber(abilityMod);
-  return formatSignedNumber(abilityMod + classSaveBonus(saveKey));
+  const augurMod = luckAugurModLive(PC_SAVE_AUGUR_CATEGORIES[fieldId] || []);
+  return formatSignedNumber(abilityMod + classSaveBonus(saveKey) + augurMod);
 }
 
 // Mouseover breakdown for the Init field - same "spell out every term"
@@ -9017,9 +9235,11 @@ function initBreakdownTooltipLive() {
   const lvl = levelEl ? levelEl.value.trim() : "";
   const agiMod = abilityModifierFromField("pc-agi");
   const lvlBonus = pcInitLevelBonus(cls, lvl);
+  const augurMod = luckAugurModLive(["initiative"]);
   const sumParts = [`Agi ${formatSignedNumber(agiMod)}`];
   if (lvlBonus) sumParts.push(`Warrior lvl ${lvl} ${formatSignedNumber(lvlBonus)}`);
-  const autoTotal = agiMod + lvlBonus;
+  if (augurMod) sumParts.push(`Birth Augur ${formatSignedNumber(augurMod)}`);
+  const autoTotal = agiMod + lvlBonus + augurMod;
   const initEl = document.getElementById("pc-init");
   const currentText = initEl ? initEl.value.trim() : "";
   const autoText = formatSignedNumber(autoTotal);
@@ -10145,13 +10365,16 @@ function pcSpellCheckModifierBreakdown(atk, spellburnPoints = 0, attemptReversed
   // this Elf declared, and 0 for every class except Elf (the picker itself
   // is Elf-only - see recalcPcSpellSection).
   const luckSpellMod = cls === "Elf" ? elfLuckSpellModLive(atk && atk.name) : 0;
-  const modifier = level + abilityMod + penalty + mercurialBonus + spellburnPoints + luckSpellMod;
+  // Birth Augur (Table 1-2) - "Spell checks".
+  const augurMod = luckAugurModLive(["spellChecks"]);
+  const modifier = level + abilityMod + penalty + mercurialBonus + spellburnPoints + luckSpellMod + augurMod;
   const abilityLabel = abilityId === "per" ? "Personality" : "Intelligence";
   const parts = [`Level ${formatSignedNumber(level)}`, `${abilityLabel} ${formatSignedNumber(abilityMod)}`];
   if (hinderedByArmor && penalty) parts.push(`Armor Check Penalty ${formatSignedNumber(penalty)}`);
   if (mercurialBonus) parts.push(`Mercurial Magic ${formatSignedNumber(mercurialBonus)}`);
   if (spellburnPoints) parts.push(`Spellburn ${formatSignedNumber(spellburnPoints)}`);
   if (luckSpellMod) parts.push(`Luck Spell ${formatSignedNumber(luckSpellMod)}`);
+  if (augurMod) parts.push(`Birth Augur ${formatSignedNumber(augurMod)}`);
   // Mithril note (DCC RPG core rulebook, Elf class - see
   // pcSpellcastingCheckPenaltyTotal) - only worth calling out when it's
   // actually excluding something, i.e. an Elf has at least one Equipped,
@@ -10187,13 +10410,16 @@ function pcSpellCheckModifierBreakdownForStats(stats, atk, spellburnPoints = 0, 
   // Elf Luck Spell - see pcSpellCheckModifierBreakdown's own comment
   // (Sheet-side sibling).
   const luckSpellMod = cls === "Elf" ? elfLuckSpellModForStats(stats, atk && atk.name) : 0;
-  const modifier = level + abilityMod + penalty + mercurialBonus + spellburnPoints + luckSpellMod;
+  // Birth Augur - see pcSpellCheckModifierBreakdown's own comment.
+  const augurMod = luckAugurModForStats(stats, ["spellChecks"]);
+  const modifier = level + abilityMod + penalty + mercurialBonus + spellburnPoints + luckSpellMod + augurMod;
   const abilityLabel = abilityId === "per" ? "Personality" : "Intelligence";
   const parts = [`Level ${formatSignedNumber(level)}`, `${abilityLabel} ${formatSignedNumber(abilityMod)}`];
   if (hinderedByArmor && penalty) parts.push(`Armor Check Penalty ${formatSignedNumber(penalty)}`);
   if (mercurialBonus) parts.push(`Mercurial Magic ${formatSignedNumber(mercurialBonus)}`);
   if (spellburnPoints) parts.push(`Spellburn ${formatSignedNumber(spellburnPoints)}`);
   if (luckSpellMod) parts.push(`Luck Spell ${formatSignedNumber(luckSpellMod)}`);
+  if (augurMod) parts.push(`Birth Augur ${formatSignedNumber(augurMod)}`);
   // Mithril note - see pcSpellCheckModifierBreakdown's own comment
   // (Sheet-side sibling).
   const hasMithrilExemption = hinderedByArmor && cls === "Elf" && (stats.data.armorItems || []).some(item => item.equipped && item.mithril);
@@ -10215,8 +10441,12 @@ function turnUnholyModifierForStats(stats, slotKey) {
   const level = parseLevelNumber(stats.data.level) || 0;
   const perMod = abilityModifierFromRaw(stats.data.per);
   const luckMod = abilityModifierFromRaw(stats.data.lck);
+  // Birth Augur (Table 1-2) - "Turn Unholy checks", additive on top of the
+  // live Luck bonus above (which every Cleric always gets, regardless of
+  // augur result - a completely separate rule).
+  const augurMod = luckAugurModForStats(stats, ["turnUnholy"]);
   const sides = actionDieProfileForAttack(stats, { actionDieIndex: slotKey }).sides;
-  return { level, perMod, luckMod, sides, modifier: level + perMod + luckMod };
+  return { level, perMod, luckMod, augurMod, sides, modifier: level + perMod + luckMod + augurMod };
 }
 
 // Stats-based sibling of layOnHandsRowHtml/rollLayOnHandsRow's own Bonus
@@ -10229,8 +10459,13 @@ function layOnHandsModifierForStats(stats, slotKey) {
   if ((stats.data.alignment || "").trim() === "C") return null;
   const level = parseLevelNumber(stats.data.level) || 0;
   const perMod = abilityModifierFromRaw(stats.data.per);
+  // Birth Augur (Table 1-2) - "Survived the plague: Magical healing* (*If
+  // a cleric, applies to all healing the cleric performs)". Lay on Hands
+  // only - Cause Wounds is damage, not healing, so causeWoundsModifierForStats
+  // below deliberately does NOT get this.
+  const augurMod = luckAugurModForStats(stats, ["magicalHealing"]);
   const sides = actionDieProfileForAttack(stats, { actionDieIndex: slotKey }).sides;
-  return { level, perMod, sides, modifier: level + perMod };
+  return { level, perMod, augurMod, sides, modifier: level + perMod + augurMod };
 }
 
 // Stats-based sibling of causeWoundsRowHtml/rollCauseWoundsRow's own Bonus
@@ -11559,9 +11794,10 @@ function turnUnholyRowHtml(atk) {
   const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
   const perMod = abilityModifierFromField("pc-per");
   const luckMod = pcLuckModifierLive();
-  const bonusText = isCleric ? formatSignedNumber(level + perMod + luckMod) : "";
+  const augurMod = luckAugurModLive(["turnUnholy"]);
+  const bonusText = isCleric ? formatSignedNumber(level + perMod + luckMod + augurMod) : "";
   const bonusTitle = isCleric
-    ? `Turn Unholy = d${sides} + Level ${formatSignedNumber(level)} + Personality ${formatSignedNumber(perMod)} + Luck ${formatSignedNumber(luckMod)}. It's a Spell Check, so it follows the dice chain - a smaller Action Die rolls a smaller die.`
+    ? `Turn Unholy = d${sides} + Level ${formatSignedNumber(level)} + Personality ${formatSignedNumber(perMod)} + Luck ${formatSignedNumber(luckMod)}${augurMod ? ` + Birth Augur ${formatSignedNumber(augurMod)}` : ""}. It's a Spell Check, so it follows the dice chain - a smaller Action Die rolls a smaller size.`
     : "Only Cleric has Turn Unholy - pick Cleric above.";
   const dieBadgeHtml = isCleric ? `<div class="attack-row-badges"><span class="weapon-badge weapon-badge-die" title="Turn Unholy die this row rolls">d${sides}</span></div>` : "";
   const luckLastRollAttr = escapeHtml(JSON.stringify(atk.luckLastRoll || {}));
@@ -11610,9 +11846,10 @@ function layOnHandsRowHtml(atk) {
   const sides = actionDieProfileForAttackLive({ actionDieIndex: effectiveActionDieIndex }).sides;
   const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
   const perMod = abilityModifierFromField("pc-per");
-  const bonusText = canLayOnHands ? formatSignedNumber(level + perMod) : "";
+  const augurMod = canLayOnHands ? luckAugurModLive(["magicalHealing"]) : 0;
+  const bonusText = canLayOnHands ? formatSignedNumber(level + perMod + augurMod) : "";
   const bonusTitle = canLayOnHands
-    ? `Lay on Hands = d${sides} + Level ${formatSignedNumber(level)} + Personality ${formatSignedNumber(perMod)}. It's a Spell Check, so it follows the dice chain - a smaller Action Die rolls a smaller die.`
+    ? `Lay on Hands = d${sides} + Level ${formatSignedNumber(level)} + Personality ${formatSignedNumber(perMod)}${augurMod ? ` + Birth Augur ${formatSignedNumber(augurMod)}` : ""}. It's a Spell Check, so it follows the dice chain - a smaller Action Die rolls a smaller size.`
     : "Only a Lawful or Neutral Cleric has Lay on Hands - Chaotic clerics get Cause Wounds instead.";
   const dieBadgeHtml = canLayOnHands ? `<div class="attack-row-badges"><span class="weapon-badge weapon-badge-die" title="Lay on Hands die this row rolls">d${sides}</span></div>` : "";
   const luckLastRollAttr = escapeHtml(JSON.stringify(atk.luckLastRoll || {}));
@@ -11955,6 +12192,7 @@ function refreshTurnUnholyRows() {
   const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
   const perMod = abilityModifierFromField("pc-per");
   const luckMod = pcLuckModifierLive();
+  const augurMod = luckAugurModLive(["turnUnholy"]);
   listEl.querySelectorAll(".turn-unholy-row").forEach(row => {
     const bonusInput = row.querySelector(".attack-bonus");
     if (!bonusInput) return;
@@ -11969,9 +12207,9 @@ function refreshTurnUnholyRows() {
     // value itself.
     const actDieEl = row.querySelector(".attack-action-die");
     const sides = actionDieProfileForAttackLive({ actionDieIndex: actDieEl ? actDieEl.value : "0" }).sides;
-    bonusInput.value = isCleric ? formatSignedNumber(level + perMod + luckMod) : "";
+    bonusInput.value = isCleric ? formatSignedNumber(level + perMod + luckMod + augurMod) : "";
     bonusInput.title = isCleric
-      ? `Turn Unholy = d${sides} + Level ${formatSignedNumber(level)} + Personality ${formatSignedNumber(perMod)} + Luck ${formatSignedNumber(luckMod)}. It's a Spell Check, so it follows the dice chain - a smaller Action Die rolls a smaller die.`
+      ? `Turn Unholy = d${sides} + Level ${formatSignedNumber(level)} + Personality ${formatSignedNumber(perMod)} + Luck ${formatSignedNumber(luckMod)}${augurMod ? ` + Birth Augur ${formatSignedNumber(augurMod)}` : ""}. It's a Spell Check, so it follows the dice chain - a smaller Action Die rolls a smaller size.`
       : "Only Cleric has Turn Unholy - pick Cleric above.";
     let metaEl = row.querySelector(".attack-row-meta");
     if (isCleric) {
@@ -11998,6 +12236,7 @@ function refreshLayOnHandsRows() {
   const levelEl = document.getElementById("pc-level");
   const level = parseLevelNumber(levelEl ? levelEl.value : "") || 0;
   const perMod = abilityModifierFromField("pc-per");
+  const augurMod = canLayOnHands ? luckAugurModLive(["magicalHealing"]) : 0;
   listEl.querySelectorAll(".lay-on-hands-row").forEach(row => {
     const bonusInput = row.querySelector(".attack-bonus");
     if (!bonusInput) return;
@@ -12007,9 +12246,9 @@ function refreshLayOnHandsRows() {
     // trigger a full row rebuild elsewhere.
     const actDieEl = row.querySelector(".attack-action-die");
     const sides = actionDieProfileForAttackLive({ actionDieIndex: actDieEl ? actDieEl.value : "0" }).sides;
-    bonusInput.value = canLayOnHands ? formatSignedNumber(level + perMod) : "";
+    bonusInput.value = canLayOnHands ? formatSignedNumber(level + perMod + augurMod) : "";
     bonusInput.title = canLayOnHands
-      ? `Lay on Hands = d${sides} + Level ${formatSignedNumber(level)} + Personality ${formatSignedNumber(perMod)}. It's a Spell Check, so it follows the dice chain - a smaller Action Die rolls a smaller die.`
+      ? `Lay on Hands = d${sides} + Level ${formatSignedNumber(level)} + Personality ${formatSignedNumber(perMod)}${augurMod ? ` + Birth Augur ${formatSignedNumber(augurMod)}` : ""}. It's a Spell Check, so it follows the dice chain - a smaller Action Die rolls a smaller size.`
       : "Only a Lawful or Neutral Cleric has Lay on Hands - Chaotic clerics get Cause Wounds instead.";
     let metaEl = row.querySelector(".attack-row-meta");
     if (canLayOnHands) {
@@ -12325,7 +12564,9 @@ function recalcPcAC() {
   const equippedBonus = equippedItems.reduce((sum, item) => sum + (parseInt(item.bonus, 10) || 0), 0);
   const miscMatch = String(miscEl ? miscEl.value : "").match(/-?\d+/);
   const miscBonus = miscMatch ? parseInt(miscMatch[0], 10) : 0;
-  const total = 10 + agiMod + equippedBonus + miscBonus;
+  // Birth Augur (Table 1-2) - "Charmed house: Armor Class".
+  const augurMod = luckAugurModLive(["armorClass"]);
+  const total = 10 + agiMod + equippedBonus + miscBonus + augurMod;
   acEl.value = total;
 
   // Mouseover breakdown - names each EQUIPPED item's own contribution
@@ -12339,6 +12580,7 @@ function recalcPcAC() {
     sumParts.push(`${armorTypeEntry(item.type).label} ${formatSignedNumber(bonus)}`);
   });
   if (miscBonus) sumParts.push(`Misc ${formatSignedNumber(miscBonus)}`);
+  if (augurMod) sumParts.push(`Birth Augur ${formatSignedNumber(augurMod)}`);
   acEl.title = `AC = ${sumParts.join(" + ")} = ${total}.${equippedItems.length ? "" : " No armor/shield is currently marked Equipped."}`;
   return total;
 }
@@ -12444,7 +12686,11 @@ function recalcPcSpeed() {
   const penalty = readArmorItems()
     .filter(item => item.equipped)
     .reduce((sum, item) => sum + (armorTypeEntry(item.type).speedPenalty || 0), 0);
-  const total = Math.max(0, base - penalty);
+  // Birth Augur (Table 1-2) - "Wild child: Speed (each +1/-1 = +5'/-5'
+  // speed)" - the only augur category that scales the frozen Luck
+  // modifier by a multiplier instead of adding it flat.
+  const augurBonus = luckAugurModLive(["speed"]) * 5;
+  const total = Math.max(0, base - penalty + augurBonus);
   speedEl.value = `${total}'`;
   return total;
 }
@@ -12708,13 +12954,17 @@ function pcLanguagesBonusCounts(cls, intMod, level) {
       ? `, +${firstLevelBonus} more at 1st level (Demi-human: 1 randomly determined + 1 per Int modifier point)`
       : ", +1 more at 1st level (Demi-human: 1 randomly determined language)";
   }
-  return { isDemihuman, isClassed, zeroLevelBonus, firstLevelBonus, firstLevelNote };
+  // Birth Augur (Table 1-2) - "Birdsong: Number of languages" - +1 known
+  // language, on top of everything else above.
+  const augurBonus = luckAugurModLive(["languages"]);
+  return { isDemihuman, isClassed, zeroLevelBonus, firstLevelBonus, firstLevelNote, augurBonus };
 }
 
 function computePcLanguagesText(cls, intScore, intMod, level) {
   if (intScore === null) return "";
-  const { isDemihuman, isClassed, zeroLevelBonus, firstLevelBonus, firstLevelNote } = pcLanguagesBonusCounts(cls, intMod, level);
-  const total = 1 + zeroLevelBonus + firstLevelBonus;
+  const { isDemihuman, isClassed, zeroLevelBonus, firstLevelBonus, firstLevelNote, augurBonus } = pcLanguagesBonusCounts(cls, intMod, level);
+  const total = 1 + zeroLevelBonus + firstLevelBonus + augurBonus;
+  const augurNote = augurBonus ? ` +${augurBonus} more (Birth Augur, Table 1-2)` : "";
   // Racial language (DCC RPG core rulebook, Dwarf's own class description:
   // "At 1st level, a dwarf automatically knows Common, the dwarven racial
   // language, plus one additional randomly determined language") - per
@@ -12727,7 +12977,7 @@ function computePcLanguagesText(cls, intScore, intMod, level) {
     : isClassed ? " Also automatically knows their own racial language."
     : intScore >= 8 ? " Also automatically knows their own racial language (Int 8+, 0-level)."
     : "";
-  return `Languages known: Common${zeroLevelBonus ? ` + ${zeroLevelBonus} bonus (Int modifier, 0-level)` : ""}${firstLevelNote} = ${total} total.${racialNote} Click 🎲 Roll Language below to fill in the rest from Appendix L.`;
+  return `Languages known: Common${zeroLevelBonus ? ` + ${zeroLevelBonus} bonus (Int modifier, 0-level)` : ""}${firstLevelNote}${augurNote} = ${total} total.${racialNote} Click 🎲 Roll Language below to fill in the rest from Appendix L.`;
 }
 
 function refreshPcLanguagesNote() {
@@ -12831,8 +13081,8 @@ function pcRollableLanguageCountLive() {
   const levelEl = document.getElementById("pc-level");
   const level = parseLevelNumber(levelEl ? levelEl.value : "");
   const intMod = abilityModifierFromField("pc-int");
-  const { zeroLevelBonus, firstLevelBonus } = pcLanguagesBonusCounts(cls, intMod, level);
-  return zeroLevelBonus + firstLevelBonus;
+  const { zeroLevelBonus, firstLevelBonus, augurBonus } = pcLanguagesBonusCounts(cls, intMod, level);
+  return zeroLevelBonus + firstLevelBonus + augurBonus;
 }
 
 // Rolls once on Appendix L for this character's own Class, resolves
@@ -13549,6 +13799,13 @@ function thiefSkillActionRowsForStats(stats) {
 function computeSkillRowTotal(row) {
   const abilityMod = row.ability ? abilityModifierFromField(`pc-${row.ability}`) : 0;
   const penalty = row.checkPenaltyApplies ? computePcCheckPenaltyTotal() : 0;
+  // Birth Augur (Table 1-2) - "Skill checks (including thief skills)"
+  // covers every row here; Find Trap ALSO separately matches "Find/
+  // disable traps" specifically, so it checks both categories (a
+  // character only ever has one Table 1-2 result, so this never double-
+  // counts - see luckAugurModLive's own comment).
+  const augurCategories = row.key === "findTrap" ? ["skillChecks", "findDisableTraps"] : ["skillChecks"];
+  const augurMod = luckAugurModLive(augurCategories);
   if (row.isDie) {
     // Cast Spell from Scroll's "bonus" is the action die's sides, not a
     // flat number added to a d20 roll - the ability modifier AND the armor
@@ -13556,9 +13813,9 @@ function computeSkillRowTotal(row) {
     // Cleric - see classSpellcastingHinderedByArmor - and a Thief is never
     // a Cleric) still apply to the check itself (see rollPcSkill), just
     // not to the die.
-    return { isDie: true, sides: row.classBonus, abilityMod, penalty };
+    return { isDie: true, sides: row.classBonus, abilityMod, penalty, augurMod };
   }
-  return { isDie: false, classBonus: row.classBonus, abilityMod, penalty, total: row.classBonus + abilityMod + penalty };
+  return { isDie: false, classBonus: row.classBonus, abilityMod, penalty, augurMod, total: row.classBonus + abilityMod + penalty + augurMod };
 }
 
 // Stats-based sibling of computeSkillRowTotal just above - needed so the
@@ -13575,8 +13832,11 @@ function computeSkillRowTotalForStats(stats, row) {
     const equippedItems = (stats.data.armorItems || []).filter(item => item.equipped);
     penalty = equippedItems.reduce((sum, item) => sum + (parseInt(item.checkPenalty, 10) || 0), 0);
   }
-  if (row.isDie) return { isDie: true, sides: row.classBonus, abilityMod, penalty };
-  return { isDie: false, classBonus: row.classBonus, abilityMod, penalty, total: row.classBonus + abilityMod + penalty };
+  // Birth Augur - see computeSkillRowTotal's own comment (Sheet-side sibling).
+  const augurCategories = row.key === "findTrap" ? ["skillChecks", "findDisableTraps"] : ["skillChecks"];
+  const augurMod = luckAugurModForStats(stats, augurCategories);
+  if (row.isDie) return { isDie: true, sides: row.classBonus, abilityMod, penalty, augurMod };
+  return { isDie: false, classBonus: row.classBonus, abilityMod, penalty, augurMod, total: row.classBonus + abilityMod + penalty + augurMod };
 }
 
 function skillRowValueText(row) {
@@ -13885,7 +14145,13 @@ async function rollPcSkill(key) {
     const abilityId = row.dataset.ability;
     const abilityMod = abilityId ? abilityModifierFromField(`pc-${abilityId}`) : 0;
     const penalty = row.dataset.checkPenaltyApplies === "1" ? computePcCheckPenaltyTotal() : 0;
-    const modifier = abilityMod + penalty;
+    // Birth Augur (Table 1-2) - "Skill checks" covers this row too (see
+    // computeSkillRowTotal's own comment); this branch recomputes its own
+    // modifier rather than trusting the displayed field (the die-size
+    // display has nothing to parse a flat number out of), so it needs the
+    // same term added explicitly.
+    const augurMod = luckAugurModLive(["skillChecks"]);
+    const modifier = abilityMod + penalty + augurMod;
     const forcedD20 = consumeForcedD20();
     const rolled = forcedD20 !== null ? Math.min(forcedD20, sides) : (Math.floor(Math.random() * sides) + 1);
     const total = rolled + modifier;
@@ -13943,7 +14209,7 @@ async function rollThiefSkillActionRow(row) {
   const forcedD20 = consumeForcedD20();
   if (c.isDie) {
     const rolled = forcedD20 !== null ? Math.min(forcedD20, c.sides) : (Math.floor(Math.random() * c.sides) + 1);
-    const modifier = c.abilityMod + c.penalty;
+    const modifier = c.abilityMod + c.penalty + c.augurMod;
     const total = rolled + modifier;
     const text = `${label}: d${c.sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(modifier)} = ${markRollTotal(total)}`;
     showStatus(text, false, 4000);
@@ -16164,6 +16430,15 @@ async function rollAttackFor(itemId, attackId, slotKey) {
   const atkForDie = { ...atk, actionDieIndex: effectiveSlotKey };
 
   const atkMod = parseModifier(atk.bonus);
+  // Birth Augur (Table 1-2, DCC RPG core rulebook) - a fixed Luck bonus to
+  // exactly one roll type, frozen at whatever Luck was when first rolled.
+  // The ATTACK half is already folded into atk.bonus itself (see
+  // composedAttackBonusText, same "field is what it is, no double-adding"
+  // treatment the Favorite Weapon bonus gets) - only DAMAGE needs adding
+  // separately here, since there's no equivalent pre-baked damage field.
+  // PC-only - a monster attack never has one.
+  const weaponEntryForAugur = stats.mode === "pc" ? dccWeaponEntry(atk.weapon) : null;
+  const augurDamageMod = stats.mode === "pc" ? luckAugurModForStats(stats, luckAugurDamageCategories(weaponEntryForAugur)) : 0;
   // Table 1-9's Backstab bonus (a flat to-hit bonus, no ability modifier -
   // see backstabAttackBonusForStats) applies to THIS roll only when the
   // Tracker's "Declare Backstab" flag is active for this specific line.
@@ -16266,7 +16541,7 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     if (deed) rollDice.push({ sides: deed.sides, value: deed.roll });
     if (dmg) rollDice.push(...dmg.dice);
 
-    let dmgTotal = dmg !== null ? dmg.total + (deed ? deed.total : 0) : null;
+    let dmgTotal = dmg !== null ? dmg.total + (deed ? deed.total : 0) + augurDamageMod : null;
     let critLine = "";
     if (isCrit) {
       const critDieRoll = rollDamage(profile.critDie);
@@ -16307,9 +16582,10 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     }
 
     const backstabModText = backstabActive && backstabBonus ? `${formatModifier(backstabBonus)}(backstab)` : "";
+    const augurDamageModText = augurDamageMod ? `${formatModifier(augurDamageMod)}(Birth Augur)` : "";
     const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${atkSides} ${d20Roll}${wasForced ? " forced" : ""}${formatModifier(atkMod)}${deedText}${backstabModText})${untrainedNote}`;
     const dmgText = dmg !== null
-      ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${isCrit ? " +crit" : ""})`
+      ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${isCrit ? " +crit" : ""}${augurDamageModText})`
       : "";
     text = `${atk.name || "Attack"}: ${toHitText}${dmgText}${critLine}${deedLine}${backstabLine}`;
     label = isCrit
@@ -16517,6 +16793,13 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     // is" trust single-weapon rollAttackFor now gives atkMod, no separate
     // addition needed here.
     const atkMod = parseModifier(atk.bonus);
+    // Birth Augur (Table 1-2) - see rollAttackFor's own comment; the
+    // ATTACK half is already folded into atk.bonus (composedAttackBonusText
+    // doesn't care whether a row is configured two-weapon), only DAMAGE
+    // needs adding here, per hand since a two-weapon pair's two weapons
+    // can differ.
+    const weaponEntryForAugur = dccWeaponEntry(atk.weapon);
+    const augurDamageMod = luckAugurModForStats(stats, luckAugurDamageCategories(weaponEntryForAugur));
     // Each hand rolls its OWN fresh Deed Die (see rollDeedDieForStats) -
     // per Table 1-10's footnote, it's rolled anew with each attack, and
     // both hands of a two-weapon pair are two separate attacks even
@@ -16541,7 +16824,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     if (backstabActive) backstabRevertQueue.push(atk.id);
     const untrainedNote = isWeaponUntrained(stats, atk) ? " (untrained weapon, Table 4-1: -1 die)" : "";
     if (dmg) rollDice.push(...dmg.dice);
-    let dmgTotal = dmg !== null ? dmg.total + (deed ? deed.total : 0) : null;
+    let dmgTotal = dmg !== null ? dmg.total + (deed ? deed.total : 0) + augurDamageMod : null;
 
     // Off-hand can never crit under Table 4-3 / the Halfling rule -
     // critical hits while fighting two-weapon are a primary-hand-only
@@ -16599,9 +16882,10 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     }
 
     const backstabModText = backstabActive && backstabBonus ? `${formatModifier(backstabBonus)}(backstab)` : "";
+    const augurDamageModText = augurDamageMod ? `${formatModifier(augurDamageMod)}(Birth Augur)` : "";
     const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${sides} ${roll}${forcedNote}${formatModifier(atkMod)}${deedText}${backstabModText})${untrainedNote}`;
     const dmgText = dmg !== null
-      ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${critEligible ? " +crit" : ""})`
+      ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${critEligible ? " +crit" : ""}${augurDamageModText})`
       : "";
     return `${label}: ${toHitText}${dmgText}${critLine}${deedLine}${backstabLine}`;
   }
@@ -17483,7 +17767,8 @@ async function rollTurnUnholyForTracker(itemId, attackId, slotKey) {
     const widenedFrom = await widenPcDisapprovalRangeOnceForStats(itemId, 1);
     note += ` ${markFumbleAlert("😇 DISAPPROVAL")} - the check failed (${total} ≤ 11, no effect regardless of HD) - roll on Table 5-7. Range now widens to 1-${widenedFrom + 1} for the rest of the day.`;
   }
-  const text = `Turn Unholy: d${mod.sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(mod.level)}(level) ${formatSignedNumber(mod.perMod)}(Per) ${formatSignedNumber(mod.luckMod)}(Luck) = ${markRollTotal(total)}${note}`;
+  const augurText = mod.augurMod ? ` ${formatSignedNumber(mod.augurMod)}(Birth Augur)` : "";
+  const text = `Turn Unholy: d${mod.sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(mod.level)}(level) ${formatSignedNumber(mod.perMod)}(Per) ${formatSignedNumber(mod.luckMod)}(Luck)${augurText} = ${markRollTotal(total)}${note}`;
   await markActionSlotsUsed(itemId, [actionSlotKey(stats.mode, attackId, slotKey)]);
   const duration = note ? 9000 : 4000;
   showTrackerStatus(`${item.name || "Token"} — ${text}`, false, duration);
@@ -17516,7 +17801,8 @@ async function rollLayOnHandsForTracker(itemId, attackId, slotKey) {
     const widenedFrom = await widenPcDisapprovalRangeOnceForStats(itemId, 1);
     note += ` ${markFumbleAlert("😇 DISAPPROVAL")} - the check failed (${total} ≤ 11, no healing) - roll on Table 5-7. Range now widens to 1-${widenedFrom + 1} for the rest of the day.`;
   }
-  const text = `Lay on Hands: d${mod.sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(mod.level)}(level) ${formatSignedNumber(mod.perMod)}(Per) = ${markRollTotal(total)}${note}`;
+  const augurText = mod.augurMod ? ` ${formatSignedNumber(mod.augurMod)}(Birth Augur)` : "";
+  const text = `Lay on Hands: d${mod.sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(mod.level)}(level) ${formatSignedNumber(mod.perMod)}(Per)${augurText} = ${markRollTotal(total)}${note}`;
   await markActionSlotsUsed(itemId, [actionSlotKey(stats.mode, attackId, slotKey)]);
   const duration = note ? 9000 : 4000;
   showTrackerStatus(`${item.name || "Token"} — ${text}`, false, duration);
@@ -17620,7 +17906,7 @@ async function rollThiefSkillForTracker(itemId, attackId, slotKey) {
   await markActionSlotsUsed(itemId, [actionSlotKey(stats.mode, attackId, slotKey)]);
   if (c.isDie) {
     const rolled = forcedD20 !== null ? Math.min(forcedD20, c.sides) : (Math.floor(Math.random() * c.sides) + 1);
-    const modifier = c.abilityMod + c.penalty;
+    const modifier = c.abilityMod + c.penalty + c.augurMod;
     const total = rolled + modifier;
     const text = `${label}: d${c.sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(modifier)} = ${markRollTotal(total)}`;
     showTrackerStatus(`${item.name || "Token"} — ${text}`, false, 4000);
