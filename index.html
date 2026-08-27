@@ -1612,7 +1612,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 19:32</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 19:38</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2474,6 +2474,47 @@
     </div>
   </div>
 
+  <div id="spell-duel-modal-backdrop" class="tables-modal-backdrop" style="display:none">
+    <div class="tables-modal">
+      <div class="tables-modal-header">
+        <div>
+          <div class="tables-modal-title">Spell Duel Calculator</div>
+          <div class="tables-modal-subtitle">DCC RPG core rulebook, Table 4-5/4-6/4-7 - both spell checks must already succeed at their own normal threshold. Enter both casters' already-rolled Spell Check totals, then Compare. This app can't read another character's own Sheet, so both totals are typed in by hand.</div>
+        </div>
+        <button type="button" class="tables-modal-close" id="spell-duel-modal-close" title="Close">×</button>
+      </div>
+      <div class="tables-modal-body">
+        <div class="roll-modal-inputs">
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">Attacker's Momentum</span>
+            <span class="roll-modal-static" id="spell-duel-attacker-momentum">10</span>
+          </label>
+          <button type="button" class="hp-btn" id="spell-duel-attacker-momentum-reset" title="Reset to 10 - a fresh d20 momentum tracker, same as laying a new die in front of your character sheet at the start of a new duel.">↺</button>
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">Defender's Momentum</span>
+            <span class="roll-modal-static" id="spell-duel-defender-momentum">10</span>
+          </label>
+          <button type="button" class="hp-btn" id="spell-duel-defender-momentum-reset" title="Reset to 10.">↺</button>
+        </div>
+        <div class="roll-modal-inputs">
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">Attacker's Spell Check</span>
+            <input type="number" id="spell-duel-attacker-check" min="0" />
+          </label>
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">Defender's Spell Check</span>
+            <input type="number" id="spell-duel-defender-check" min="0" />
+          </label>
+          <button type="button" class="btn-next" id="spell-duel-compare-btn">Compare</button>
+        </div>
+        <div class="roll-modal-result" id="spell-duel-compare-result"></div>
+        <button type="button" class="btn-next" id="spell-duel-power-roll-btn" style="margin-top:8px; display:none;">🎲 Roll Counterspell Power</button>
+        <button type="button" class="btn-next" id="spell-duel-phlogiston-roll-btn" style="margin-top:8px; display:none;">🎲 Roll Phlogiston Disturbance (1d10)</button>
+        <div class="roll-modal-result" id="spell-duel-power-result"></div>
+      </div>
+    </div>
+  </div>
+
   <div id="morale-modal-backdrop" class="tables-modal-backdrop" style="display:none">
     <div class="tables-modal">
       <div class="tables-modal-header">
@@ -2754,6 +2795,7 @@
             <button type="button" id="pc-corruption-btn" class="hp-btn" style="display:none;" title="Roll Corruption (Tables 5-3/5-4/5-5) - Wizard/Elf only.">☣ Corruption</button>
             <button type="button" id="pc-disapproval-btn" class="hp-btn" style="display:none;" title="Roll Disapproval (Table 5-7) - Cleric only.">😇 Disapproval</button>
             <button type="button" id="pc-patron-taint-btn" class="hp-btn" style="display:none;" title="Roll Patron Taint Check (DCC RPG core rulebook) - Wizard/Elf only. Click after casting invoke patron, patron bond, or any other patron-based spell. Chance starts at 1% and rises by 1 point with each such casting that doesn't taint; a taint resets it back to 1%. On a taint, roll on your own patron's specific taint table (consult your book).">🔮 Patron Taint</button>
+            <button type="button" id="pc-spell-duel-btn" class="hp-btn" style="display:none;" title="Spell Duel Calculator (DCC RPG core rulebook) - both wizards and clerics can spell duel. Enter both casters' already-rolled Spell Check totals to resolve a counterspell exchange.">⚔️ Spell Duel</button>
           </div>
           <div class="attack-list" id="pc-spells-list"></div>
           <button type="button" class="add-attack-btn" id="add-spell-pc">+ Add Spell</button>
@@ -8852,6 +8894,189 @@ document.getElementById("morale-modal-roll-btn").addEventListener("click", () =>
   broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: d20 }], modifier: willMod + employerPer + gmMod, notation: "d20", total, label: "Morale Check" });
 });
 
+// Spell Duel (DCC RPG core rulebook, Table 4-5/4-6/4-7) - "both wizards
+// and clerics can spell duel... a spell duel is where one spellcaster
+// casts a spell that is countered by a second caster, and the two
+// proceed to throw spells until one dominates." This app can't read
+// another character's own Sheet/Tracker roll live, so the Spell Duel
+// Calculator (openSpellDuelModal below) takes both already-rolled Spell
+// Check totals as manual input rather than rolling them itself.
+//
+// SPELL_DUEL_DIE_BY_DIFF is Table 4-5 (Spell Duel Check Comparison) -
+// verified the 17x17 grid is entirely a function of the ABSOLUTE
+// DIFFERENCE between the two spell checks (every diagonal is constant),
+// so it's encoded here as a single array indexed by that difference
+// (clamped at 16, matching the table's own "28+" open bucket) rather
+// than transcribing the full grid - same total information, less room
+// for a transcription error. Index 0 (checks tied) is "PD" - refer to
+// Table 4-7 instead.
+const SPELL_DUEL_DIE_BY_DIFF = ["PD", "d3", "d4", "d5", "d5", "d6", "d6", "d7", "d7", "d8", "d8", "d10", "d10", "d12", "d12", "d14", "d16"];
+
+// Table 4-6: Counterspell Power - NOT verified against the free
+// Reference Booklet (unlike Table 4-7 below), so this is written in
+// Claude's own words describing the mechanic rather than the book's
+// exact phrasing, same "paraphrase, don't transcribe" treatment
+// DCC_FAMILIAR_TYPE_TRAITS got for the same reason. `die` (when present)
+// is the die the OUTCOME ITSELF calls for the player to roll (e.g. how
+// much a mitigated check drops by) - separate from the die already
+// rolled to reach this row.
+const SPELL_DUEL_COUNTERSPELL_TABLE = {
+  rows: [
+    { max: 1,
+      defenderHigh: { die: "d4", text: "Mitigate: subtract the roll from the ATTACKER's check. The attacker's spell still goes off at this lower result; the defender's spell is cancelled." },
+      attackerHigh: { die: "d4", text: "Push-through: subtract the roll from the DEFENDER's check. The defender's spell goes off at this lower result, and the attacker's spell also goes off, simultaneously, at its normal result." } },
+    { max: 2,
+      defenderHigh: { die: "d6", text: "Mitigate: subtract the roll from the ATTACKER's check. The attacker's spell still goes off at this lower result; the defender's spell is cancelled." },
+      attackerHigh: { die: "d8", text: "Push-through: subtract the roll from the DEFENDER's check. The defender's spell goes off at this lower result; the attacker's spell goes off FIRST, at its normal result." } },
+    { max: 3,
+      defenderHigh: { die: "d8", text: "Mitigate: subtract the roll from the ATTACKER's check. The attacker's spell still goes off at this lower result; the defender's spell is cancelled." },
+      attackerHigh: { die: null, text: "Overwhelm: the attacker's spell goes off at its normal result; the defender's spell is cancelled." } },
+    { max: 4,
+      defenderHigh: { die: "d10", text: "Mutual mitigation: subtract the roll from BOTH checks. Both spells go off simultaneously, at this lower result." },
+      attackerHigh: { die: null, text: "Overwhelm: the attacker's spell goes off at its normal result; the defender's spell is cancelled." } },
+    { max: 5,
+      defenderHigh: { die: null, text: "Mutual cancellation: both spells are cancelled." },
+      attackerHigh: { die: null, text: "Overwhelm: the attacker's spell goes off at its normal result; the defender's spell is cancelled." } },
+    { max: 6,
+      defenderHigh: { die: "d6", text: "Push-through: subtract the roll from the DEFENDER's check. The defender's spell goes off at this result; the attacker's spell is cancelled." },
+      attackerHigh: { die: "d8", text: "Overwhelm and reflect: subtract the roll from the DEFENDER's check. The attacker's spell goes off at its normal result, and the defender's own spell reflects back onto them at this lower result." } },
+    { max: 7,
+      defenderHigh: { die: "d4", text: "Push-through: subtract the roll from the DEFENDER's check. The defender's spell goes off at this result; the attacker's spell is cancelled." },
+      attackerHigh: { die: "d8", text: "Overwhelm and reflect: subtract the roll from the DEFENDER's check. The attacker's spell goes off FIRST at its normal result, and the defender's own spell reflects back onto them at this lower result." } },
+    { max: 8,
+      defenderHigh: { die: null, text: "Overwhelm: the attacker's spell is cancelled; the defender's spell goes off at its normal result." },
+      attackerHigh: { die: "d6", text: "Overwhelm and reflect: subtract the roll from the DEFENDER's check. The attacker's spell goes off FIRST at its normal result, and the defender's own spell reflects back onto them at this lower result." } },
+    { max: 9,
+      defenderHigh: { die: null, text: "Reflect: the defender's spell is cancelled, and the attacker's OWN spell reflects back onto them at the spell check result rolled to get here." },
+      attackerHigh: { die: "d4", text: "Overwhelm and reflect: subtract the roll from the DEFENDER's check. The attacker's spell goes off FIRST at its normal result, and the defender's own spell reflects back onto them at this lower result." } },
+    { max: Infinity,
+      defenderHigh: { die: null, text: "Reflect and overwhelm: the defender's spell goes off at its normal result, and the attacker's OWN spell reflects back onto them at the spell check result rolled to get here." },
+      attackerHigh: { die: null, text: "Reflect and overwhelm: the attacker's spell goes off at its normal result, and the defender's OWN spell reflects back onto them at their own normal result too." } },
+  ],
+};
+
+// Table 4-7: Phlogiston Disturbance - verified word-for-word against the
+// free DCC Reference Booklet (its own Table of Contents lists this exact
+// table, pages 30-31), so embedded here in full rather than paraphrased,
+// same treatment every other free-sourced table in this app already gets
+// (CRIT_TABLES, FUMBLE_TABLE, DISAPPROVAL_TABLE, etc.).
+const PHLOGISTON_DISTURBANCE_TABLE = {
+  rows: [
+    { max: 1, text: "Pocket dimension. Both casters are instantaneously transferred to a pocket dimension that is spontaneously created by the interaction between their spells. They remain within the pocket dimension until one is killed, at which point the interaction of their spells ceases and the survivor is transferred back to the material plane one millisecond after their departure. Observers see only a brief flicker and the disappearance of the loser, whose body is lost forever. The pocket dimension appears as (roll 1d6) (1) a mountaintop surrounded by red clouds; (2) a bubble adrift in space; (3) a sweltering island in a sea of lava; (4) an upside-down forest where the trees grow down from the sky above; (5) a dust mote atop the point of a needle; (6) the left nostril of an intergalactic whale." },
+    { max: 2, text: "Alignment rift. Both casters are transferred to an alignment plane. If both are the same alignment, they go to that plane; if they are opposed, or if either is neutral, they transfer to the plane of neutrality. They return to the material plane after (roll 1d4) (1) one caster is killed (both bodies return); (2) 1d8 days; (3) 3d6 rounds for each caster, rolled separately; (4) The End of Days." },
+    { max: 3, text: "Time accelerates. Both casters see everything around them slow down; in reality, they are accelerating, and surrounding characters see them move at incredible speeds. Resolve an additional 2d4 rounds of combat between the casters only; no other characters may act in this time. At the end of this time, they slow back into the mainstream flow of time." },
+    { max: 4, text: "Time slows. The casters perceive the world around them as normal but observers see their reactions slow to a crawl. Roll 1d3 and resolve that many rounds of combat among other participants before the casters can react again." },
+    { max: 5, text: "Backward loop in time. The casters are tossed backward in time to relive the last few moments repeatedly. Roll 1d4 and repeat the last spell interaction that many times, re-rolling spell checks and incrementing momentum trackers but ignoring any subsequent Phlogiston Disturbance results (treat same-check results as \"both spells cancelled\"). No spell can be lost during this time - a below-minimum result indicates only a failure, and the spell cast repeats on the next loop. When this time loop is concluded, the two casters re-enter the normal initiative count." },
+    { max: 6, text: "Spells merge. In a freak of eldritch energy, the two spells merge to create something greater than both. This result requires judge mediation. Generally speaking, the resulting effect is centered directly between the two casters and is either: (a) twice as powerful as the normal spell (if two opposing spells had cancelled each other), or (b) some weird agglomeration of spell effects (if two different spells were used)." },
+    { max: 7, text: "Supernatural influence. The casters create a rift in space and some supernatural influence filters through. Both spells fail and roll 1d4: (1) a randomly determined elemental energy suffuses the surrounding area, causing minor effects; (2) negative energy drains through, granting +1d8 hit points to all un-dead and demons nearby; (3) shadow energy fills the air, limiting eyesight to half normal range; (4) ethereal mists swirl about, and 1d4 randomly determined ghosts enter the world." },
+    { max: 8, text: "Supernatural summoning. The combined spell results inadvertently pull a supernatural creature through the fabric of space and time. Randomly determine the nature of the creature (roll 1d3): (1) elemental; (2) demon; (3) celestial. The creature has 1d4+1 HD. Determine its reaction by rolling 1d5: (1) hostile to all; (2) hostile to one caster (randomly determined) and neutral to the other; (3) friendly to one caster (randomly determined) and hostile to the other; (4) neutral to all parties; (5) friendly to all parties." },
+    { max: 9, text: "Demonic invasion. 1d4 randomly determined demons are summoned at the exact midpoint between the two casters. Determine their reaction randomly as with a supernatural summoning above. The demons are of a type determined here (roll 1d4): (1) type I; (2) type II; (3) type III; (4) type IV." },
+    { max: 10, text: "Mutual corruption. Both spells fail, and both casters suffer 1d4+1 corruption results. Roll corruption as normal for the spells involved." },
+  ],
+};
+
+let spellDuelAttackerMomentum = 10;
+let spellDuelDefenderMomentum = 10;
+// Set by the Compare click, consumed by the Counterspell Power roll -
+// cleared (or simply superseded) by the next Compare, same "stale result
+// belongs to whatever it was rolled for" reasoning other modals in this
+// app already follow.
+let spellDuelPendingWinner = null;
+let spellDuelPendingDieType = null;
+
+function refreshSpellDuelMomentumBadges() {
+  document.getElementById("spell-duel-attacker-momentum").textContent = String(spellDuelAttackerMomentum);
+  document.getElementById("spell-duel-defender-momentum").textContent = String(spellDuelDefenderMomentum);
+}
+function openSpellDuelModal() {
+  spellDuelAttackerMomentum = 10;
+  spellDuelDefenderMomentum = 10;
+  spellDuelPendingWinner = null;
+  spellDuelPendingDieType = null;
+  refreshSpellDuelMomentumBadges();
+  document.getElementById("spell-duel-attacker-check").value = "";
+  document.getElementById("spell-duel-defender-check").value = "";
+  document.getElementById("spell-duel-compare-result").innerHTML = "";
+  document.getElementById("spell-duel-power-result").innerHTML = "";
+  document.getElementById("spell-duel-power-roll-btn").style.display = "none";
+  document.getElementById("spell-duel-phlogiston-roll-btn").style.display = "none";
+  document.getElementById("spell-duel-modal-backdrop").style.display = "flex";
+}
+function closeSpellDuelModal() {
+  document.getElementById("spell-duel-modal-backdrop").style.display = "none";
+}
+document.getElementById("pc-spell-duel-btn").addEventListener("click", openSpellDuelModal);
+document.getElementById("spell-duel-modal-close").addEventListener("click", closeSpellDuelModal);
+document.getElementById("spell-duel-modal-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "spell-duel-modal-backdrop") closeSpellDuelModal();
+});
+document.getElementById("spell-duel-attacker-momentum-reset").addEventListener("click", () => {
+  spellDuelAttackerMomentum = 10;
+  refreshSpellDuelMomentumBadges();
+});
+document.getElementById("spell-duel-defender-momentum-reset").addEventListener("click", () => {
+  spellDuelDefenderMomentum = 10;
+  refreshSpellDuelMomentumBadges();
+});
+// Step 4-5 of the Counterspell in Action sequence: compare the two spell
+// checks, increment the winner's momentum tracker by 1, and look up
+// Table 4-5 for the die to roll (or PD on a tie).
+document.getElementById("spell-duel-compare-btn").addEventListener("click", () => {
+  const attackerCheck = parseInt(document.getElementById("spell-duel-attacker-check").value, 10);
+  const defenderCheck = parseInt(document.getElementById("spell-duel-defender-check").value, 10);
+  const resultEl = document.getElementById("spell-duel-compare-result");
+  const powerBtn = document.getElementById("spell-duel-power-roll-btn");
+  const pdBtn = document.getElementById("spell-duel-phlogiston-roll-btn");
+  document.getElementById("spell-duel-power-result").innerHTML = "";
+  powerBtn.style.display = "none";
+  pdBtn.style.display = "none";
+  if (!Number.isFinite(attackerCheck) || !Number.isFinite(defenderCheck)) {
+    resultEl.innerHTML = "Enter both spell check totals first.";
+    return;
+  }
+  const thresholdWarning = (attackerCheck <= 11 || defenderCheck <= 11)
+    ? " ⚠️ Both spell checks must succeed at their own normal threshold to even reach this table - double check that's actually true here."
+    : "";
+  const diff = Math.abs(attackerCheck - defenderCheck);
+  const dieType = SPELL_DUEL_DIE_BY_DIFF[Math.min(16, diff)];
+  if (dieType === "PD") {
+    spellDuelPendingWinner = null;
+    spellDuelPendingDieType = null;
+    resultEl.innerHTML = `Tied spell checks (${attackerCheck} = ${defenderCheck}) — Phlogiston Disturbance!${thresholdWarning}`;
+    pdBtn.style.display = "";
+    return;
+  }
+  const attackerHigh = attackerCheck > defenderCheck;
+  if (attackerHigh) spellDuelAttackerMomentum += 1; else spellDuelDefenderMomentum += 1;
+  refreshSpellDuelMomentumBadges();
+  spellDuelPendingWinner = attackerHigh ? "attacker" : "defender";
+  spellDuelPendingDieType = dieType;
+  const winnerLabel = attackerHigh ? "Attacker" : "Defender";
+  resultEl.innerHTML = `${winnerLabel} is high (${attackerCheck} vs ${defenderCheck}, diff ${diff}) — roll ${dieType} on Counterspell Power. ${winnerLabel}'s momentum tracker is now ${attackerHigh ? spellDuelAttackerMomentum : spellDuelDefenderMomentum}.${thresholdWarning}`;
+  powerBtn.style.display = "";
+});
+// Step 6: roll the indicated die, modify by the difference between the
+// two momentum trackers, then cross-reference Table 4-6.
+document.getElementById("spell-duel-power-roll-btn").addEventListener("click", () => {
+  if (!spellDuelPendingDieType) return;
+  const sides = parseInt(spellDuelPendingDieType.slice(1), 10);
+  const raw = Math.floor(Math.random() * sides) + 1;
+  const momentumDiff = spellDuelPendingWinner === "attacker"
+    ? spellDuelAttackerMomentum - spellDuelDefenderMomentum
+    : spellDuelDefenderMomentum - spellDuelAttackerMomentum;
+  const modified = raw + momentumDiff;
+  const row = lookupTableRow(SPELL_DUEL_COUNTERSPELL_TABLE, modified);
+  const outcome = spellDuelPendingWinner === "attacker" ? row.attackerHigh : row.defenderHigh;
+  const resultEl = document.getElementById("spell-duel-power-result");
+  resultEl.innerHTML = `🎲 ${spellDuelPendingDieType} (${raw}) ${formatSignedNumber(momentumDiff)}(momentum) = ${modified} — ${outcome.text}${outcome.die ? ` (roll ${outcome.die} where indicated)` : ""}`;
+});
+document.getElementById("spell-duel-phlogiston-roll-btn").addEventListener("click", () => {
+  const raw = Math.floor(Math.random() * 10) + 1;
+  const row = lookupTableRow(PHLOGISTON_DISTURBANCE_TABLE, raw);
+  const resultEl = document.getElementById("spell-duel-power-result");
+  resultEl.innerHTML = `🎲 d10 (${raw}) — ${row.text}`;
+});
+
 let corruptionModalTier = "minor";
 // The most recently rolled result's own display line (roll breakdown +
 // table text), kept so the Burn Luck button below can splice an "AVOIDED"
@@ -12321,6 +12546,12 @@ function recalcPcSpellSection() {
     disapprovalRangeWrap.style.display = abilityId === "per" ? "" : "none";
     if (abilityId === "per") refreshPcDisapprovalRangeNote();
   }
+  // Spell Duel (DCC RPG core rulebook): "both wizards and clerics can
+  // spell duel" - any caster, shown whenever the Spell Check section
+  // itself is (abilityId truthy either way), unlike Corruption/Patron
+  // Taint (Wizard/Elf-only) or Disapproval (Cleric-only) above.
+  const spellDuelBtn = document.getElementById("pc-spell-duel-btn");
+  if (spellDuelBtn) spellDuelBtn.style.display = abilityId ? "" : "none";
   if (!wrapEl) return;
   if (!abilityId) {
     wrapEl.style.display = "none";
