@@ -1516,7 +1516,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 13:09</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 13:21</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1911,6 +1911,12 @@
           <div id="pc-patron-wrap" style="display:none; margin-top:8px;">
             <div class="spell-section-header">Patron <span class="spell-section-hint">optional</span></div>
             <input type="text" id="pc-patron" placeholder="e.g. a lord of a hidden fey court" title="Free text - which patron this Wizard/Elf is bonded to (DCC RPG core rulebook - specific patron names/write-ups are paid content, so this is player-filled like the Cleric Deity field). Knowing/casting Invoke Patron or Patron Bond (pick either from the spell list below - Table 5-8's own ** footnote: rolling either one grants BOTH, but they only cost one spell slot together) lets that patron's own three personal spells be picked too, grouped by name in the spell-name dropdown." />
+          </div>
+          <div id="pc-elf-luck-spell-wrap" style="display:none; margin-top:8px;">
+            <div class="spell-section-header">Luck Spell <span class="spell-section-hint">optional</span></div>
+            <select id="pc-elf-luck-spell" title="At 1st level, an Elf may apply their Luck modifier to Spell Checks on one spell of their choosing (DCC RPG core rulebook) - fixed at whatever their Luck modifier was when first chosen, the same way a Warrior/Dwarf's Favorite Weapon bonus is; it doesn't change later even if Luck does."></select>
+            <div class="fumble-die-note" id="pc-elf-luck-spell-note" style="display:none; margin-top:4px;"></div>
+            <input type="hidden" id="pc-elf-luck-spell-luck" value="" />
           </div>
           <div id="pc-familiar-wrap" style="display:none; margin-top:8px;">
             <div class="spell-section-header">Familiar <span class="spell-section-hint">DCC RPG core rulebook</span></div>
@@ -2513,9 +2519,9 @@ const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al", "montype"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-favorite-weapon-luck","pc-deity","pc-patron","pc-familiar-name","pc-familiar-category","pc-familiar-config","pc-familiar-personality","pc-familiar-hp","pc-familiar-hp-bonus-applied","pc-familiar-token-id","pc-familiar-unlocked","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto"];
+const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-favorite-weapon-luck","pc-elf-luck-spell-luck","pc-deity","pc-patron","pc-familiar-name","pc-familiar-category","pc-familiar-config","pc-familiar-personality","pc-familiar-hp","pc-familiar-hp-bonus-applied","pc-familiar-token-id","pc-familiar-unlocked","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
-const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level"];
+const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level", "pc-elf-luck-spell"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
 
 // Table 1-3: Occupation (Reference Booklet pp.6-7, all 100 die-roll
@@ -10134,12 +10140,18 @@ function pcSpellCheckModifierBreakdown(atk, spellburnPoints = 0, attemptReversed
   // rather than replacing it.
   const sides = attemptReversed ? stepDiceChain(mercurialSides, -1) : mercurialSides;
   const mercurialBonus = mercurial ? mercurial.bonus : 0;
-  const modifier = level + abilityMod + penalty + mercurialBonus + spellburnPoints;
+  // Elf Luck Spell (DCC RPG core rulebook, Elf's own "Luck" entry) - see
+  // elfLuckSpellModLive's own comment. 0 for every spell except the one
+  // this Elf declared, and 0 for every class except Elf (the picker itself
+  // is Elf-only - see recalcPcSpellSection).
+  const luckSpellMod = cls === "Elf" ? elfLuckSpellModLive(atk && atk.name) : 0;
+  const modifier = level + abilityMod + penalty + mercurialBonus + spellburnPoints + luckSpellMod;
   const abilityLabel = abilityId === "per" ? "Personality" : "Intelligence";
   const parts = [`Level ${formatSignedNumber(level)}`, `${abilityLabel} ${formatSignedNumber(abilityMod)}`];
   if (hinderedByArmor && penalty) parts.push(`Armor Check Penalty ${formatSignedNumber(penalty)}`);
   if (mercurialBonus) parts.push(`Mercurial Magic ${formatSignedNumber(mercurialBonus)}`);
   if (spellburnPoints) parts.push(`Spellburn ${formatSignedNumber(spellburnPoints)}`);
+  if (luckSpellMod) parts.push(`Luck Spell ${formatSignedNumber(luckSpellMod)}`);
   // Mithril note (DCC RPG core rulebook, Elf class - see
   // pcSpellcastingCheckPenaltyTotal) - only worth calling out when it's
   // actually excluding something, i.e. an Elf has at least one Equipped,
@@ -10172,12 +10184,16 @@ function pcSpellCheckModifierBreakdownForStats(stats, atk, spellburnPoints = 0, 
   // Reversing Spells - see pcSpellCheckModifierBreakdown's own comment.
   const sides = attemptReversed ? stepDiceChain(mercurialSides, -1) : mercurialSides;
   const mercurialBonus = mercurial ? mercurial.bonus : 0;
-  const modifier = level + abilityMod + penalty + mercurialBonus + spellburnPoints;
+  // Elf Luck Spell - see pcSpellCheckModifierBreakdown's own comment
+  // (Sheet-side sibling).
+  const luckSpellMod = cls === "Elf" ? elfLuckSpellModForStats(stats, atk && atk.name) : 0;
+  const modifier = level + abilityMod + penalty + mercurialBonus + spellburnPoints + luckSpellMod;
   const abilityLabel = abilityId === "per" ? "Personality" : "Intelligence";
   const parts = [`Level ${formatSignedNumber(level)}`, `${abilityLabel} ${formatSignedNumber(abilityMod)}`];
   if (hinderedByArmor && penalty) parts.push(`Armor Check Penalty ${formatSignedNumber(penalty)}`);
   if (mercurialBonus) parts.push(`Mercurial Magic ${formatSignedNumber(mercurialBonus)}`);
   if (spellburnPoints) parts.push(`Spellburn ${formatSignedNumber(spellburnPoints)}`);
+  if (luckSpellMod) parts.push(`Luck Spell ${formatSignedNumber(luckSpellMod)}`);
   // Mithril note - see pcSpellCheckModifierBreakdown's own comment
   // (Sheet-side sibling).
   const hasMithrilExemption = hinderedByArmor && cls === "Elf" && (stats.data.armorItems || []).some(item => item.equipped && item.mithril);
@@ -10932,7 +10948,7 @@ document.getElementById("add-spell-pc").addEventListener("click", () => {
   // updateOpenSpellsCount applies it to the displayed count, so the two
   // can't disagree about how much room is actually left.
   const itemsForAdd = readSpellItems();
-  if (capForAdd !== null && (itemsForAdd.length - pcPatronSpellSlotDiscount(itemsForAdd)) >= capForAdd) {
+  if (capForAdd !== null && (itemsForAdd.length - pcPatronSpellSlotDiscount(itemsForAdd, clsForAdd)) >= capForAdd) {
     showStatus(capMessageForAdd, true, 6000);
     return;
   }
@@ -11010,6 +11026,19 @@ function recalcPcSpellSection() {
   // of whether this field is filled in.
   const patronWrap = document.getElementById("pc-patron-wrap");
   if (patronWrap) patronWrap.style.display = abilityId === "int" ? "" : "none";
+  // Luck Spell (DCC RPG core rulebook, Elf class - NOT Wizard) - same
+  // "one-time pick, frozen forever" mechanic as a Warrior/Dwarf's Favorite
+  // Weapon, just for a spell instead of a weapon (see
+  // syncElfLuckSpellSnapshot/favoriteWeaponLuckModLive's own comment for
+  // the shared reasoning).
+  const elfLuckSpellWrap = document.getElementById("pc-elf-luck-spell-wrap");
+  if (elfLuckSpellWrap) {
+    elfLuckSpellWrap.style.display = cls === "Elf" ? "" : "none";
+    if (cls === "Elf") {
+      refreshElfLuckSpellSelect();
+      syncElfLuckSpellSnapshot();
+    }
+  }
   // Familiar (DCC RPG core rulebook) - Wizard-only, NOT Elf (unlike
   // Patron/Corruption above, which are shared by both Int casters) - the
   // "may begin play with a familiar" class feature is written into the
@@ -11072,16 +11101,20 @@ function recalcPcSpellSection() {
 // Table 5-8's own ** footnote (DCC RPG core rulebook): rolling or picking
 // either Invoke Patron or Patron Bond grants BOTH spells, but the pair
 // only costs a single spell slot together (see dccSpellOptionsHtml's own
-// "**" marker on these two entries). Once both are named among a Wizard/
-// Elf's known spells, one slot's worth should be given back against
-// whatever count is being checked against the Known Spells allotment
-// (Table 1-12/1-16) - shared by updateOpenSpellsCount's own display and
-// the add-spell-pc button's cap check below, so the two can't disagree.
-// Never applies to Cleric (their spell list has neither name) or while
-// only one of the pair is named (the rule only kicks in once both are).
-function pcPatronSpellSlotDiscount(items) {
+// "**" marker on these two entries) - a WIZARD's own discount. An Elf
+// gets a bigger version of this same break: their own class writeup says
+// they "automatically receive the spells Patron Bond and Invoke Patron at
+// 1st level IN ADDITION TO their other spells" - i.e. both are free, not
+// just bundled into a single shared slot, so an Elf's discount is 2 once
+// both are named, not 1. Shared by updateOpenSpellsCount's own display
+// and the add-spell-pc button's cap check below, so the two can't
+// disagree. Never applies to Cleric (their spell list has neither name)
+// or while only one of the pair is named (the rule only kicks in once
+// both are, matching Table 5-8's own footnote).
+function pcPatronSpellSlotDiscount(items, cls) {
   const named = items.filter(s => s.name && s.name.trim()).map(s => s.name.trim());
-  return (named.includes("Invoke patron") && named.includes("Patron bond")) ? 1 : 0;
+  if (!named.includes("Invoke patron") || !named.includes("Patron bond")) return 0;
+  return cls === "Elf" ? 2 : 1;
 }
 
 function updateOpenSpellsCount() {
@@ -11096,13 +11129,17 @@ function updateOpenSpellsCount() {
     return;
   }
   const items = readSpellItems();
-  const known = items.filter(s => s.name && s.name.trim()).length - pcPatronSpellSlotDiscount(items);
+  const known = items.filter(s => s.name && s.name.trim()).length - pcPatronSpellSlotDiscount(items, cls);
   const levelEl = document.getElementById("pc-level");
   if (cls === "Wizard" || cls === "Elf") {
     const allotment = intCasterSpellsKnownAllotment(cls, levelEl ? levelEl.value : "", abilityModifierFromField("pc-int"));
     if (allotment) {
       const tableCite = cls === "Wizard" ? "Table 1-12: Wizard" : "Table 1-16: Elf";
-      const patronDiscountNote = pcPatronSpellSlotDiscount(items) ? " Invoke Patron + Patron Bond only cost one slot together (Table 5-8's own ** footnote), already reflected in this count." : "";
+      const patronDiscountNote = pcPatronSpellSlotDiscount(items, cls)
+        ? (cls === "Elf"
+          ? " Invoke Patron + Patron Bond are both free for an Elf (automatic at 1st level, on top of other known spells), already reflected in this count."
+          : " Invoke Patron + Patron Bond only cost one slot together (Table 5-8's own ** footnote), already reflected in this count.")
+        : "";
       countEl.textContent = ` (${known}/${allotment.known})`;
       countEl.title = `Known Spells (${tableCite}) - ${allotment.known} allowed at this Level + Intelligence modifier (${known} currently picked below).${patronDiscountNote} Max Spell Level you're eligible for: ${allotment.maxLevel}.`;
       return;
@@ -11217,6 +11254,81 @@ function spellSelectOptionsHtml(selectedName) {
 function spellSelectOptionsHtmlForStats(stats, selectedName) {
   return buildSpellSelectOptions(pcKnownSpellNamesForStats(stats), selectedName, "No known spells - add some in the Spells section on the Sheet");
 }
+
+// Repaints #pc-elf-luck-spell's own options from this Elf's current known
+// spells (pcKnownSpellNames) - same "stale pick stays offered/selected"
+// contract buildSpellSelectOptions already gives every other spell-name
+// dropdown, called on every render pass (recalcPcSpellSection) so a spell
+// renamed/removed down in the Spells section doesn't silently orphan this
+// pick without at least showing it as removed.
+function refreshElfLuckSpellSelect() {
+  const selectEl = document.getElementById("pc-elf-luck-spell");
+  if (!selectEl) return;
+  const prev = selectEl.value;
+  selectEl.innerHTML = spellSelectOptionsHtml(prev);
+}
+// An Elf's Luck Spell bonus (DCC RPG core rulebook, Elf's own "Luck"
+// entry): "At first level, an elf may choose to apply their Luck modifier
+// to spell checks on one spell of their choosing. That modifier does not
+// change as the elf's Luck score changes" - same frozen-at-first-pick
+// contract as favoriteWeaponLuckModLive (Warrior/Dwarf's own Favorite
+// Weapon), just for a spell instead of a weapon. Returns 0 when `spellName`
+// isn't the one currently chosen (or nothing's chosen yet), same "only
+// applies to the one declared thing" shape isFavoriteWeaponMatch gives its
+// own bonus.
+function elfLuckSpellModLive(spellName) {
+  const pickEl = document.getElementById("pc-elf-luck-spell");
+  if (!pickEl || !spellName || pickEl.value !== spellName) return 0;
+  const frozenEl = document.getElementById("pc-elf-luck-spell-luck");
+  if (frozenEl && frozenEl.value.trim() !== "") {
+    const n = parseInt(frozenEl.value, 10);
+    if (Number.isFinite(n)) return n;
+  }
+  return pcLuckModifierLive();
+}
+// Stats-based sibling of elfLuckSpellModLive, for the Combat Tracker.
+function elfLuckSpellModForStats(stats, spellName) {
+  const picked = (stats.data["elf-luck-spell"] || "").trim();
+  if (!picked || !spellName || picked !== spellName) return 0;
+  const raw = stats.data["elf-luck-spell-luck"];
+  if (raw !== undefined && raw !== null && String(raw).trim() !== "") {
+    const n = parseInt(raw, 10);
+    if (Number.isFinite(n)) return n;
+  }
+  return abilityModifierFromRaw(stats.data.lck);
+}
+// Captures pc-elf-luck-spell-luck the first time a Luck Spell is on file
+// with nothing snapshotted yet - passive, every-render-pass resync (see
+// syncFavoriteWeaponLuckSnapshot's own comment for the shared "can't know
+// the real historical value, so snapshot what's on file now" reasoning,
+// including for an already-saved character whose pick predates this
+// snapshot). Also keeps the note under the dropdown in sync.
+function syncElfLuckSpellSnapshot() {
+  const noteEl = document.getElementById("pc-elf-luck-spell-note");
+  const pickEl = document.getElementById("pc-elf-luck-spell");
+  const frozenEl = document.getElementById("pc-elf-luck-spell-luck");
+  if (!pickEl || !pickEl.value.trim()) {
+    if (noteEl) noteEl.style.display = "none";
+    return;
+  }
+  if (frozenEl && frozenEl.value.trim() === "") {
+    frozenEl.value = String(pcLuckModifierLive());
+  }
+  if (noteEl) {
+    noteEl.style.display = "";
+    noteEl.textContent = `Locked Luck bonus for this spell: ${formatSignedNumber(elfLuckSpellModLive(pickEl.value))} (fixed since first chosen - doesn't change even if Luck does later).`;
+  }
+}
+document.getElementById("pc-elf-luck-spell").addEventListener("change", () => {
+  const frozenEl = document.getElementById("pc-elf-luck-spell-luck");
+  // Blanking the pick means nothing is locked in yet - clear the frozen
+  // value too, so choosing a spell again captures a FRESH snapshot (same
+  // reasoning as the Favorite Weapon <select>'s own change handler).
+  if (!document.getElementById("pc-elf-luck-spell").value && frozenEl) frozenEl.value = "";
+  scheduleSave();
+  syncElfLuckSpellSnapshot();
+  refreshSpellAttackRows();
+});
 
 function spellAttackRowHtml(atk) {
   // Hidden .attack-name/.attack-damage: readAttacks()/applyWeaponSelection
