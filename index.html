@@ -849,6 +849,17 @@
     font-family: inherit;
   }
   .newday-btn:hover { filter: brightness(1.1); }
+  .newday-bedrest-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    justify-content: center;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .newday-bedrest-label input { cursor: pointer; }
   .spellburn-modal-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid rgba(69, 57, 46, 0.5); }
   .spellburn-modal-label { flex: 1; color: var(--text); }
   .spellburn-modal-score { flex: none; font-variant-numeric: tabular-nums; color: var(--muted); min-width: 54px; text-align: right; }
@@ -1516,7 +1527,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 15:32</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 15:49</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1754,7 +1765,10 @@
           <input type="hidden" id="pc-luck-augur-roll" value="" />
           <input type="hidden" id="pc-luck-augur-mod" value="" />
           <input type="hidden" id="pc-luck-augur-hp-bonus-applied" value="" />
-          <button type="button" id="pc-spellburn-newday-btn" class="newday-btn" title="A night's rest - every class. Heals 1 HP. Wizard/Elf: recovers 1 point to ONE Str/Agi/Sta ability spent on Spellburn (see the Cast a Spell row), up to what it was before any Spellburn - asks which to recover if more than one is eligible. Thief/Halfling: also recovers Luck equal to their Level, up to its own natural max. Also clears any Lost spells. Click once per in-game day that passes.">🌙 New Day</button>
+          <button type="button" id="pc-spellburn-newday-btn" class="newday-btn" title="A night's rest - every class. Heals 1 hp (2 with the Bed Rest checkbox). Wizard/Elf: recovers 1 point (2 with Bed Rest) to ONE Str/Agi/Sta ability spent on Spellburn (see the Cast a Spell row), up to what it was before any Spellburn - asks which to recover if more than one is eligible. Thief/Halfling: also recovers Luck equal to their Level (NOT doubled by Bed Rest - Luck has its own separate recovery rate, DCC RPG core rulebook), up to its own natural max. Also clears any Lost spells. Click once per in-game day that passes.">🌙 New Day</button>
+          <label class="newday-bedrest-label" title="A full day of bed rest (DCC RPG core rulebook) doubles natural healing - 2 hp instead of 1, and 2 ability points instead of 1 (Luck is unaffected - it has its own separate recovery rate). Check this before clicking New Day if the character spent the WHOLE day resting rather than adventuring.">
+            <input type="checkbox" id="pc-newday-bedrest" /> 🛌 Day of bed rest (2x healing)
+          </label>
           <input type="hidden" id="pc-spellburnMax" value="" />
           <input type="hidden" id="pc-luckMax" value="" />
         </fieldset>
@@ -7283,12 +7297,18 @@ function spellburnRecoverableAbilities() {
   });
 }
 
-// Recovers exactly 1 point on ONE ability, capped at pc-spellburnMax's
-// snapshotted true score so recovery can't overshoot. The snapshot is
-// cleared once that ability is fully recovered, so a later burn
-// re-snapshots fresh (self-correcting if the true score ever changes,
-// e.g. a level-based ability increase).
-function recoverSpellburnAbility(ability, extraNote = "") {
+// Recovers 1 point on ONE ability (2 with a full day of bed rest - DCC
+// RPG core rulebook: "ability score loss... heals at the same rate [as
+// hit points]: 1 point with a good night's rest, and 2 points with a day
+// of bed rest"), capped at pc-spellburnMax's snapshotted true score so
+// recovery can't overshoot. The snapshot is cleared once that ability is
+// fully recovered, so a later burn re-snapshots fresh (self-correcting if
+// the true score ever changes, e.g. a level-based ability increase).
+// "Only ONE ability recovers per rest" is Spellburn's own, more specific
+// rule (see spellburnRecoverableAbilities/openNewDayModal) - unaffected by
+// bed rest, which only changes the AMOUNT recovered, not how many
+// abilities are eligible to pick from.
+function recoverSpellburnAbility(ability, extraNote = "", amount = 1) {
   const maxEl = document.getElementById("pc-spellburnMax");
   let maxMap = {};
   try { maxMap = JSON.parse((maxEl && maxEl.value) || "{}"); } catch (e) { maxMap = {}; }
@@ -7297,13 +7317,13 @@ function recoverSpellburnAbility(ability, extraNote = "") {
   const current = parseAbilityScore(el ? el.value : "");
   if (current === null) return;
   if (current >= maxMap[ability]) { delete maxMap[ability]; if (maxEl) maxEl.value = JSON.stringify(maxMap); return; }
-  const next = current + 1;
+  const next = Math.min(maxMap[ability], current + amount);
   el.value = `${next} (${formatSignedNumber(dccAbilityModifier(next))})`;
   if (next >= maxMap[ability]) delete maxMap[ability];
   if (maxEl) maxEl.value = JSON.stringify(maxMap);
   refreshDerivedPcFields();
   scheduleSave();
-  showStatus(`New Day: recovered 1 point of ${spellburnAbilityLabel(ability)} (now ${next}).${extraNote}`, false, 5000);
+  showStatus(`New Day: recovered ${next - current} point${next - current === 1 ? "" : "s"} of ${spellburnAbilityLabel(ability)} (now ${next}).${extraNote}`, false, 5000);
 }
 
 // Surfaces pc-luckMax (otherwise a purely internal snapshot - see its own
@@ -7399,21 +7419,25 @@ function recoverLuck(cls, extraNote = "") {
   showStatus(`New Day: recovered ${next - current} point${next - current === 1 ? "" : "s"} of Luck (now ${next}, ${cls}'s own Level).${extraNote}`, false, 5000);
 }
 
-// Natural healing - "you heal 1 HP for every night's rest," every class,
-// no eligibility check the way Spellburn/Luck recovery need (see
+// Natural healing (DCC RPG core rulebook): "a character who actively
+// adventures and gets a good night's rest heals 1 hit point. If the
+// character gets a day of bed rest, they heal 2 hit points" - every
+// class, no eligibility check the way Spellburn/Luck recovery need (see
 // spellburnRecoverableAbilities/luckRecoverable) since there's nothing to
 // choose between: it just happens alongside whatever else New Day
-// recovers. Capped at Max HP; a silent no-op (returns 0) once already
-// there, or if the HP fields aren't parseable (e.g. blank on a
-// still-being-built character).
-function healPcHpOvernight() {
+// recovers. Capped at (natural) Max HP - this app has no separate
+// "temporary max HP boost" field, so pc-hp-max IS that natural max by
+// convention. A silent no-op (returns 0) once already there, or if the
+// HP fields aren't parseable (e.g. blank on a still-being-built
+// character).
+function healPcHpOvernight(amount = 1) {
   const curEl = document.getElementById("pc-hp-current");
   const maxEl = document.getElementById("pc-hp-max");
   if (!curEl || !maxEl) return 0;
   const current = Number(curEl.value);
   const max = Number(maxEl.value);
   if (!Number.isFinite(current) || !Number.isFinite(max) || current >= max) return 0;
-  const next = Math.min(max, current + 1);
+  const next = Math.min(max, current + amount);
   curEl.value = String(next);
   scheduleSave();
   return next - current;
@@ -7447,7 +7471,8 @@ function clearAllLostSpells() {
   return clearedCount;
 }
 
-// A day of rest only recovers ONE point total per Spellburn ability, so if
+// A day of rest only recovers ONE ability's worth of Spellburn loss (1
+// point, or 2 with the Bed Rest checkbox - DCC RPG core rulebook), so if
 // more than one ability (Str/Agi/Sta Spellburn, plus a Thief/Halfling's
 // own Luck - see luckRecoverable) is eligible the player has to choose
 // which heals today - a small popup listing just the eligible ones (same
@@ -7455,20 +7480,35 @@ function clearAllLostSpells() {
 // fresh each open since which abilities qualify changes over time). With
 // only one eligible item there's nothing to choose, so this recovers it
 // directly instead of asking. Each item is `{ ability }` for a Spellburn
-// recovery (flat +1) or `{ luck: true }` for a Luck recovery (+Level,
-// Thief/Halfling only). Natural HP healing, clearing Lost spells, and
-// resetting a Cleric's Disapproval Range all run unconditionally for
-// EVERY class, regardless of what (if anything) is eligible below - see
-// healPcHpOvernight/clearAllLostSpells/resetPcDisapprovalRange's own
-// comments - so New Day is worth clicking even for a class with nothing
-// to choose from.
+// recovery (+1, or +2 with Bed Rest) or `{ luck: true }` for a Luck
+// recovery (+Level, Thief/Halfling only, never doubled by Bed Rest - Luck
+// has its own separate recovery rate). Natural HP healing, clearing Lost
+// spells, and resetting a Cleric's Disapproval Range all run
+// unconditionally for EVERY class, regardless of what (if anything) is
+// eligible below - see healPcHpOvernight/clearAllLostSpells/
+// resetPcDisapprovalRange's own comments - so New Day is worth clicking
+// even for a class with nothing to choose from.
 function openNewDayModal() {
+  // "A day of bed rest" doubles natural healing (DCC RPG core rulebook) -
+  // HP and Spellburn-ability recovery both scale by this; Luck does NOT
+  // (see recoverLuck's own call below, never passed this amount - Luck
+  // has its own separate, fixed recovery rate). Read once and reset
+  // immediately after, so the checkbox is a per-click choice rather than
+  // a standing preference that could silently double-heal a later,
+  // ordinary night.
+  const bedRestEl = document.getElementById("pc-newday-bedrest");
+  const amount = bedRestEl && bedRestEl.checked ? 2 : 1;
+  if (bedRestEl) bedRestEl.checked = false;
   // Both run unconditionally, before the early-return below - a Warrior
   // at full HP with no Lost spells would otherwise see "nothing to
   // recover" even on a night that DID heal them, and a Wizard/Elf with a
   // Lost spell but nothing currently burned would never get it back.
   const lostCleared = clearAllLostSpells();
-  const hpHealed = healPcHpOvernight();
+  const hpHealed = healPcHpOvernight(amount);
+  // HP just moved - resync Bleeding Out state (see refreshPcDyingState's
+  // own comment on why this is checked after every HP change) in case a
+  // night's rest is what pushes someone from 0 hp back to positive.
+  refreshPcDyingState();
   const disapprovalReset = resetPcDisapprovalRange();
   const extraNote = newDayExtraNote(hpHealed, lostCleared, disapprovalReset);
   const classEl = document.getElementById("pc-class");
@@ -7488,7 +7528,7 @@ function openNewDayModal() {
   }
   if (recoverable.length === 1) {
     const only = recoverable[0];
-    if (only.luck) recoverLuck(cls, extraNote); else recoverSpellburnAbility(only.ability, extraNote);
+    if (only.luck) recoverLuck(cls, extraNote); else recoverSpellburnAbility(only.ability, extraNote, amount);
     return;
   }
   const body = document.getElementById("newday-modal-body");
@@ -7501,7 +7541,7 @@ function openNewDayModal() {
       <div class="spellburn-modal-row">
         <span class="spellburn-modal-label">Luck</span>
         <span class="spellburn-modal-score">${current === null ? "—" : `${current} (${formatSignedNumber(dccAbilityModifier(current))})`}</span>
-        <button type="button" class="hp-btn newday-modal-recover" data-luck="1" title="Recover ${level} Luck point${level === 1 ? "" : "s"} (${cls}'s own Level)">+${level}</button>
+        <button type="button" class="hp-btn newday-modal-recover" data-luck="1" title="Recover ${level} Luck point${level === 1 ? "" : "s"} (${cls}'s own Level - not doubled by bed rest)">+${level}</button>
       </div>`;
     }
     const el = document.getElementById(`pc-${item.ability}`);
@@ -7510,13 +7550,13 @@ function openNewDayModal() {
     <div class="spellburn-modal-row">
       <span class="spellburn-modal-label">${spellburnAbilityLabel(item.ability)}</span>
       <span class="spellburn-modal-score">${current === null ? "—" : `${current} (${formatSignedNumber(dccAbilityModifier(current))})`}</span>
-      <button type="button" class="hp-btn newday-modal-recover" data-ability="${item.ability}" title="Recover 1 ${spellburnAbilityLabel(item.ability)} point">+1</button>
+      <button type="button" class="hp-btn newday-modal-recover" data-ability="${item.ability}" title="Recover ${amount} ${spellburnAbilityLabel(item.ability)} point${amount === 1 ? "" : "s"}">+${amount}</button>
     </div>`;
   }).join("");
   body.querySelectorAll(".newday-modal-recover").forEach(btn => {
     btn.addEventListener("click", () => {
       if (btn.dataset.luck) { recoverLuck(cls, extraNote); closeNewDayModal(); return; }
-      recoverSpellburnAbility(btn.dataset.ability, extraNote);
+      recoverSpellburnAbility(btn.dataset.ability, extraNote, amount);
       closeNewDayModal();
     });
   });
