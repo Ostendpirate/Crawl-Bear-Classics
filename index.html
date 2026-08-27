@@ -1595,7 +1595,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 15:57</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 16:03</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2545,6 +2545,7 @@
         <div class="roll-modal-result" id="lay-on-hands-modal-result"></div>
         <button type="button" class="btn-next" id="lay-on-hands-modal-roll-effect-btn" style="margin-top:8px; display:none;">🎲 Roll Result</button>
         <div class="roll-modal-result" id="lay-on-hands-modal-roll-result"></div>
+        <button type="button" class="hp-btn" id="lay-on-hands-modal-apply-btn" style="margin-top:8px; display:none;" title="Adds the rolled healing to THIS SHEET's own current hp (capped at max hp). Use this on the HEALED character's own token/Sheet, not necessarily the cleric who cast it - same 'whichever Sheet is open' convention every other roll in this app already follows, since it can't target a specific character either.">➕ Apply to This Sheet's HP</button>
       </div>
     </div>
   </div>
@@ -9344,6 +9345,11 @@ function rollLayOnHandsRow(row) {
 // the real number just from comparing two possible targets" reasoning
 // openTurnUnholyModal's own comment gives.
 let layOnHandsModalDiceCount = 0;
+// The most recently rolled hit-point healing total, so the Apply button
+// below knows what to add - same "belongs to whatever it was rolled for,
+// cleared the moment the inputs change again" reasoning
+// layOnHandsModalDiceCount's own comment gives.
+let layOnHandsModalLastHealed = null;
 function openLayOnHandsModal(prefillTotal) {
   const inputEl = document.getElementById("lay-on-hands-modal-total-input");
   if (inputEl && typeof prefillTotal === "number") inputEl.value = String(prefillTotal);
@@ -9368,6 +9374,9 @@ function renderLayOnHandsModalResult() {
   // Same "a previously-rolled result belongs to whatever it was rolled
   // for" reasoning as renderTurnUnholyModalResult's own comment.
   if (rollResultEl) rollResultEl.innerHTML = "";
+  layOnHandsModalLastHealed = null;
+  const applyBtn = document.getElementById("lay-on-hands-modal-apply-btn");
+  if (applyBtn) applyBtn.style.display = "none";
   if (!resultEl) return;
   const rawDice = row ? (row.dice[relationship] || 0) : 0;
   layOnHandsModalDiceCount = 0;
@@ -9413,9 +9422,40 @@ document.getElementById("lay-on-hands-modal-roll-effect-btn").addEventListener("
   if (!layOnHandsModalDiceCount) return;
   const hd = document.getElementById("lay-on-hands-modal-hd-select").value;
   const healed = rollSimpleDiceSpec(`${layOnHandsModalDiceCount}d${hd}`);
+  layOnHandsModalLastHealed = healed;
   const text = `Rolled result: ${healed} hit points healed (${layOnHandsModalDiceCount}d${hd}).`;
   const rollResultEl = document.getElementById("lay-on-hands-modal-roll-result");
   if (rollResultEl) rollResultEl.innerHTML = `<span class="roll-modal-result-roll">${escapeHtml(text)}</span>`;
+  const applyBtn = document.getElementById("lay-on-hands-modal-apply-btn");
+  if (applyBtn) applyBtn.style.display = healed > 0 ? "" : "none";
+});
+// Bleeding Out (DCC RPG core rulebook): "if they are healed on the round
+// they're reduced to 0 hit points or the next round, they are healed per
+// the result of the lay on hands check (treat their hit points as
+// starting at 0)" - this app already floors hp-current at 0 (adjustHp's
+// own clamp), so "starting at 0" is already the natural state; applying
+// the roll here on top of that is exactly that calculation. Writes
+// straight to THIS Sheet's pc-hp-current (see the button's own tooltip
+// for why - same "whichever Sheet is open" limitation every other roll
+// in this app already has), capped at max hp, then resyncs Bleeding
+// Out/Injuries state exactly like adjustHp's own reactive call does,
+// since this is one more way hp-current can change besides the +/-
+// buttons, typing, and New Day.
+document.getElementById("lay-on-hands-modal-apply-btn").addEventListener("click", () => {
+  if (!layOnHandsModalLastHealed) return;
+  const curEl = document.getElementById("pc-hp-current");
+  const maxEl = document.getElementById("pc-hp-max");
+  if (!curEl) return;
+  const current = Number(curEl.value) || 0;
+  const max = Number(maxEl ? maxEl.value : "") || Infinity;
+  const next = Math.min(max, current + layOnHandsModalLastHealed);
+  curEl.value = String(next);
+  refreshPcDyingState();
+  refreshInjuries();
+  scheduleSave();
+  showStatus(`Lay on Hands: healed ${next - current} hit point${next - current === 1 ? "" : "s"} (now ${next}).`, false, 6000);
+  layOnHandsModalLastHealed = null;
+  document.getElementById("lay-on-hands-modal-apply-btn").style.display = "none";
 });
 
 // Cause Wounds (DCC RPG core rulebook, Chaotic Cleric only) - the mirror
