@@ -353,6 +353,8 @@
     line-height: 1.2;
   }
   .chat-luck-burn-btn:hover { background: var(--accent); color: #1e1b18; }
+  .chat-luck-assist-btn { background: var(--good); color: #1e1b18; }
+  .chat-luck-assist-btn:hover { filter: brightness(1.1); }
   .gm-badge {
     font-size: 9px;
     text-transform: uppercase;
@@ -1595,7 +1597,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 17:08</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 17:56</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -8421,8 +8423,16 @@ async function openLuckBurnModal(ctx) {
   luckBurnModalLastRoll = lastRoll;
   luckBurnModalAccum = emptyLuckBurnAccum();
   luckBurnModalSnapshot = null;
+  // Good Luck Charm (DCC RPG core rulebook, Halfling only): "the halfling
+  // can expend Luck to aid their allies... The halfling loses the Luck,
+  // and the ally receives the benefit" - ctx.burnerItemId (see the ctx
+  // builders' own comments) names a DIFFERENT token than ctx.itemId when
+  // this is an assist rather than an ordinary self-burn.
+  const assistNote = ctx.burnerItemId && ctx.burnerItemId !== ctx.itemId
+    ? " Burning YOUR OWN Luck (Good Luck Charm, Halfling only) to boost an ally's roll instead of one of your own."
+    : "";
   document.getElementById("luckburn-modal-subtitle").textContent =
-    `Permanently burn Luck to boost ${lastRoll.label || ctx.label || "your last roll"} - already rolled at ${lastRoll.total} (DCC RPG core rulebook). Thief rolls their own Luck Die per point spent, Halfling doubles the flat rate, every other class gets a flat +1 per point.`;
+    `Permanently burn Luck to boost ${lastRoll.label || ctx.label || "your last roll"} - already rolled at ${lastRoll.total} (DCC RPG core rulebook). Thief rolls their own Luck Die per point spent, Halfling doubles the flat rate, every other class gets a flat +1 per point.${assistNote}`;
   document.getElementById("luckburn-modal-original-total").textContent = String(lastRoll.total);
   document.getElementById("luckburn-modal-backdrop").style.display = "flex";
   await refreshLuckBurnModal();
@@ -8441,7 +8451,11 @@ function closeLuckBurnModal() {
 async function refreshLuckBurnModal() {
   const ctx = luckBurnModalCtx;
   if (!ctx) return;
-  const [item] = await OBR.scene.items.getItems([ctx.itemId]);
+  // Good Luck Charm (Halfling only) - whoever's Luck is actually being
+  // spent (ctx.burnerItemId) is not always the same token whose roll is
+  // being boosted (ctx.itemId) - see the ctx builders' own comments.
+  const burnerItemId = ctx.burnerItemId || ctx.itemId;
+  const [item] = await OBR.scene.items.getItems([burnerItemId]);
   if (!item || luckBurnModalCtx !== ctx) return; // popup closed/retargeted while this was in flight
   const luckScore = parseAbilityScore(getStatsForItem(item).data.lck);
   if (!luckBurnModalSnapshot) luckBurnModalSnapshot = { luckScore };
@@ -8470,12 +8484,16 @@ async function refreshLuckBurnModal() {
 async function luckBurnModalMinusClick() {
   const ctx = luckBurnModalCtx;
   if (!ctx) return;
-  const [item] = await OBR.scene.items.getItems([ctx.itemId]);
+  const burnerItemId = ctx.burnerItemId || ctx.itemId;
+  const [item] = await OBR.scene.items.getItems([burnerItemId]);
   if (!item || luckBurnModalCtx !== ctx) return;
   const stats = getStatsForItem(item);
   const cls = (stats.data.class || "").trim();
   const levelRaw = stats.data.level;
-  const newScore = await applyLuckBurnPointForStats(ctx.itemId, 1);
+  // The BURNER's own class/level formula applies (e.g. a Halfling
+  // assisting an ally still doubles their own burn rate) - never the
+  // target's.
+  const newScore = await applyLuckBurnPointForStats(burnerItemId, 1);
   if (newScore === null) return;
   const prev = luckBurnModalAccum || emptyLuckBurnAccum();
   const { bonus: pointBonus, rolls: pointRolls, sides } = computeLuckBurnBonus(cls, levelRaw, 1);
@@ -8498,7 +8516,8 @@ async function cancelLuckBurnModal() {
   const ctx = luckBurnModalCtx;
   const snapshot = luckBurnModalSnapshot;
   if (!ctx || !snapshot) { closeLuckBurnModal(); return; }
-  await OBR.scene.items.updateItems([ctx.itemId], items => {
+  const burnerItemId = ctx.burnerItemId || ctx.itemId;
+  await OBR.scene.items.updateItems([burnerItemId], items => {
     items.forEach(item => {
       const mode = item.metadata[MODE_METADATA_KEY] || "monster";
       if (mode !== "pc") return;
@@ -8523,7 +8542,16 @@ async function confirmLuckBurnModal() {
   if (!ctx || !lastRoll) { closeLuckBurnModal(); return; }
   if (accum && accum.points > 0) {
     const newTotal = lastRoll.total + accum.bonus;
-    await ctx.applyAdjustment(accum.bonus, accum.detail, newTotal, lastRoll.total, lastRoll.label || ctx.label);
+    // Good Luck Charm (Halfling only) - look up the assisting Halfling's
+    // own name once, here, so every ctx builder's applyAdjustment can
+    // credit them in the posted note without each one needing its own
+    // extra OBR fetch.
+    let burnerName = null;
+    if (ctx.burnerItemId && ctx.burnerItemId !== ctx.itemId) {
+      const [burnerItem] = await OBR.scene.items.getItems([ctx.burnerItemId]);
+      burnerName = burnerItem ? (burnerItem.name || "Halfling ally") : null;
+    }
+    await ctx.applyAdjustment(accum.bonus, accum.detail, newTotal, lastRoll.total, lastRoll.label || ctx.label, burnerName);
   }
   closeLuckBurnModal();
 }
@@ -18012,8 +18040,12 @@ async function handleFumbleCancelClick(target) {
 // everywhere. Not a new physical die roll, so unlike an ordinary roll
 // result this never calls broadcastDiceRoll (no tumble animation for
 // pure arithmetic).
-function postLuckAdjustmentNote({ rollerName, kind, gmOnly, label, bonus, detail, oldTotal, newTotal }) {
-  const text = `🍀 Burn Luck: ${label} ${oldTotal} → ${markRollTotal(String(newTotal))} (${formatSignedNumber(bonus)}, ${detail}).`;
+function postLuckAdjustmentNote({ rollerName, kind, gmOnly, label, bonus, detail, oldTotal, newTotal, burnerName }) {
+  // Good Luck Charm (DCC RPG core rulebook, Halfling only) - burnerName is
+  // only set when a DIFFERENT token's Luck paid for this boost (see
+  // confirmLuckBurnModal), crediting the assisting Halfling in the note.
+  const creditLine = burnerName ? ` — assisted by ${burnerName}'s Good Luck Charm` : "";
+  const text = `🍀 Burn Luck: ${label} ${oldTotal} → ${markRollTotal(String(newTotal))} (${formatSignedNumber(bonus)}, ${detail})${creditLine}.`;
   showTrackerStatus(text, false, 6000);
   showStatus(text, false, 6000);
   appendChatLog({ kind, tokenName: rollerName, text, gmOnly });
@@ -18030,21 +18062,33 @@ function postLuckAdjustmentNote({ rollerName, kind, gmOnly, label, bonus, detail
 // weapon/spell name AS OF THAT ROLL, which the modal passes straight
 // through to applyAdjustment on Confirm. `chatKind` is "attack" or
 // "spell", matching appendChatLog's own kind values.
-function attackOrSpellLuckBurnCtx(itemId, attackId, slotKey, chatKind) {
+// burnerItemId (optional, all 5 ctx builders in this file take it the
+// same way) is Good Luck Charm's own hook (DCC RPG core rulebook,
+// Halfling only): "the halfling can expend Luck to aid their allies...
+// The halfling loses the Luck, and the ally receives the benefit." When
+// present and different from `itemId`, it's the ASSISTING Halfling's own
+// token - openLuckBurnModal/luckBurnModalMinusClick/cancelLuckBurnModal
+// all spend/restore Luck and read the class/level burn-rate formula from
+// burnerItemId instead of itemId, while getLastRoll/applyAdjustment below
+// keep acting on itemId (the roll actually being boosted) exactly as
+// before - so an ordinary self-burn (burnerItemId omitted) is completely
+// unaffected.
+function attackOrSpellLuckBurnCtx(itemId, attackId, slotKey, chatKind, burnerItemId) {
   return {
     itemId,
+    burnerItemId,
     getLastRoll: async () => {
       const [item] = await OBR.scene.items.getItems([itemId]);
       if (!item) return null;
       const atk = getStatsForItem(item).attacks.find(a => a.id === attackId);
       return (atk && atk.luckLastRoll && atk.luckLastRoll[slotKey]) || null;
     },
-    applyAdjustment: async (bonus, detail, newTotal, oldTotal, label) => {
+    applyAdjustment: async (bonus, detail, newTotal, oldTotal, label, burnerName) => {
       const [item] = await OBR.scene.items.getItems([itemId]);
       await clearLuckLastRollForStats(itemId, attackId, slotKey);
       const rollerName = item ? (item.name || "Token") : "Token";
       const gmOnly = item ? isGmOnlyRoll(getStatsForItem(item).mode, item) : false;
-      postLuckAdjustmentNote({ rollerName, kind: chatKind, gmOnly, label: label || "this roll", bonus, detail, oldTotal, newTotal });
+      postLuckAdjustmentNote({ rollerName, kind: chatKind, gmOnly, label: label || "this roll", bonus, detail, oldTotal, newTotal, burnerName });
     },
   };
 }
@@ -18081,21 +18125,22 @@ async function clearInitiativeLuckLastRollForStats(itemId) {
 // Builds the ctx openLuckBurnModal needs for Initiative's Burn Luck -
 // used only by a Log entry's own 🍀 button now (see chatEntryHtml/
 // chatLuckBurnCtxFor); there's no Tracker/Sheet row button anymore.
-function initiativeLuckBurnCtx(itemId) {
+function initiativeLuckBurnCtx(itemId, burnerItemId) {
   return {
     itemId,
+    burnerItemId,
     label: "Initiative",
     getLastRoll: async () => {
       const [item] = await OBR.scene.items.getItems([itemId]);
       if (!item) return null;
       return getStatsForItem(item).data.initLuckLastRoll || null;
     },
-    applyAdjustment: async (bonus, detail, newTotal, oldTotal, label) => {
+    applyAdjustment: async (bonus, detail, newTotal, oldTotal, label, burnerName) => {
       const [item] = await OBR.scene.items.getItems([itemId]);
       await clearInitiativeLuckLastRollForStats(itemId);
       const rollerName = item ? (item.name || "Token") : "Token";
       const gmOnly = item ? isGmOnlyRoll(getStatsForItem(item).mode, item) : false;
-      postLuckAdjustmentNote({ rollerName, kind: "initiative", gmOnly, label: label || "Initiative", bonus, detail, oldTotal, newTotal });
+      postLuckAdjustmentNote({ rollerName, kind: "initiative", gmOnly, label: label || "Initiative", bonus, detail, oldTotal, newTotal, burnerName });
     },
   };
 }
@@ -18141,9 +18186,10 @@ async function clearSkillLuckLastRollForStats(itemId, skillKey) {
 // used only by a Log entry's own 🍀 button now (see chatEntryHtml/
 // chatLuckBurnCtxFor), same "always metadata-based" reasoning
 // attackOrSpellLuckBurnCtx/initiativeLuckBurnCtx already follow.
-function skillLuckBurnCtx(itemId, skillKey, label) {
+function skillLuckBurnCtx(itemId, skillKey, label, burnerItemId) {
   return {
     itemId,
+    burnerItemId,
     label,
     getLastRoll: async () => {
       const [item] = await OBR.scene.items.getItems([itemId]);
@@ -18151,12 +18197,12 @@ function skillLuckBurnCtx(itemId, skillKey, label) {
       const data = getStatsForItem(item).data;
       return (data.skillLuckLastRoll && data.skillLuckLastRoll[skillKey]) || null;
     },
-    applyAdjustment: async (bonus, detail, newTotal, oldTotal, rollLabel) => {
+    applyAdjustment: async (bonus, detail, newTotal, oldTotal, rollLabel, burnerName) => {
       const [item] = await OBR.scene.items.getItems([itemId]);
       await clearSkillLuckLastRollForStats(itemId, skillKey);
       const rollerName = item ? (item.name || "Token") : "Token";
       const gmOnly = item ? isGmOnlyRoll(getStatsForItem(item).mode, item) : false;
-      postLuckAdjustmentNote({ rollerName, kind: "skill", gmOnly, label: rollLabel || label || "this roll", bonus, detail, oldTotal, newTotal });
+      postLuckAdjustmentNote({ rollerName, kind: "skill", gmOnly, label: rollLabel || label || "this roll", bonus, detail, oldTotal, newTotal, burnerName });
     },
   };
 }
@@ -18198,9 +18244,10 @@ async function clearSaveLuckLastRollForStats(itemId, saveId) {
 // Builds the ctx openLuckBurnModal needs for one save's Burn Luck -
 // Log-entry-only, same "always metadata-based" reasoning
 // attackOrSpellLuckBurnCtx/skillLuckBurnCtx/initiativeLuckBurnCtx follow.
-function saveLuckBurnCtx(itemId, saveId, label) {
+function saveLuckBurnCtx(itemId, saveId, label, burnerItemId) {
   return {
     itemId,
+    burnerItemId,
     label,
     getLastRoll: async () => {
       const [item] = await OBR.scene.items.getItems([itemId]);
@@ -18208,12 +18255,12 @@ function saveLuckBurnCtx(itemId, saveId, label) {
       const data = getStatsForItem(item).data;
       return (data.saveLuckLastRoll && data.saveLuckLastRoll[saveId]) || null;
     },
-    applyAdjustment: async (bonus, detail, newTotal, oldTotal, rollLabel) => {
+    applyAdjustment: async (bonus, detail, newTotal, oldTotal, rollLabel, burnerName) => {
       const [item] = await OBR.scene.items.getItems([itemId]);
       await clearSaveLuckLastRollForStats(itemId, saveId);
       const rollerName = item ? (item.name || "Token") : "Token";
       const gmOnly = item ? isGmOnlyRoll(getStatsForItem(item).mode, item) : false;
-      postLuckAdjustmentNote({ rollerName, kind: "save", gmOnly, label: rollLabel || label || "this roll", bonus, detail, oldTotal, newTotal });
+      postLuckAdjustmentNote({ rollerName, kind: "save", gmOnly, label: rollLabel || label || "this roll", bonus, detail, oldTotal, newTotal, burnerName });
     },
   };
 }
@@ -18254,9 +18301,10 @@ async function clearAbilityLuckLastRollForStats(itemId, abilityId) {
 // Builds the ctx openLuckBurnModal needs for one ability check's Burn
 // Luck - Log-entry-only, same "always metadata-based" reasoning
 // attackOrSpellLuckBurnCtx/skillLuckBurnCtx/saveLuckBurnCtx follow.
-function abilityLuckBurnCtx(itemId, abilityId, label) {
+function abilityLuckBurnCtx(itemId, abilityId, label, burnerItemId) {
   return {
     itemId,
+    burnerItemId,
     label,
     getLastRoll: async () => {
       const [item] = await OBR.scene.items.getItems([itemId]);
@@ -18264,12 +18312,12 @@ function abilityLuckBurnCtx(itemId, abilityId, label) {
       const data = getStatsForItem(item).data;
       return (data.abilityLuckLastRoll && data.abilityLuckLastRoll[abilityId]) || null;
     },
-    applyAdjustment: async (bonus, detail, newTotal, oldTotal, rollLabel) => {
+    applyAdjustment: async (bonus, detail, newTotal, oldTotal, rollLabel, burnerName) => {
       const [item] = await OBR.scene.items.getItems([itemId]);
       await clearAbilityLuckLastRollForStats(itemId, abilityId);
       const rollerName = item ? (item.name || "Token") : "Token";
       const gmOnly = item ? isGmOnlyRoll(getStatsForItem(item).mode, item) : false;
-      postLuckAdjustmentNote({ rollerName, kind: "ability", gmOnly, label: rollLabel || label || "this roll", bonus, detail, oldTotal, newTotal });
+      postLuckAdjustmentNote({ rollerName, kind: "ability", gmOnly, label: rollLabel || label || "this roll", bonus, detail, oldTotal, newTotal, burnerName });
     },
   };
 }
@@ -19072,6 +19120,13 @@ async function appendChatLog(entry) {
 function chatEntryHtml(entry) {
   const time = new Date(entry.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const luckTargets = Array.isArray(entry.luckTargets) ? entry.luckTargets : [];
+  // Good Luck Charm (DCC RPG core rulebook, Halfling only) - offered as a
+  // SEPARATE button alongside the normal one whenever the currently-open
+  // Sheet is a Halfling and this isn't already that Halfling's own roll
+  // (assisting yourself is just the ordinary Burn Luck button). See
+  // chatLuckBurnCtxFor's own comment for how this reaches burnerItemId.
+  const classEl = document.getElementById("pc-class");
+  const viewerIsHalfling = !!currentItemId && classEl && classEl.value === "Halfling";
   const luckRowHtml = luckTargets.length
     ? `<div class="chat-entry-luck-row">${luckTargets.map((t, i) => {
         const isFumbleCancel = t.type === "fumbleCancel";
@@ -19081,7 +19136,11 @@ function chatEntryHtml(entry) {
         const buttonLabel = isFumbleCancel
           ? "🍀 Burn 1 Luck to Cancel Fumble"
           : `🍀${luckTargets.length > 1 ? ` ${escapeHtml(t.label || "")}` : " Burn Luck"}`;
-        return `<button type="button" class="chat-luck-burn-btn" data-luck-index="${i}" title="${title}">${buttonLabel}</button>`;
+        const ownBtn = `<button type="button" class="chat-luck-burn-btn" data-luck-index="${i}" title="${title}">${buttonLabel}</button>`;
+        const assistBtn = (!isFumbleCancel && viewerIsHalfling && t.itemId !== currentItemId)
+          ? `<button type="button" class="chat-luck-burn-btn chat-luck-assist-btn" data-luck-index="${i}" title="Good Luck Charm (DCC RPG core rulebook, Halfling only) - burn YOUR OWN Luck to boost this ally's roll instead of one of your own.">🍀🤝 Assist</button>`
+          : "";
+        return ownBtn + assistBtn;
       }).join("")}</div>`
     : "";
   return `
@@ -19105,20 +19164,27 @@ function chatEntryHtml(entry) {
 // roll for that target is, which may have since moved on from this exact
 // entry if it was rolled again without burning - same characteristic the
 // row-based buttons already have).
-function chatLuckBurnCtxFor(target) {
+// burnerItemId (optional) is Good Luck Charm's own hook (Halfling only) -
+// see the ctx builders' own comments for how it splits "whose Luck is
+// spent" from "whose roll is boosted."
+function chatLuckBurnCtxFor(target, burnerItemId) {
   if (!target) return null;
   if (target.type === "attack" || target.type === "spell") {
-    return attackOrSpellLuckBurnCtx(target.itemId, target.attackId, target.slotKey, target.chatKind);
+    return attackOrSpellLuckBurnCtx(target.itemId, target.attackId, target.slotKey, target.chatKind, burnerItemId);
   }
-  if (target.type === "skill") return skillLuckBurnCtx(target.itemId, target.skillKey, target.label);
-  if (target.type === "initiative") return initiativeLuckBurnCtx(target.itemId);
-  if (target.type === "save") return saveLuckBurnCtx(target.itemId, target.saveId, target.label);
-  if (target.type === "ability") return abilityLuckBurnCtx(target.itemId, target.abilityId, target.label);
+  if (target.type === "skill") return skillLuckBurnCtx(target.itemId, target.skillKey, target.label, burnerItemId);
+  if (target.type === "initiative") return initiativeLuckBurnCtx(target.itemId, burnerItemId);
+  if (target.type === "save") return saveLuckBurnCtx(target.itemId, target.saveId, target.label, burnerItemId);
+  if (target.type === "ability") return abilityLuckBurnCtx(target.itemId, target.abilityId, target.label, burnerItemId);
   return null;
 }
 
 document.getElementById("chat-log-list").addEventListener("click", e => {
-  const btn = e.target.closest(".chat-luck-burn-btn");
+  // Good Luck Charm's own button carries BOTH classes (see chatEntryHtml)
+  // so it still matches the plain .chat-luck-burn-btn selector below -
+  // check the more specific one first.
+  const assistBtn = e.target.closest(".chat-luck-assist-btn");
+  const btn = assistBtn || e.target.closest(".chat-luck-burn-btn");
   if (!btn) return;
   const entryEl = btn.closest(".chat-entry");
   const entry = entryEl ? lastChatLog.find(en => en.id === entryEl.dataset.entryId) : null;
@@ -19130,7 +19196,7 @@ document.getElementById("chat-log-list").addEventListener("click", e => {
     handleFumbleCancelClick(target);
     return;
   }
-  const ctx = chatLuckBurnCtxFor(target);
+  const ctx = chatLuckBurnCtxFor(target, assistBtn ? currentItemId : undefined);
   if (ctx) openLuckBurnModal(ctx);
 });
 
