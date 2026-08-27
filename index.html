@@ -1612,7 +1612,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 23:08</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 23:16</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1943,6 +1943,7 @@
           <div id="pc-deity-wrap" style="display:none">
             <label>Deity (Cleric)</label>
             <input type="text" id="pc-deity" placeholder="e.g. a Lawful war-god" title="Free text - type this cleric's own deity (from your rulebook's Sample Deities appendix, or a homebrew one) here. Which weapons this cleric is trained in (Table 4-1's untrained-weapon penalty) and which creatures count as unholy for Turn Unholy both follow this character's ALIGNMENT rather than the specific deity picked - see the fields above." />
+            <textarea id="pc-deity-writeup" class="manifestation-note" placeholder="This deity's own write-up from your Sample Deities appendix, if you want it handy here" rows="2" style="margin-top:4px;" title="Free text - the GM's own Rulebook Data Import (Dice tab) can auto-fill this once the Deity name above matches an imported entry, same as a spell row's Manifestation - never overwrites something already typed in."></textarea>
           </div>
         </div>
 
@@ -2038,6 +2039,7 @@
           <div id="pc-patron-wrap" style="display:none; margin-top:8px;">
             <div class="spell-section-header">Patron <span class="spell-section-hint">optional</span></div>
             <input type="text" id="pc-patron" placeholder="e.g. a lord of a hidden fey court" title="Free text - which patron this Wizard/Elf is bonded to (DCC RPG core rulebook - specific patron names/write-ups are paid content, so this is player-filled like the Cleric Deity field). Knowing/casting Invoke Patron or Patron Bond (pick either from the spell list below - Table 5-8's own ** footnote: rolling either one grants BOTH, but they only cost one spell slot together) lets that patron's own three personal spells be picked too, grouped by name in the spell-name dropdown." />
+            <textarea id="pc-patron-writeup" class="manifestation-note" placeholder="This patron's own write-up from your book, if you want it handy here" rows="2" style="margin-top:4px;" title="Free text - the GM's own Rulebook Data Import (Dice tab) can auto-fill this once the Patron name above matches an imported entry, same as a spell row's Manifestation - never overwrites something already typed in."></textarea>
           </div>
           <div id="pc-elf-luck-spell-wrap" style="display:none; margin-top:8px;">
             <div class="spell-section-header">Luck Spell <span class="spell-section-hint">optional</span></div>
@@ -2230,9 +2232,9 @@
       <fieldset class="gm-only-row" id="rulebook-import-row" style="display:none;">
         <legend>Import Rulebook Data</legend>
         <div class="fumble-die-note" style="margin-bottom:6px;">
-          Paste JSON you've personally transcribed from your own copy of the rulebook - spell Manifestation text and Effect Table rows, keyed by exact spell name. This is stored in THIS SCENE's own data (shared with everyone at this table, same as the roll log), never saved to this app's own source code or public repo. Format: <code>{"spells":{"Magic missile":{"manifestation":"...","effectRows":[{"range":"12-13","text":"..."}]}}}</code>. A spell row's own Manifestation/Effect Table only auto-fills when picked and currently blank - it never overwrites something already typed in.
+          Paste JSON you've personally transcribed from your own copy of the rulebook - spell Manifestation/Effect Table/Corruption/Misfire text keyed by exact spell name, and/or Patron/Deity write-ups keyed by exact patron/deity name (matching whatever's typed in that character's own Patron/Deity field). This is stored in THIS SCENE's own data (shared with everyone at this table, same as the roll log), never saved to this app's own source code or public repo. Format: <code>{"spells":{"Magic missile":{"manifestation":"...","effectRows":[{"range":"12-13","text":"..."}],"corruption":"...","misfire":"..."}},"patrons":{"a lord of a hidden fey court":"..."},"deities":{"a Lawful war-god":"..."}}</code> - any subset of "spells"/"patrons"/"deities" is fine. Every field above only auto-fills when its own name is picked/typed and it's currently blank - it never overwrites something already typed in.
         </div>
-        <textarea id="rulebook-import-textarea" rows="4" placeholder='{"spells": {"Magic missile": {"manifestation": "...", "effectRows": [{"range": "12-13", "text": "..."}]}}}' style="width:100%; box-sizing:border-box; font-family:monospace; font-size:11px;"></textarea>
+        <textarea id="rulebook-import-textarea" rows="4" placeholder='{"spells": {"Magic missile": {"manifestation": "...", "effectRows": [{"range": "12-13", "text": "..."}], "corruption": "...", "misfire": "..."}}, "patrons": {"a lord of a hidden fey court": "..."}, "deities": {"a Lawful war-god": "..."}}' style="width:100%; box-sizing:border-box; font-family:monospace; font-size:11px;"></textarea>
         <div class="row" style="margin-top:6px;">
           <div>
             <label>Or load a .json file</label>
@@ -2863,7 +2865,7 @@ const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al", "montype"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-luck-augur-roll","pc-luck-augur-mod","pc-luck-augur-hp-bonus-applied","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-favorite-weapon-luck","pc-elf-luck-spell-luck","pc-deity","pc-patron","pc-familiar-name","pc-familiar-category","pc-familiar-config","pc-familiar-personality","pc-familiar-hp","pc-familiar-hp-bonus-applied","pc-familiar-token-id","pc-familiar-unlocked","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto","pc-dying-state","pc-dying-deadline-round","pc-body-recovery-attempted","pc-patron-taint-chance"];
+const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-luck-augur-roll","pc-luck-augur-mod","pc-luck-augur-hp-bonus-applied","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-favorite-weapon-luck","pc-elf-luck-spell-luck","pc-deity","pc-deity-writeup","pc-patron","pc-patron-writeup","pc-familiar-name","pc-familiar-category","pc-familiar-config","pc-familiar-personality","pc-familiar-hp","pc-familiar-hp-bonus-applied","pc-familiar-token-id","pc-familiar-unlocked","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto","pc-dying-state","pc-dying-deadline-round","pc-body-recovery-attempted","pc-patron-taint-chance"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
 const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level", "pc-elf-luck-spell"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
@@ -3096,6 +3098,14 @@ function fillForm(mode, data) {
           : (selectEl && selectEl.value === SPELL_CUSTOM_KEY ? (customEl ? customEl.value.trim() : "") : (selectEl ? selectEl.value : ""));
         applyRulebookDataToRow(row, name);
       });
+    }
+    // Same catch-up, for Patron/Deity write-ups (see
+    // applyRulebookWriteupField's own comment).
+    if (lastRulebookData && lastRulebookData.patrons) {
+      applyRulebookWriteupField(document.getElementById("pc-patron").value.trim(), lastRulebookData.patrons, document.getElementById("pc-patron-writeup"));
+    }
+    if (lastRulebookData && lastRulebookData.deities) {
+      applyRulebookWriteupField(document.getElementById("pc-deity").value.trim(), lastRulebookData.deities, document.getElementById("pc-deity-writeup"));
     }
   }
   if (mode === "pc") renderInjuries(d.injuries || []);
@@ -7021,6 +7031,23 @@ function scheduleSave() {
 
 [...MONSTER_ALL_FIELD_IDS, ...PC_ALL_FIELD_IDS].forEach(id => {
   document.getElementById(id).addEventListener("input", scheduleSave);
+});
+// Rulebook Data Import's own auto-fill for Patron/Deity (see
+// applyRulebookWriteupField's own comment) - triggered on the identity
+// field itself (pc-patron/pc-deity) rather than a dedicated "pick from a
+// list" control, since both are free text; a typed name that happens to
+// match an imported entry fills the write-up field once, same "never
+// overwrites something already there" contract as a spell row's own
+// Manifestation.
+document.getElementById("pc-patron").addEventListener("input", () => {
+  if (lastRulebookData && lastRulebookData.patrons) {
+    applyRulebookWriteupField(document.getElementById("pc-patron").value.trim(), lastRulebookData.patrons, document.getElementById("pc-patron-writeup"));
+  }
+});
+document.getElementById("pc-deity").addEventListener("input", () => {
+  if (lastRulebookData && lastRulebookData.deities) {
+    applyRulebookWriteupField(document.getElementById("pc-deity").value.trim(), lastRulebookData.deities, document.getElementById("pc-deity-writeup"));
+  }
 });
 nameEl.addEventListener("input", scheduleSave);
 
@@ -11727,7 +11754,7 @@ function divineAidModifierForStats(stats, slotKey) {
 }
 
 function emptySpellItem() {
-  return { id: "g" + Math.random().toString(36).slice(2, 9), name: "", mercurial: null, mercurialNote: "", mercurialBonus: "", mercurialDieSteps: "", manifestation: "", concentration: false, lost: false, level: "", range: "", duration: "", castingTime: "", save: "", effectRows: [] };
+  return { id: "g" + Math.random().toString(36).slice(2, 9), name: "", mercurial: null, mercurialNote: "", mercurialBonus: "", mercurialDieSteps: "", manifestation: "", concentration: false, lost: false, level: "", range: "", duration: "", castingTime: "", save: "", effectRows: [], corruption: "", misfire: "" };
 }
 
 function emptySpellEffectRow() {
@@ -11897,6 +11924,8 @@ function spellRowHtml(item, index, allItems) {
         <div class="spell-row-collapsible"${expanded ? "" : ' style="display:none"'}>
           ${manifestationFieldHtml(item)}
           ${spellEffectRowsHtml(item)}
+          ${corruptionFieldHtml(item)}
+          ${misfireFieldHtml(item)}
         </div>
       </div>`;
   }
@@ -11985,6 +12014,8 @@ function spellRowHtml(item, index, allItems) {
         ${manifestationFieldHtml(item)}
         ${mercurialRowHtml}
         ${spellEffectRowsHtml(item)}
+        ${corruptionFieldHtml(item)}
+        ${misfireFieldHtml(item)}
       </div>
     </div>`;
 }
@@ -12041,6 +12072,22 @@ function lostCheckboxHtml(item) {
 function manifestationFieldHtml(item) {
   return `<div class="spell-section-header">Manifestation <span class="spell-section-hint">optional</span></div>
     <textarea class="manifestation-note" placeholder="Roll per this spell's own entry in your rulebook" rows="2">${escapeHtml(item.manifestation || "")}</textarea>`;
+}
+
+// Corruption/Misfire - like Manifestation above, this app has no per-spell
+// tables to roll against (a patron spell's own Corruption/Misfire tables
+// are paid content, distinct from the character-wide Corruption Effects
+// log under pc-corruption-notes, which records what actually HAPPENED
+// rather than what a given spell's own table says could happen) - so
+// these are deliberately plain persistent notes too, always rendered and
+// harmless when blank, same reasoning as Manifestation's own comment.
+function corruptionFieldHtml(item) {
+  return `<div class="spell-section-header">Corruption <span class="spell-section-hint">optional</span></div>
+    <textarea class="spell-corruption-note" placeholder="This spell's own Corruption table entry, if it has one (your own rulebook)" rows="2">${escapeHtml(item.corruption || "")}</textarea>`;
+}
+function misfireFieldHtml(item) {
+  return `<div class="spell-section-header">Misfire <span class="spell-section-hint">optional</span></div>
+    <textarea class="spell-misfire-note" placeholder="This spell's own Misfire table entry, if it has one - patron spells only (your own rulebook)" rows="2">${escapeHtml(item.misfire || "")}</textarea>`;
 }
 
 function spellsListEl() {
@@ -12124,7 +12171,13 @@ function readSpellItems() {
       const textEl = effectRow.querySelector(".spell-effect-text");
       return { id: effectRow.dataset.id, range: rangeInputEl ? rangeInputEl.value : "", text: textEl ? textEl.value : "" };
     });
-    return { id: row.dataset.id, name, mercurial, mercurialNote, mercurialBonus, mercurialDieSteps, manifestation, concentration, lost, level, range, duration, castingTime, save, effectRows };
+    // Corruption/Misfire (see corruptionFieldHtml/misfireFieldHtml) - same
+    // "always there, no appear-later gap" contract as Manifestation.
+    const corruptionEl = row.querySelector(".spell-corruption-note");
+    const corruption = corruptionEl ? corruptionEl.value : "";
+    const misfireEl = row.querySelector(".spell-misfire-note");
+    const misfire = misfireEl ? misfireEl.value : "";
+    return { id: row.dataset.id, name, mercurial, mercurialNote, mercurialBonus, mercurialDieSteps, manifestation, concentration, lost, level, range, duration, castingTime, save, effectRows, corruption, misfire };
   });
 }
 
@@ -12155,10 +12208,10 @@ function attachEffectRowListeners(effectRow) {
 
 // Rulebook Data Import's own auto-fill (see appendChatLog's neighboring
 // comment for the storage side) - only ever fills in a row's Manifestation/
-// Effect Table when they're CURRENTLY BLANK, so a player's own typed-in
-// notes are never silently overwritten by a later import or a name
-// picked, then changed back. Operates directly on this row's own DOM
-// (not a data-level re-render) so it can reuse effectRowHtml/
+// Effect Table/Corruption/Misfire when they're CURRENTLY BLANK, so a
+// player's own typed-in notes are never silently overwritten by a later
+// import or a name picked, then changed back. Operates directly on this
+// row's own DOM (not a data-level re-render) so it can reuse effectRowHtml/
 // attachEffectRowListeners exactly as the "+ Add Roll Range" button
 // already does, and auto-expands the row if it was collapsed so the
 // newly-filled content is actually visible.
@@ -12179,6 +12232,18 @@ function applyRulebookDataToRow(row, spellName) {
     rowsWrap.querySelectorAll(".spell-effect-row").forEach(effectRow => attachEffectRowListeners(effectRow));
     changed = true;
   }
+  const corruptionEl = row.querySelector(".spell-corruption-note");
+  if (corruptionEl && !corruptionEl.value.trim() && entry.corruption) {
+    corruptionEl.value = entry.corruption;
+    autoResizeTextarea(corruptionEl);
+    changed = true;
+  }
+  const misfireEl = row.querySelector(".spell-misfire-note");
+  if (misfireEl && !misfireEl.value.trim() && entry.misfire) {
+    misfireEl.value = entry.misfire;
+    autoResizeTextarea(misfireEl);
+    changed = true;
+  }
   if (changed) {
     const collapsibleEl = row.querySelector(".spell-row-collapsible");
     const toggleBtn = row.querySelector(".spell-row-toggle-btn");
@@ -12186,6 +12251,20 @@ function applyRulebookDataToRow(row, spellName) {
     scheduleSave();
   }
   return changed;
+}
+
+// Patron/Deity write-up auto-fill - same "only when currently blank"
+// contract as applyRulebookDataToRow above, just keyed by patron/deity
+// name (lastRulebookData.patrons/.deities) instead of by spell name, and
+// filling a single adjacent textarea instead of a whole row.
+function applyRulebookWriteupField(nameValue, dataMap, writeupEl) {
+  if (!writeupEl || !nameValue || !dataMap) return false;
+  const text = dataMap[nameValue];
+  if (!text || writeupEl.value.trim()) return false;
+  writeupEl.value = text;
+  autoResizeTextarea(writeupEl);
+  scheduleSave();
+  return true;
 }
 
 function attachSpellRowListeners() {
@@ -12210,7 +12289,7 @@ function attachSpellRowListeners() {
         toggleBtn.title = `${nowExpanded ? "Collapse" : "Expand"} this spell's details`;
         if (nowExpanded) {
           expandedSpellRows.add(row.dataset.id);
-          collapsibleEl.querySelectorAll(".manifestation-note, .mercurial-note, .spell-effect-text").forEach(autoResizeTextarea);
+          collapsibleEl.querySelectorAll(".manifestation-note, .mercurial-note, .spell-effect-text, .spell-corruption-note, .spell-misfire-note").forEach(autoResizeTextarea);
         } else {
           expandedSpellRows.delete(row.dataset.id);
         }
@@ -12230,6 +12309,18 @@ function attachSpellRowListeners() {
         scheduleSave();
       });
     }
+    // Corruption/Misfire (see corruptionFieldHtml/misfireFieldHtml) - same
+    // "always there, auto-resized, harmless when blank" contract as
+    // Manifestation above.
+    [".spell-corruption-note", ".spell-misfire-note"].forEach(sel => {
+      const el = row.querySelector(sel);
+      if (!el) return;
+      autoResizeTextarea(el);
+      el.addEventListener("input", () => {
+        autoResizeTextarea(el);
+        scheduleSave();
+      });
+    });
     // Stat-block (see spellStatblockHtml) - plain persistent text fields,
     // present on every row regardless of class, same contract as
     // Manifestation. No auto-resize needed - these are single-line inputs,
@@ -12732,7 +12823,7 @@ function openSpellsModal() {
   // regardless of whether this popup happens to be open) ends up stuck
   // at the wrong height. Redo it now that the content is actually laid
   // out and visible.
-  document.querySelectorAll("#spells-modal-backdrop .mercurial-note, #spells-modal-backdrop .manifestation-note, #spells-modal-backdrop .spell-effect-text")
+  document.querySelectorAll("#spells-modal-backdrop .mercurial-note, #spells-modal-backdrop .manifestation-note, #spells-modal-backdrop .spell-effect-text, #spells-modal-backdrop .spell-corruption-note, #spells-modal-backdrop .spell-misfire-note")
     .forEach(autoResizeTextarea);
 }
 function closeSpellsModal() {
@@ -19988,15 +20079,25 @@ async function appendChatLog(entry) {
 // copy of the rulebook, stored in THIS SCENE's own metadata (shared with
 // everyone at this table, same mechanism the chat log above already
 // uses) - never written into this app's own source/repo, since the DATA
-// lives entirely in OBR's own scene storage, not in index.html. Merges
-// with (rather than replacing) whatever's already there, keyed by spell
-// name, so importing a second batch adds to the first instead of
-// clobbering it - re-importing the SAME spell overwrites just that entry.
+// lives entirely in OBR's own scene storage, not in index.html. Three
+// independent top-level categories - spells (keyed by spell name, feeds
+// applyRulebookDataToRow: manifestation/effectRows/corruption/misfire),
+// patrons and deities (each keyed by name, feeds applyRulebookWriteupField)
+// - a GM can import any subset of the three. Each category merges with
+// (rather than replaces) whatever's already there, so importing a second
+// batch adds to the first instead of clobbering it - re-importing the SAME
+// key overwrites just that entry.
 function refreshRulebookImportStatus() {
   const el = document.getElementById("rulebook-import-status");
   if (!el) return;
-  const count = lastRulebookData && lastRulebookData.spells ? Object.keys(lastRulebookData.spells).length : 0;
-  el.textContent = count > 0 ? `${count} spell${count === 1 ? "" : "s"} currently loaded for this scene.` : "Nothing imported yet.";
+  const spellCount = lastRulebookData && lastRulebookData.spells ? Object.keys(lastRulebookData.spells).length : 0;
+  const patronCount = lastRulebookData && lastRulebookData.patrons ? Object.keys(lastRulebookData.patrons).length : 0;
+  const deityCount = lastRulebookData && lastRulebookData.deities ? Object.keys(lastRulebookData.deities).length : 0;
+  const parts = [];
+  if (spellCount > 0) parts.push(`${spellCount} spell${spellCount === 1 ? "" : "s"}`);
+  if (patronCount > 0) parts.push(`${patronCount} patron${patronCount === 1 ? "" : "s"}`);
+  if (deityCount > 0) parts.push(`${deityCount} deit${deityCount === 1 ? "y" : "ies"}`);
+  el.textContent = parts.length ? `${parts.join(", ")} currently loaded for this scene.` : "Nothing imported yet.";
 }
 document.getElementById("rulebook-import-file").addEventListener("change", (e) => {
   const file = e.target.files && e.target.files[0];
@@ -20021,15 +20122,21 @@ document.getElementById("rulebook-import-btn").addEventListener("click", async (
     el.textContent = `Couldn't parse that as JSON: ${err.message}`;
     return;
   }
-  if (!parsed || typeof parsed !== "object" || !parsed.spells || typeof parsed.spells !== "object") {
-    el.textContent = `Expected a top-level "spells" object, e.g. {"spells":{"Magic missile":{"manifestation":"...","effectRows":[...]}}}.`;
+  const hasSpells = parsed && typeof parsed === "object" && parsed.spells && typeof parsed.spells === "object";
+  const hasPatrons = parsed && typeof parsed === "object" && parsed.patrons && typeof parsed.patrons === "object";
+  const hasDeities = parsed && typeof parsed === "object" && parsed.deities && typeof parsed.deities === "object";
+  if (!hasSpells && !hasPatrons && !hasDeities) {
+    el.textContent = `Expected a top-level "spells", "patrons", and/or "deities" object, e.g. {"spells":{"Magic missile":{"manifestation":"...","effectRows":[...],"corruption":"...","misfire":"..."}},"patrons":{"a lord of a hidden fey court":"..."},"deities":{"a Lawful war-god":"..."}}.`;
     return;
   }
   try {
     const sceneMeta = await OBR.scene.getMetadata();
-    const existing = sceneMeta[RULEBOOK_DATA_METADATA_KEY] && sceneMeta[RULEBOOK_DATA_METADATA_KEY].spells ? sceneMeta[RULEBOOK_DATA_METADATA_KEY].spells : {};
-    const mergedSpells = { ...existing, ...parsed.spells };
-    const next = { spells: mergedSpells };
+    const existingData = sceneMeta[RULEBOOK_DATA_METADATA_KEY] || {};
+    const next = {
+      spells: { ...(existingData.spells || {}), ...(parsed.spells || {}) },
+      patrons: { ...(existingData.patrons || {}), ...(parsed.patrons || {}) },
+      deities: { ...(existingData.deities || {}), ...(parsed.deities || {}) },
+    };
     lastRulebookData = next;
     await OBR.scene.setMetadata({ [RULEBOOK_DATA_METADATA_KEY]: next });
     document.getElementById("rulebook-import-textarea").value = "";
