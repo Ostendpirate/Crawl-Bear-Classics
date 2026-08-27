@@ -712,6 +712,20 @@
   .spell-section-hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
   .mercurial-row { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
   .familiar-fields { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+  .familiar-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
+    background: rgba(69, 57, 46, 0.35);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+  }
+  .familiar-summary-row { display: flex; gap: 6px; }
+  .familiar-summary-label { flex: none; width: 64px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; font-size: 9px; padding-top: 1px; }
+  .familiar-summary-value { flex: 1; color: var(--text); }
   .mercurial-row > .spell-section-header { margin-top: 0; }
   .mercurial-controls { display: flex; align-items: flex-end; gap: 6px; flex-wrap: wrap; }
   .mercurial-roll { flex: none; width: 40px; font-size: 11px; font-weight: 700; color: var(--accent); padding: 4px 2px; background: var(--border); border: none; border-radius: 5px; text-align: center; }
@@ -1491,7 +1505,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 10:56</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 11:19</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1886,14 +1900,19 @@
             <input type="text" id="pc-patron" placeholder="e.g. a lord of a hidden fey court" title="Free text - which patron this Wizard/Elf is bonded to (DCC RPG core rulebook - specific patron names/write-ups are paid content, so this is player-filled like the Cleric Deity field). Knowing/casting Invoke Patron or Patron Bond (pick either from the spell list below - Table 5-8's own ** footnote: rolling either one grants BOTH, but they only cost one spell slot together) lets that patron's own three personal spells be picked too, grouped by name in the spell-name dropdown." />
           </div>
           <div id="pc-familiar-wrap" style="display:none; margin-top:8px;">
-            <div class="spell-section-header">Familiar <span class="spell-section-hint">optional</span></div>
+            <div class="spell-section-header">Familiar <span class="spell-section-hint">DCC RPG core rulebook</span></div>
             <div class="familiar-fields">
-              <input type="text" id="pc-familiar-name" placeholder="Familiar's name" title="This Wizard's familiar (DCC RPG core rulebook) - the actual Familiar Type/Bonus tables are paid content, so Type and Bonus below are free text, player-filled from your own book, same as the Patron field above." />
-              <input type="text" id="pc-familiar-type" placeholder="Type (e.g. black cat, raven, toad)" />
-              <input type="text" id="pc-familiar-bonus" placeholder="Bonus (e.g. +2 to Fort saves while within 30')" />
+              <input type="text" id="pc-familiar-name" placeholder="Familiar's name" title="Generated when Find familiar succeeds (see the popup) - Type/Physical Configuration/Personality/HP below come from Tables 7-4/7-5/7-6, only this name is yours to fill in." />
             </div>
-            <button type="button" class="hp-btn" id="add-familiar-token-btn" title="Adds a small linked creature token for this familiar near your own token on the map, with a starter HP/AC you can adjust on its own sheet - it then shows up in the Combat Tracker like any other creature.">🐾 Add Familiar Token</button>
+            <div class="familiar-summary" id="pc-familiar-summary"></div>
+            <button type="button" class="hp-btn" id="add-familiar-token-btn" title="Adds a small linked creature token for this familiar near your own token on the map, using its generated HP/AC/attack - it then shows up in the Combat Tracker like any other creature.">🐾 Add Familiar Token</button>
             <input type="hidden" id="pc-familiar-token-id" value="" />
+            <input type="hidden" id="pc-familiar-category" value="" />
+            <input type="hidden" id="pc-familiar-config-name" value="" />
+            <input type="hidden" id="pc-familiar-config-bonus" value="" />
+            <input type="hidden" id="pc-familiar-personality" value="" />
+            <input type="hidden" id="pc-familiar-hp" value="" />
+            <input type="hidden" id="pc-familiar-hp-bonus-applied" value="" />
           </div>
           <input type="hidden" id="pc-familiar-unlocked" value="" />
           <div id="pc-corruption-notes-wrap" style="display:none; margin-top:8px;">
@@ -2142,18 +2161,17 @@
       <div class="tables-modal-header">
         <div>
           <div class="tables-modal-title">🐾 Familiar Found!</div>
-          <div class="tables-modal-subtitle">Find familiar succeeded (DCC RPG core rulebook) - enter your familiar's details from your own book. You can skip this and fill it in later from the Familiar section near Spells.</div>
+          <div class="tables-modal-subtitle">Find familiar succeeded (DCC RPG core rulebook) - Type/Physical Configuration/Personality/HP are rolled below (Tables 7-4/7-5/7-6). Just name it. Skip still unlocks the Familiar section - you can reroll by casting Find familiar again later.</div>
         </div>
         <button type="button" class="tables-modal-close" id="familiar-found-modal-close" title="Close">×</button>
       </div>
       <div class="tables-modal-body">
+        <div class="familiar-summary" id="familiar-found-modal-summary"></div>
         <div class="familiar-fields">
-          <input type="text" id="familiar-found-modal-name" placeholder="Familiar's name" />
-          <input type="text" id="familiar-found-modal-type" placeholder="Type (e.g. black cat, raven, toad)" />
-          <input type="text" id="familiar-found-modal-bonus" placeholder="Bonus (e.g. +2 to Fort saves while within 30')" />
+          <input type="text" id="familiar-found-modal-name" placeholder="Name your familiar" />
         </div>
         <div class="spellburn-modal-actions">
-          <button type="button" class="spellburn-modal-cancel-btn" id="familiar-found-modal-skip" title="Close without filling these in now - the Familiar section still unlocks, just blank for now">Skip for now</button>
+          <button type="button" class="spellburn-modal-cancel-btn" id="familiar-found-modal-skip" title="Close without naming it now - the Familiar section still unlocks with everything rolled below, just no name yet">Skip for now</button>
           <button type="button" class="spellburn-modal-confirm-btn" id="familiar-found-modal-save">Save</button>
         </div>
       </div>
@@ -2479,7 +2497,7 @@ const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al", "montype"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-deity","pc-patron","pc-familiar-name","pc-familiar-type","pc-familiar-bonus","pc-familiar-token-id","pc-familiar-unlocked","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto"];
+const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-deity","pc-patron","pc-familiar-name","pc-familiar-category","pc-familiar-config-name","pc-familiar-config-bonus","pc-familiar-personality","pc-familiar-hp","pc-familiar-hp-bonus-applied","pc-familiar-token-id","pc-familiar-unlocked","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
 const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
@@ -6684,6 +6702,17 @@ function formatSignedNumber(n) {
   return n > 0 ? `+${n}` : `${n}`;
 }
 
+// Adds `delta` to whatever signed-number text is already in a save field
+// (e.g. "+2") - used to fold a Guardian familiar's +1-all-saves bonus onto
+// its copy of the wizard's own saves (see addFamiliarToken). A blank/
+// unparseable source field is treated as +0 rather than left untouched,
+// so the familiar's token still shows the bonus by itself.
+function addSignedText(text, delta) {
+  if (!delta) return text || "";
+  const base = parseInt(text, 10);
+  return formatSignedNumber((Number.isFinite(base) ? base : 0) + delta);
+}
+
 // Ability fields store (and display) as "14 (+1)" - this pulls just the
 // leading number back out, whether the field currently holds a bare score,
 // an already-formatted "score (mod)" string, or is empty.
@@ -7994,31 +8023,82 @@ function adjustPcDisapprovalRange(delta) {
 document.getElementById("pc-disapproval-range-minus").addEventListener("click", () => adjustPcDisapprovalRange(-1));
 document.getElementById("pc-disapproval-range-plus").addEventListener("click", () => adjustPcDisapprovalRange(1));
 
-// Which roll triggered this popup - "sheet" reads/writes the PC sheet's
-// own DOM fields directly (same as openSpellburnModal's "sheet" kind);
-// "tracker" (itemId) writes straight into that token's metadata instead,
-// since a Tracker-tab roll can be for any PC, not just whichever one
-// happens to be open on the Sheet tab right now.
+function rollDie(sides) {
+  return Math.floor(Math.random() * sides) + 1;
+}
+// The base 1d4+2 HP every familiar gets (DCC RPG core rulebook, "All
+// familiars"), plus a Guardian's own additional 1d4+2 (a second, separate
+// roll - the book's own "an additional 1d4+2" phrasing, not one doubled
+// die).
+function rollFamiliarHp(category) {
+  let hp = rollDie(4) + 2;
+  if (category === "Guardian") hp += rollDie(4) + 2;
+  return hp;
+}
+// Shared renderer for both the "Familiar Found" popup's preview and the
+// persistent Familiar section on the Sheet (refreshFamiliarSummary) - one
+// template so the two never drift apart.
+function familiarSummaryHtml(f) {
+  const traits = DCC_FAMILIAR_TYPE_TRAITS[f.category] || null;
+  const ac = 14 + (traits ? traits.acBonus : 0);
+  const rows = [
+    ["Type", f.category ? `${f.category}${traits ? ` — ${traits.summary}` : ""}` : "—"],
+    ["Form", f.configName ? `${f.configName}${f.configBonus ? ` (${f.configBonus})` : ""}` : "—"],
+    ["Personality", f.personality || "—"],
+    ["HP / AC", f.hp ? `${f.hp} HP, AC ${ac}` : "—"],
+  ];
+  return rows.map(([label, value]) =>
+    `<div class="familiar-summary-row"><span class="familiar-summary-label">${escapeHtml(label)}</span><span class="familiar-summary-value">${escapeHtml(value)}</span></div>`
+  ).join("");
+}
+// Passive resync for the Sheet's own Familiar section (see
+// recalcPcSpellSection, which calls this right after showing the wrap) -
+// same "read fresh off the saved fields every render pass" contract as
+// every other derived display in this app.
+function refreshFamiliarSummary() {
+  const summaryEl = document.getElementById("pc-familiar-summary");
+  if (!summaryEl) return;
+  summaryEl.innerHTML = familiarSummaryHtml({
+    category: document.getElementById("pc-familiar-category").value,
+    configName: document.getElementById("pc-familiar-config-name").value,
+    configBonus: document.getElementById("pc-familiar-config-bonus").value,
+    personality: document.getElementById("pc-familiar-personality").value,
+    hp: document.getElementById("pc-familiar-hp").value,
+  });
+}
+
+// Which roll triggered this popup, PLUS this casting's own freshly-rolled
+// results (category/configName/configBonus/personality/hp - set by
+// openFamiliarFoundModal right below) - "sheet" reads/writes the PC
+// sheet's own DOM fields directly (same as openSpellburnModal's "sheet"
+// kind); "tracker" (itemId) writes straight into that token's metadata
+// instead, since a Tracker-tab roll can be for any PC, not just whichever
+// one happens to be open on the Sheet tab right now.
 let familiarFoundModalCtx = null;
 
 // Opens right after a successful Find familiar cast (see
-// rollSpellAttackRow/rollSpellAttackForTracker) so the player can name
-// their new familiar on the spot - pre-filled from whatever's already
-// saved (re-casting after an earlier familiar died still shows its old
-// details as a starting point, rather than forcing a from-scratch retype).
+// rollSpellAttackRow/rollSpellAttackForTracker, which pass `total` and
+// `alignment`) - rolls Type (Table 7-4, a lookup off total+alignment, not
+// a random roll), Physical Configuration (Table 7-5, d14 by alignment),
+// Personality (Table 7-6, d20) and HP fresh right here, since a NEW
+// familiar has genuinely arrived (recasting after an earlier one died
+// isn't "editing" the old one - see the RAW citations on the tables
+// above). Only the Name field carries over from any existing familiar, as
+// a convenience starting point the player is free to change.
 function openFamiliarFoundModal(ctx) {
+  const category = familiarTypeForRoll(ctx.total, ctx.alignment);
+  const configRows = DCC_FAMILIAR_CONFIG_TABLE[ctx.alignment] || DCC_FAMILIAR_CONFIG_TABLE.N;
+  const configEntry = configRows[rollDie(14) - 1];
+  const personality = DCC_FAMILIAR_PERSONALITY_TABLE[rollDie(20) - 1];
+  const hp = rollFamiliarHp(category);
+  Object.assign(ctx, { category, configName: configEntry.name, configBonus: configEntry.bonus, personality, hp });
   familiarFoundModalCtx = ctx;
+  document.getElementById("familiar-found-modal-summary").innerHTML = familiarSummaryHtml(ctx);
   const nameFld = document.getElementById("familiar-found-modal-name");
-  const typeFld = document.getElementById("familiar-found-modal-type");
-  const bonusFld = document.getElementById("familiar-found-modal-bonus");
   nameFld.value = "";
-  typeFld.value = "";
-  bonusFld.value = "";
   document.getElementById("familiar-found-modal-backdrop").style.display = "flex";
   if (ctx.kind === "sheet") {
     nameFld.value = document.getElementById("pc-familiar-name").value;
-    typeFld.value = document.getElementById("pc-familiar-type").value;
-    bonusFld.value = document.getElementById("pc-familiar-bonus").value;
   } else {
     OBR.scene.items.getItems([ctx.itemId]).then(([item]) => {
       // Popup closed, or retargeted at a different roll, before this
@@ -8026,8 +8106,6 @@ function openFamiliarFoundModal(ctx) {
       if (!item || familiarFoundModalCtx !== ctx) return;
       const data = item.metadata[PC_METADATA_KEY] || {};
       nameFld.value = data["familiar-name"] || "";
-      typeFld.value = data["familiar-type"] || "";
-      bonusFld.value = data["familiar-bonus"] || "";
     });
   }
 }
@@ -8035,28 +8113,67 @@ function closeFamiliarFoundModal() {
   document.getElementById("familiar-found-modal-backdrop").style.display = "none";
   familiarFoundModalCtx = null;
 }
-// Unlocks pc-familiar-wrap (see recalcPcSpellSection) and, when given,
-// overwrites Name/Type/Bonus - `null` for any of the three leaves that
-// field as it already was, so Skip (which passes all three null) never
-// blanks out a familiar this character already had on file.
-function applyFamiliarFoundSheet(name, type, bonus) {
+// The wizard gains bonus HP equal to the familiar's own HP (DCC RPG core
+// rulebook, "All familiars") - tracked via pc-familiar-hp-bonus-applied so
+// a later reroll (a new familiar after the old one died) corrects the OLD
+// bonus back out before adding the new one, rather than stacking. Skipped
+// entirely (bonus left untouched) if HP Max isn't currently a plain
+// number - nothing safe to add a delta to.
+function applyFamiliarHpBonusToWizard(newHp) {
+  const appliedEl = document.getElementById("pc-familiar-hp-bonus-applied");
+  const oldBonus = parseInt(appliedEl.value, 10) || 0;
+  const delta = newHp - oldBonus;
+  appliedEl.value = String(newHp);
+  if (!delta) return;
+  const maxEl = document.getElementById("pc-hp-max");
+  const curEl = document.getElementById("pc-hp-current");
+  const maxVal = parseInt(maxEl.value, 10);
+  if (Number.isFinite(maxVal)) maxEl.value = String(maxVal + delta);
+  const curVal = parseInt(curEl.value, 10);
+  if (Number.isFinite(curVal)) curEl.value = String(Math.max(0, curVal + delta));
+}
+// Unlocks pc-familiar-wrap (see recalcPcSpellSection), writes this
+// casting's rolled Type/Form/Personality/HP, and applies the Wizard HP
+// bonus - `name` of `null` (Skip) leaves whatever name was already there
+// rather than blanking a familiar this character already had on file.
+function applyFamiliarFoundSheet(ctx, name) {
   document.getElementById("pc-familiar-unlocked").value = "1";
   if (name !== null) document.getElementById("pc-familiar-name").value = name;
-  if (type !== null) document.getElementById("pc-familiar-type").value = type;
-  if (bonus !== null) document.getElementById("pc-familiar-bonus").value = bonus;
+  document.getElementById("pc-familiar-category").value = ctx.category;
+  document.getElementById("pc-familiar-config-name").value = ctx.configName;
+  document.getElementById("pc-familiar-config-bonus").value = ctx.configBonus;
+  document.getElementById("pc-familiar-personality").value = ctx.personality;
+  document.getElementById("pc-familiar-hp").value = String(ctx.hp);
+  applyFamiliarHpBonusToWizard(ctx.hp);
   scheduleSave();
   recalcPcSpellSection();
 }
-async function applyFamiliarFoundForStats(itemId, name, type, bonus) {
-  await OBR.scene.items.updateItems([itemId], items => {
+// Tracker-side sibling of applyFamiliarFoundSheet - same fields, same HP-
+// bonus delta logic, just written straight into item.metadata (like
+// applySpellburnPointForStats) since the roll that triggered this may not
+// be for whichever PC is open on the Sheet tab right now.
+async function applyFamiliarFoundForStats(ctx, name) {
+  await OBR.scene.items.updateItems([ctx.itemId], items => {
     items.forEach(item => {
       const mode = item.metadata[MODE_METADATA_KEY] || "monster";
       if (mode !== "pc") return;
       const data = { ...(item.metadata[PC_METADATA_KEY] || defaultData("pc")) };
       data["familiar-unlocked"] = "1";
       if (name !== null) data["familiar-name"] = name;
-      if (type !== null) data["familiar-type"] = type;
-      if (bonus !== null) data["familiar-bonus"] = bonus;
+      data["familiar-category"] = ctx.category;
+      data["familiar-config-name"] = ctx.configName;
+      data["familiar-config-bonus"] = ctx.configBonus;
+      data["familiar-personality"] = ctx.personality;
+      data["familiar-hp"] = String(ctx.hp);
+      const oldBonus = parseInt(data["familiar-hp-bonus-applied"], 10) || 0;
+      const delta = ctx.hp - oldBonus;
+      data["familiar-hp-bonus-applied"] = String(ctx.hp);
+      if (delta) {
+        const maxVal = parseInt(data.hpMax, 10);
+        if (Number.isFinite(maxVal)) data.hpMax = String(maxVal + delta);
+        const curVal = parseInt(data.hpCurrent, 10);
+        if (Number.isFinite(curVal)) data.hpCurrent = String(Math.max(0, curVal + delta));
+      }
       item.metadata[PC_METADATA_KEY] = data;
     });
   });
@@ -8064,32 +8181,30 @@ async function applyFamiliarFoundForStats(itemId, name, type, bonus) {
 document.getElementById("familiar-found-modal-save").addEventListener("click", async () => {
   const ctx = familiarFoundModalCtx;
   if (!ctx) return;
-  const name = document.getElementById("familiar-found-modal-name").value.trim();
-  const type = document.getElementById("familiar-found-modal-type").value.trim();
-  const bonus = document.getElementById("familiar-found-modal-bonus").value.trim();
+  const name = document.getElementById("familiar-found-modal-name").value.trim() || "Familiar";
   if (ctx.kind === "sheet") {
-    applyFamiliarFoundSheet(name, type, bonus);
+    applyFamiliarFoundSheet(ctx, name);
   } else {
-    await applyFamiliarFoundForStats(ctx.itemId, name, type, bonus);
+    await applyFamiliarFoundForStats(ctx, name);
   }
   closeFamiliarFoundModal();
-  showStatus("Familiar saved.", false, 3000);
+  showStatus(`${name} saved.`, false, 3000);
 });
 async function skipFamiliarFoundModal() {
   const ctx = familiarFoundModalCtx;
   if (!ctx) { closeFamiliarFoundModal(); return; }
   if (ctx.kind === "sheet") {
-    applyFamiliarFoundSheet(null, null, null);
+    applyFamiliarFoundSheet(ctx, null);
   } else {
-    await applyFamiliarFoundForStats(ctx.itemId, null, null, null);
+    await applyFamiliarFoundForStats(ctx, null);
   }
   closeFamiliarFoundModal();
 }
 document.getElementById("familiar-found-modal-skip").addEventListener("click", skipFamiliarFoundModal);
 // The spell already succeeded regardless of whether this popup gets
-// filled in - × closes the same way Skip does (still unlocks the
-// section), rather than leaving it locked because the player dismissed
-// the popup without noticing the Skip button.
+// named - × closes the same way Skip does (still unlocks the section with
+// everything rolled), rather than leaving it locked because the player
+// dismissed the popup without noticing the Skip button.
 document.getElementById("familiar-found-modal-close").addEventListener("click", skipFamiliarFoundModal);
 
 // Spawns a small linked creature token for this Wizard's familiar (see
@@ -8145,22 +8260,44 @@ async function addFamiliarToken() {
   }
   const size = Math.max(30, Math.min(width, height) * 0.6);
   const position = { x: boundsMinX + width + size * 0.5, y: boundsMinY };
-  const typeEl = document.getElementById("pc-familiar-type");
-  const bonusEl = document.getElementById("pc-familiar-bonus");
-  const familiarType = (typeEl.value || "").trim();
-  const familiarBonus = (bonusEl.value || "").trim();
-  const noteParts = [`Familiar of ${pcItem.name || "a Wizard"}.`];
-  if (familiarType) noteParts.push(`Type: ${familiarType}.`);
-  if (familiarBonus) noteParts.push(`Bonus: ${familiarBonus}.`);
+  const category = document.getElementById("pc-familiar-category").value || "Guardian";
+  const traits = DCC_FAMILIAR_TYPE_TRAITS[category] || DCC_FAMILIAR_TYPE_TRAITS.Guardian;
+  const configName = document.getElementById("pc-familiar-config-name").value;
+  const configBonus = document.getElementById("pc-familiar-config-bonus").value;
+  const personality = document.getElementById("pc-familiar-personality").value;
+  const hp = parseInt(document.getElementById("pc-familiar-hp").value, 10) || rollFamiliarHp(category);
+  const ac = 14 + traits.acBonus;
+  // A Guardian's attack scales with the wizard's own class/level Attack
+  // bonus as they level (DCC RPG core rulebook) - traits.attackBonus is
+  // just its level-1 starting +4; currentClassLevelEntry().attack is the
+  // same class/level Attack number weapon rows already fold into their
+  // own Bonus (see composedAttackBonusText), added on top here.
+  const classEntry = currentClassLevelEntry();
+  const classAttack = (category === "Guardian" && classEntry && typeof classEntry.attack === "number") ? classEntry.attack : 0;
+  const attackBonus = traits.attackBonus + classAttack;
+  const fortEl = document.getElementById("pc-fort");
+  const refEl = document.getElementById("pc-ref");
+  const willEl = document.getElementById("pc-will");
+  const noteParts = [
+    `Familiar of ${pcItem.name || "a Wizard"} - ${category}: ${traits.summary}`,
+    configName ? `Form: ${configName}${configBonus ? ` (${configBonus})` : ""}.` : "",
+    personality ? `Personality: ${personality}.` : "",
+    traits.critDie ? `Crit die ${traits.critDie}, Table ${traits.critTable}.` : "",
+    `Uses its wizard's saving throws${traits.saveBonus ? ` (+${traits.saveBonus} bonus already folded in below)` : ""}.`,
+  ].filter(Boolean);
   const alignmentEl = document.getElementById("pc-alignment");
   const monsterData = {
     ...defaultData("monster"),
-    hpCurrent: "2",
-    hpMax: "2",
-    hd: "1d4",
-    ac: "12",
+    hpCurrent: String(hp),
+    hpMax: String(hp),
+    hd: "1d4+2",
+    ac: String(ac),
     al: alignmentEl ? alignmentEl.value : "",
+    fort: fortEl ? addSignedText(fortEl.value, traits.saveBonus) : "",
+    ref: refEl ? addSignedText(refEl.value, traits.saveBonus) : "",
+    will: willEl ? addSignedText(willEl.value, traits.saveBonus) : "",
     sp: noteParts.join(" "),
+    attacks: [{ ...emptyAttack(), name: configName || "Bite/Claw", bonus: formatSignedNumber(attackBonus), damage: traits.damage }],
   };
   const shape = buildShape()
     .width(size)
@@ -8186,7 +8323,7 @@ async function addFamiliarToken() {
   }
   tokenIdEl.value = shape.id;
   scheduleSave();
-  showStatus(`Added ${familiarName}'s token to the map - open it to fill in its own HP/AC/attacks.`, false, 6000);
+  showStatus(`Added ${familiarName}'s token to the map (${hp} HP, AC ${ac}).`, false, 6000);
 }
 document.getElementById("add-familiar-token-btn").addEventListener("click", addFamiliarToken);
 
@@ -9389,6 +9526,148 @@ const DCC_PATRON_SPELLS = [
   { patron: "The Three Fates", name: "Blade of Atropos", page: 351 },
   { patron: "The Three Fates", name: "Curse of Moirae", page: 352 },
   { patron: "The Three Fates", name: "Warp & weft", page: 353 },
+];
+
+// Table 7-4: Familiar Type (DCC RPG core rulebook) - which of the 4
+// familiar types (see DCC_FAMILIAR_TYPE_TRAITS below) a successful Find
+// familiar cast produces, keyed by the wizard's own Alignment and the
+// Spell Check TOTAL achieved (12+ - anything under that is a failed cast,
+// same universal floor rollSpellAttackRow's own generic pass/fail band
+// already uses). A pure numeric lookup, no flavor text, so unlike 7-5/7-6
+// below there's nothing here to walk carefully around - same reasoning
+// the Turn Unholy/Lay on Hands range tables already follow. `rows` uses
+// the same ascending-max shape lookupTableRow expects.
+const DCC_FAMILIAR_TYPE_TABLE = {
+  L: { rows: [{ max: 17, type: "Guardian" }, { max: 23, type: "Focal" }, { max: 29, type: "Focal" }, { max: Infinity, type: "Arcane" }] },
+  N: { rows: [{ max: 17, type: "Guardian" }, { max: 23, type: "Arcane" }, { max: 29, type: "Focal" }, { max: Infinity, type: "Demonic" }] },
+  C: { rows: [{ max: 17, type: "Guardian" }, { max: 23, type: "Demonic" }, { max: 29, type: "Arcane" }, { max: Infinity, type: "Focal" }] },
+};
+function familiarTypeForRoll(total, alignment) {
+  const table = DCC_FAMILIAR_TYPE_TABLE[alignment] || DCC_FAMILIAR_TYPE_TABLE.N;
+  const row = lookupTableRow(table, total);
+  return row ? row.type : "Guardian";
+}
+
+// The 4 familiar types' mechanical traits (DCC RPG core rulebook,
+// "Step 1: Familiar type") - paraphrased into short mechanic summaries
+// rather than the book's own sentences, same "mechanic in my own words,
+// not the prose" treatment Lay on Hands' rules text got. `attackBonus` is
+// each type's OWN attack (added to `hpBonusDice`, `acBonus`, `saveBonus`
+// on top of every familiar's shared base - see rollFamiliarStats); a
+// Guardian's actually scales with the wizard's own class/level Attack
+// bonus growth (see addFamiliarToken), so its `attackBonus` here is just
+// the level-1 starting value.
+const DCC_FAMILIAR_TYPE_TRAITS = {
+  Guardian: {
+    hpBonusDice: "1d4+2",
+    acBonus: 2,
+    attackBonus: 4,
+    damage: "1d6",
+    critDie: "1d12",
+    critTable: "III",
+    saveBonus: 1,
+    summary: "Combat-focused: extra HP, +2 AC, +1 to all saves, and an attack that scales up alongside your own class/level Attack bonus as you level.",
+  },
+  Focal: {
+    hpBonusDice: null,
+    acBonus: 0,
+    attackBonus: 1,
+    damage: "1d3",
+    critDie: null,
+    critTable: null,
+    saveBonus: 0,
+    summary: "You see through its eyes and can cast spells with it as the point of origin (delivering touch spells at range) - any spell cast through it gets +1 to the Spell Check.",
+  },
+  Arcane: {
+    hpBonusDice: null,
+    acBonus: 0,
+    attackBonus: 1,
+    damage: "1d3",
+    critDie: null,
+    critTable: null,
+    saveBonus: 0,
+    summary: "Arrives already knowing one random level 1 spell you don't have (or an interesting spell-like power, at the judge's discretion) - castable at your own normal Spell Check, same as any other spell in your repertoire.",
+  },
+  Demonic: {
+    hpBonusDice: null,
+    acBonus: 0,
+    attackBonus: 2,
+    damage: "1d4",
+    critDie: null,
+    critTable: null,
+    saveBonus: 0,
+    summary: "Splits Corruption and poison/disease/infection effects with you (rounded down in your favor, plus +4 Fort vs. those) - but claims your soul if you die while it still lives.",
+  },
+};
+
+// Table 7-5: Familiar Physical Configuration (DCC RPG core rulebook) -
+// the specific creature/form a familiar takes, plus the master's own
+// passive benefit from that form. This table (and 7-6 below) isn't in the
+// free Reference Booklet - Familiars are well past that booklet's own
+// table of contents - so unlike Turn Unholy/Lay on Hands/Mercurial Magic
+// this is sourced from the user's own copy, pasted specifically for this
+// feature; see the copyright memory note on this decision. d14, cross-
+// referenced by Alignment - `rows[roll-1]` is the entry for a given roll.
+const DCC_FAMILIAR_CONFIG_TABLE = {
+  L: [
+    { name: "Eagle", bonus: "excellent vision" },
+    { name: "White cat", bonus: "moves very silently" },
+    { name: "Hawk", bonus: "excellent vision" },
+    { name: "Brownie", bonus: "excellent at hiding in forest" },
+    { name: "Miniature armored knight (visor never lifted)", bonus: "+1 AC" },
+    { name: "Giant bee", bonus: "melee attacks deal +1 extra stinging damage" },
+    { name: "Faithful hound", bonus: "your followers/retainers get +2 to morale checks" },
+    { name: "Giant ant", bonus: "+1 to ESP/telepathy/scrying attempts" },
+    { name: "Extraplanar ant", bonus: "+1 to planar travel attempts" },
+    { name: "Miniature ancient version of you", bonus: "an extra life - the first time you die, the familiar dies instead and you're restored to full HP" },
+    { name: "Giant wasp", bonus: "melee attacks poison: DC 12 Fort or temporary loss of 1 Str" },
+    { name: "Miniature cowled wizard (face never revealed)", bonus: "+1 to Spell Checks for one randomly determined spell" },
+    { name: "Miniature gorilla", bonus: "+1 Strength" },
+    { name: "Miniature young/spry version of you", bonus: "+1 Stamina" },
+  ],
+  N: [
+    { name: "Badger", bonus: "melee attacks deal +1 extra damage" },
+    { name: "Wolverine", bonus: "+2 hit points" },
+    { name: "Owl", bonus: "sees at night as well as a human by day, plus excellent hearing" },
+    { name: "Pixie", bonus: "excellent at hiding in forest" },
+    { name: "Miniature minotaur", bonus: "+1 Strength" },
+    { name: "Giant cricket", bonus: "loud, commanding voice" },
+    { name: "Lizard", bonus: "40' movement" },
+    { name: "Turtle", bonus: "+2 AC but movement reduced by 5'" },
+    { name: "Toad", bonus: "can breathe underwater up to 20 minutes" },
+    { name: "Tiny elemental", bonus: "+1 to checks/saves relating to its element (1d12 to determine element)" },
+    { name: "Crow", bonus: "uncanny ability to detect gems/shiny objects" },
+    { name: "Horned slug", bonus: "melee attack causes paralysis: DC 12 Fort or paralyzed 1d4+caster level rounds" },
+    { name: "Giant beetle", bonus: "+1 AC" },
+    { name: "Rat", bonus: "120' infravision" },
+  ],
+  C: [
+    { name: "Giant centipede", bonus: "10' climb speed" },
+    { name: "Black cat", bonus: "moves very silently" },
+    { name: "Bat", bonus: "extraordinary hearing" },
+    { name: "Cobra", bonus: "poisoned bite: DC 16 Fort save or lose 1d6 Stamina" },
+    { name: "Tarantula", bonus: "melee attacks poison: DC 14 Fort or temporary loss of 1 Agility" },
+    { name: "Weasel", bonus: "supernatural ability to squeeze into tight places" },
+    { name: "Spider monkey", bonus: "20' climb speed" },
+    { name: "Pseudo-dragon", bonus: "breath weapon 1/day: 20'x10' cone, 2d6 fire damage" },
+    { name: "Miniature woman of extraordinary beauty", bonus: "+2 Personality" },
+    { name: "Python", bonus: "melee attack constricts: +1d4 extra damage each round after the first, increasing further each round" },
+    { name: "Tiny viper", bonus: "extraordinary sense of smell" },
+    { name: "Tiny demon (imp/quasit)", bonus: "+2 Luck, restoring nightly like a thief's own Luck" },
+    { name: "Scorpion", bonus: "+2 to Fort saves vs. poison" },
+    { name: "Skeletal rat", bonus: "+1 damage against undead" },
+  ],
+};
+
+// Table 7-6: Familiar Personality (DCC RPG core rulebook) - pure flavor,
+// no mechanical effect; d20, `[roll-1]` is the entry. Same sourcing note
+// as Table 7-5 just above.
+const DCC_FAMILIAR_PERSONALITY_TABLE = [
+  "Grumpy", "Angry", "Eager and curious", "Complains constantly about creaky joints",
+  "Normally mellow, but gets oddly animated whenever one particular topic comes up",
+  "Cranky", "Narcissistic", "Wise", "Vapid (constantly polishes its nails)",
+  "Garrulous (won't shut up)", "Stingy", "Jolly", "Introspective", "Convivial",
+  "Lazy", "Aloof", "Charitable", "Seductive", "Mellow", "Sleepy",
 ];
 
 // Sentinel <option> value for "this row's spell isn't on the list" -
@@ -10661,26 +10940,28 @@ function recalcPcSpellSection() {
   // Familiar (DCC RPG core rulebook) - Wizard-only, NOT Elf (unlike
   // Patron/Corruption above, which are shared by both Int casters) - the
   // "may begin play with a familiar" class feature is written into the
-  // Wizard chapter specifically. Same free-text reasoning as Patron: the
-  // actual Familiar Type/Bonus tables are paid content, so Type/Bonus are
-  // player-filled rather than a dropdown built off them. Also gated on
-  // pc-familiar-unlocked, set only by a successful Find familiar cast (see
-  // openFamiliarFoundModal/rollSpellAttackRow) - there's nothing to show
-  // here until the character has actually found one.
+  // Wizard chapter specifically. Type/Physical Configuration/Personality/
+  // HP are generated (Tables 7-4/7-5/7-6 - see openFamiliarFoundModal),
+  // not free text. Gated on pc-familiar-unlocked, set only by a successful
+  // Find familiar cast - there's nothing to show here until the character
+  // has actually found one.
   const familiarUnlockedEl = document.getElementById("pc-familiar-unlocked");
-  // One-time migration: a character saved by the very first version of
-  // this section (before it required actually casting Find familiar)
-  // could already have Name/Type/Bonus filled in with no unlocked flag to
-  // match - treat "already has familiar data" as proof enough rather than
-  // hiding a character's existing familiar behind a spell they never
-  // needed to cast under the rules as they existed when they filled it in.
+  // One-time migration: a character saved by an earlier version of this
+  // section (free-text Name/Type/Bonus, no roll tables, no unlocked flag)
+  // could already have a Name filled in - treat that as proof enough
+  // rather than hiding a character's existing familiar behind a spell
+  // they never needed to cast under the rules as they existed when they
+  // filled it in. Its old Type/Bonus text doesn't map to the new
+  // Category/Form/Personality/HP fields, so the summary just starts blank
+  // until the player recasts Find familiar to roll a proper one.
   if (familiarUnlockedEl && familiarUnlockedEl.value !== "1") {
-    const hasLegacyData = ["pc-familiar-name", "pc-familiar-type", "pc-familiar-bonus"]
-      .some(id => (document.getElementById(id).value || "").trim());
-    if (hasLegacyData) familiarUnlockedEl.value = "1";
+    const legacyNameEl = document.getElementById("pc-familiar-name");
+    if (legacyNameEl && legacyNameEl.value.trim()) familiarUnlockedEl.value = "1";
   }
   const familiarWrap = document.getElementById("pc-familiar-wrap");
-  if (familiarWrap) familiarWrap.style.display = (cls === "Wizard" && familiarUnlockedEl && familiarUnlockedEl.value === "1") ? "" : "none";
+  const familiarShown = cls === "Wizard" && familiarUnlockedEl && familiarUnlockedEl.value === "1";
+  if (familiarWrap) familiarWrap.style.display = familiarShown ? "" : "none";
+  if (familiarShown) refreshFamiliarSummary();
   // Disapproval Range (see refreshPcDisapprovalRangeNote's own comment) -
   // same Cleric-only gate as the button itself, same passive every-render
   // refresh as Corruption Effects above (a range widened via a Tracker-tab
@@ -11772,8 +12053,9 @@ async function rollSpellAttackRow(row) {
   // "natural 1 always fails regardless of total" exclusion the Burn Luck
   // caching below already applies.
   if (spellName === "Find familiar" && check.abilityId === "int" && total >= 12 && rolled !== 1) {
-    note += ` ${markCritAlert("🐾 FAMILIAR FOUND")} - enter its details in the popup.`;
-    openFamiliarFoundModal({ kind: "sheet" });
+    note += ` ${markCritAlert("🐾 FAMILIAR FOUND")} - see the popup for what arrived.`;
+    const alignmentEl = document.getElementById("pc-alignment");
+    openFamiliarFoundModal({ kind: "sheet", total, alignment: alignmentEl ? alignmentEl.value : "" });
   }
   // Failed Spellburn (DCC RPG core rulebook): a natural 1 while Spellburning
   // permanently costs 1 MORE ability point on top of what was already
@@ -16220,8 +16502,8 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   // metadata since a Tracker-tab roll may not be for whichever PC is open
   // on the Sheet tab right now.
   if (effectiveName === "Find familiar" && check.abilityId === "int" && total >= 12 && rolled !== 1) {
-    note += ` ${markCritAlert("🐾 FAMILIAR FOUND")} - enter its details in the popup.`;
-    openFamiliarFoundModal({ kind: "tracker", itemId });
+    note += ` ${markCritAlert("🐾 FAMILIAR FOUND")} - see the popup for what arrived.`;
+    openFamiliarFoundModal({ kind: "tracker", itemId, total, alignment: stats.data.alignment || "" });
   }
   // Failed Spellburn (DCC RPG core rulebook) - see rollSpellAttackRow's own
   // comment; openFailedSpellburnModalForStats runs against THIS token, not
