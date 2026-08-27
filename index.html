@@ -1612,7 +1612,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 18:31</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 18:34</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1720,6 +1720,8 @@
             </div>
           </div>
         </div>
+
+        <button type="button" class="hp-btn" id="morale-btn" title="Morale Check (DCC RPG core rulebook) - 1d20 + Will save vs DC 11 when a group's first creature is slain or half are down, a single monster drops to half HP, or a retainer first meets danger or an adventure ends. Player characters never make morale checks.">🏳️ Morale Check</button>
 
         <div class="saves">
           <div class="save-box"><label class="roll-label" data-roll-save="fort" title="Click to roll a Fortitude save: d20 + Fort.">Fort</label><input type="text" id="fort" placeholder="+2"/></div>
@@ -2408,6 +2410,45 @@
           <button type="button" class="spellburn-modal-cancel-btn" id="luckburn-modal-cancel" title="Undo every point spent since opening this popup, and close without posting an adjustment">Cancel</button>
           <button type="button" class="spellburn-modal-confirm-btn" id="luckburn-modal-confirm">Confirm</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="morale-modal-backdrop" class="tables-modal-backdrop" style="display:none">
+    <div class="tables-modal">
+      <div class="tables-modal-header">
+        <div>
+          <div class="tables-modal-title">Morale Check</div>
+          <div class="tables-modal-subtitle">1d20 + Will save (+ an employer's Personality modifier for a retainer) vs DC 11 (DCC RPG core rulebook) - 11 or higher means the creature keeps fighting, 10 or less means they flee or surrender. Checked with a group of monsters when the first is slain and again when half are down; with a single monster when it's lost half its hp; with a retainer when combat/danger is first met and at the end of each adventure. Player characters never make morale checks.</div>
+        </div>
+        <button type="button" class="tables-modal-close" id="morale-modal-close" title="Close">×</button>
+      </div>
+      <div class="tables-modal-body">
+        <div class="roll-modal-inputs">
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">Will Save</span>
+            <span class="roll-modal-static" id="morale-modal-will">+0</span>
+          </label>
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">DC</span>
+            <input type="number" id="morale-modal-dc" value="11" min="1" />
+          </label>
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">GM Modifier</span>
+            <input type="number" id="morale-modal-gm-mod" value="0" placeholder="-4 to +4" />
+          </label>
+        </div>
+        <label class="roll-modal-field" style="margin-top:6px; display:flex; align-items:center; gap:6px;">
+          <input type="checkbox" id="morale-modal-retainer" /><span>Retainer - add employer's Personality modifier</span>
+        </label>
+        <div class="roll-modal-inputs" id="morale-modal-retainer-fields" style="display:none;">
+          <label class="roll-modal-field">
+            <span class="roll-modal-field-label">Employer's Personality Mod</span>
+            <input type="number" id="morale-modal-employer-per" value="0" />
+          </label>
+        </div>
+        <button type="button" class="btn-next" id="morale-modal-roll-btn" style="margin-top:8px;">🎲 Roll</button>
+        <div class="roll-modal-result" id="morale-modal-result"></div>
       </div>
     </div>
   </div>
@@ -8607,6 +8648,60 @@ document.getElementById("luckburn-modal-backdrop").addEventListener("click", (e)
   if (e.target.id === "luckburn-modal-backdrop") closeLuckBurnModal();
 });
 document.getElementById("luckburn-modal-minus").addEventListener("click", luckBurnModalMinusClick);
+
+// Morale (DCC RPG core rulebook) - a monster/NPC/retainer-only check
+// ("Player characters never make morale checks; their behavior is up to
+// the players") triggered at specific combat moments this app has no
+// way to detect automatically (a group's first creature slain, half a
+// group down, a single monster at half hp, a retainer meeting danger or
+// an adventure ending) - same "the roll is fully mechanical, the trigger
+// is judgment" split every other GM-discretion rule in this app already
+// follows. Reads the currently-open monster's own Will save live off the
+// Sheet (#will) rather than a manual entry, since that field's already
+// tracked; DC/GM modifier/retainer's employer bonus are all editable
+// because none of those are things this app tracks anywhere.
+function openMoraleModal() {
+  const willMod = parseModifier(document.getElementById("will").value) || 0;
+  document.getElementById("morale-modal-will").textContent = formatSignedNumber(willMod);
+  document.getElementById("morale-modal-dc").value = "11";
+  document.getElementById("morale-modal-gm-mod").value = "0";
+  document.getElementById("morale-modal-retainer").checked = false;
+  document.getElementById("morale-modal-retainer-fields").style.display = "none";
+  document.getElementById("morale-modal-employer-per").value = "0";
+  document.getElementById("morale-modal-result").innerHTML = "";
+  document.getElementById("morale-modal-backdrop").style.display = "flex";
+}
+function closeMoraleModal() {
+  document.getElementById("morale-modal-backdrop").style.display = "none";
+}
+document.getElementById("morale-btn").addEventListener("click", openMoraleModal);
+document.getElementById("morale-modal-close").addEventListener("click", closeMoraleModal);
+document.getElementById("morale-modal-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "morale-modal-backdrop") closeMoraleModal();
+});
+document.getElementById("morale-modal-retainer").addEventListener("change", (e) => {
+  document.getElementById("morale-modal-retainer-fields").style.display = e.target.checked ? "" : "none";
+});
+document.getElementById("morale-modal-roll-btn").addEventListener("click", () => {
+  const willMod = parseModifier(document.getElementById("will").value) || 0;
+  const dc = parseInt(document.getElementById("morale-modal-dc").value, 10) || 11;
+  const gmMod = parseInt(document.getElementById("morale-modal-gm-mod").value, 10) || 0;
+  const isRetainer = document.getElementById("morale-modal-retainer").checked;
+  const employerPer = isRetainer ? (parseInt(document.getElementById("morale-modal-employer-per").value, 10) || 0) : 0;
+  const d20 = Math.floor(Math.random() * 20) + 1;
+  const total = d20 + willMod + employerPer + gmMod;
+  const success = total >= dc;
+  const retainerNote = isRetainer ? ` ${formatSignedNumber(employerPer)}(employer's Per)` : "";
+  const gmNote = gmMod ? ` ${formatSignedNumber(gmMod)}(GM)` : "";
+  const resultText = `d20 (${d20}) ${formatSignedNumber(willMod)}(Will)${retainerNote}${gmNote} = ${total} vs DC ${dc} — ${success ? "Keeps fighting!" : "Flees / surrenders."}`;
+  document.getElementById("morale-modal-result").innerHTML = `<span class="roll-modal-result-roll">🎲 ${escapeHtml(resultText)}</span>`;
+  const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Monster";
+  const text = `Morale Check: ${resultText}`;
+  showStatus(text, false, 7000);
+  const openItem = lastRosterItems.find(i => i.id === currentItemId);
+  appendChatLog({ kind: "save", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("monster", openItem) });
+  broadcastDiceRoll({ rollerName, dice: [{ sides: 20, value: d20 }], modifier: willMod + employerPer + gmMod, notation: "d20", total, label: "Morale Check" });
+});
 
 let corruptionModalTier = "minor";
 // The most recently rolled result's own display line (roll breakdown +
