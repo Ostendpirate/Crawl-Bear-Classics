@@ -1612,7 +1612,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 19:00</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 19:32</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2253,6 +2253,59 @@
         </div>
         <div class="fumble-die-note" style="margin-top:4px;">
           Check whatever applies, then roll the attack - the next attack roll (Sheet or Tracker, melee or missile) reads and consumes these, folding in the right modifier for its own weapon type. Clears itself after one use, so a stale condition never silently carries into a later, unrelated attack.
+        </div>
+      </fieldset>
+
+      <fieldset id="ritual-magic-row">
+        <legend>Ritualized Magic</legend>
+        <div class="row">
+          <div>
+            <label title="Each additional wizard past the primary caster contributes HALF their own spell check bonus (including spellburn) to the circle, tracked fractionally by you (two +1 contributors = +1 to the circle) - max +10. Minimum casting time 1 turn/mage, often closer to 1 hour/mage. Any corruption is shared by every mage in the circle.">Circle of Mages: collective bonus</label>
+            <input type="number" id="ritual-circle-bonus" placeholder="e.g. 3, max 10" min="0" max="10" />
+          </div>
+          <div>
+            <label title="The caster rolls this many d20s and keeps only the highest, ignoring the rest.">Circle of Mages: mages in circle</label>
+            <input type="number" id="ritual-circle-size" placeholder="e.g. 3" min="1" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label title="Treasure sacrificed as a spell ingredient: up to 500gp=+1, 501-2,000gp=+2, 2,001-5,000gp=+3, 5,001gp+=+4 (max +4).">Sacrifice: treasure value (gp)</label>
+            <input type="number" id="ritual-sacrifice-gp" placeholder="e.g. 1200" min="0" />
+          </div>
+          <div>
+            <label title="Creatures sacrificed as a spell ingredient: +1 per 5 HD sacrificed, max +4.">Sacrifice: creature HD sacrificed</label>
+            <input type="number" id="ritual-sacrifice-hd" placeholder="e.g. 8" min="0" />
+          </div>
+        </div>
+        <div class="sitmod-checks">
+          <label title="Casting at a ley line, standing stone, or other place of significance to the spell - typically increases the spell check die one step up the dice chain, at the cost of at least 1 extra turn, possibly a full hour, of casting time.">
+            <input type="checkbox" id="ritual-location" /> Location of Power (+1 die step, extra casting time)
+          </label>
+        </div>
+        <div class="row">
+          <div>
+            <label title="Extraordinarily rare spell components, requiring a quest to obtain, prep time, and casting time.">Rare Ingredients bonus</label>
+            <input type="number" id="ritual-rare-ingredients" placeholder="0-4" min="0" max="4" />
+          </div>
+          <div>
+            <label title="Extended casting time (chanting, incense, fasting) - every full day spent casting adds +1. No natural rest or spell recovery happens during this time.">Extra Duration (days spent casting)</label>
+            <input type="number" id="ritual-extra-duration" placeholder="e.g. 2" min="0" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label title="Offering one's own mortal shell for the consumption of supernatural powers - extremely painful, but adds a bonus at the cost of a MANDATORY Corruption roll of the matching tier (the ☣ Corruption button, Spells section, opens pre-set to that tier once you roll this Spell Check).">Automatic Corruption</label>
+            <select id="ritual-corruption">
+              <option value="">None</option>
+              <option value="minor">Minor (+2, mandatory Minor Corruption)</option>
+              <option value="major">Major (+4, mandatory Major Corruption)</option>
+              <option value="greater">Greater (+6, mandatory Greater Corruption)</option>
+            </select>
+          </div>
+        </div>
+        <div class="fumble-die-note" style="margin-top:4px;">
+          Fill in whatever applies, then roll a Spell Check (Sheet or Tracker) - it reads and consumes these once, folding the combined bonus/die-step/circle-roll into that one Spell Check. Clears itself after one use. Judge's discretion applies to several of these amounts (Sacrifice/Rare Ingredients/Location of Power cast-time cost) - this only automates the arithmetic once you and your judge have agreed the amount.
         </div>
       </fieldset>
 
@@ -8809,7 +8862,20 @@ let corruptionModalTier = "minor";
 // a fresh roll (or the modal reopening) makes the old one stale.
 let corruptionModalLastResultLine = "";
 
-function openCorruptionModal() {
+// prefillTier (optional - "minor"/"major"/"greater") is Ritualized
+// Magic's own Automatic Corruption hook (DCC RPG core rulebook): "any
+// casting ritual where the caster offers to voluntarily accept
+// corruption can add an extra bonus... at the result of a mandatory
+// corruption of minor/major/greater variety" - see
+// consumeRitualizedMagicModifiers/rollSpellAttackRow's own call site.
+// Only accepts an actual tier string, never the click Event the ordinary
+// launcher button below passes through, so a plain click never
+// misinterprets its own Event object as a tier.
+function openCorruptionModal(prefillTier) {
+  if (typeof prefillTier === "string" && prefillTier) {
+    corruptionModalTier = prefillTier;
+    document.querySelectorAll(".roll-modal-tier-btn").forEach(b => b.classList.toggle("active", b.dataset.tier === prefillTier));
+  }
   document.getElementById("corruption-modal-luck").textContent = formatSignedNumber(pcLuckModifierLive());
   document.getElementById("corruption-modal-result").innerHTML = "";
   corruptionModalLastResultLine = "";
@@ -8819,7 +8885,7 @@ function openCorruptionModal() {
 function closeCorruptionModal() {
   document.getElementById("corruption-modal-backdrop").style.display = "none";
 }
-document.getElementById("pc-corruption-btn").addEventListener("click", openCorruptionModal);
+document.getElementById("pc-corruption-btn").addEventListener("click", () => openCorruptionModal());
 document.getElementById("corruption-modal-close").addEventListener("click", closeCorruptionModal);
 document.getElementById("corruption-modal-backdrop").addEventListener("click", (e) => {
   if (e.target.id === "corruption-modal-backdrop") closeCorruptionModal();
@@ -13352,6 +13418,15 @@ async function rollSpellAttackRow(row) {
     showStatus("Only Cleric/Wizard/Elf roll a Spell Check.", true, 4000);
     return;
   }
+  // Ritualized Magic (DCC RPG core rulebook, Wizard Grimoire section) -
+  // consumed once here, folded on top of check's own sides/modifier
+  // (Mercurial Magic/Reversing Spells already baked in) rather than
+  // inside pcSpellCheckModifierBreakdown itself, same reasoning
+  // consumeForcedD20/consumeSituationalModifiers are consumed directly in
+  // roll functions rather than inside a shared breakdown helper.
+  const ritual = consumeRitualizedMagicModifiers();
+  const ritualSides = stepDiceChain(check.sides, ritual.diceSteps);
+  const ritualModifier = check.modifier + ritual.flatMod;
   const spellName = selectEl ? selectEl.value.trim() : "";
   const label = spellName || "Spell";
   // Regaining spells via Spellburn (DCC RPG core rulebook) - a Lost spell
@@ -13390,9 +13465,26 @@ async function rollSpellAttackRow(row) {
   // 20 on a stepped-down d14 still only ever reads as a 14).
   const autoNat = burnPoints >= 20;
   const forcedD20 = autoNat ? null : consumeForcedD20();
-  const rolled = autoNat ? check.sides : (forcedD20 !== null ? Math.min(forcedD20, check.sides) : (Math.floor(Math.random() * check.sides) + 1));
-  const { critBonus, note: baseNote } = spellCheckNaturalResultText(rolled, check.sides, check.level, check.abilityId);
+  // Circle of Mages (Ritualized Magic) - "the casting mage can roll a
+  // number of times equal to the number of mages in the circle, keeping
+  // only the highest die roll." A forced d20 (GM Testing) always wins out
+  // over any of this, same "testing override beats everything" contract
+  // consumeForcedD20 already has everywhere else.
+  const circleRolls = ritual.circleSize > 1
+    ? Array.from({ length: ritual.circleSize }, () => Math.floor(Math.random() * ritualSides) + 1)
+    : null;
+  const rolled = autoNat ? ritualSides
+    : forcedD20 !== null ? Math.min(forcedD20, ritualSides)
+    : circleRolls ? Math.max(...circleRolls)
+    : (Math.floor(Math.random() * ritualSides) + 1);
+  const { critBonus, note: baseNote } = spellCheckNaturalResultText(rolled, ritualSides, check.level, check.abilityId);
   let note = autoNat ? `${baseNote} (forced by Spellburn - ${burnPoints} points spent)` : baseNote;
+  if (circleRolls) note += ` 🔮 Circle of ${ritual.circleSize}: rolled ${circleRolls.join(", ")}, kept ${rolled}.`;
+  if (ritual.detail) note += ` (Ritualized Magic: ${ritual.detail})`;
+  if (ritual.corruptionTier) {
+    note += ` ${markFumbleAlert("☣ MANDATORY CORRUPTION")} - opening ${ritual.corruptionTier} Corruption now.`;
+    openCorruptionModal(ritual.corruptionTier);
+  }
   // Disapproval Range (DCC RPG core rulebook, Cleric only) - auto-detects
   // and widens right here rather than leaving it to the natural-1 note
   // above, since (once widened past 1) a roll that triggers Disapproval
@@ -13406,7 +13498,7 @@ async function rollSpellAttackRow(row) {
   // comment; the die itself is already reduced (check.sides), this just
   // surfaces WHY in the roll result.
   if (attemptReversed) note += ` 🔄 Reversing Spells: attempting this spell's reverse effect - Spell Check die reduced 1 step.`;
-  const total = rolled + check.modifier + critBonus;
+  const total = rolled + ritualModifier + critBonus;
   // Lost (see isSpellLost/setSpellLost's own comment) - this app has no
   // per-spell casting tables to check the actual threshold against, so it
   // defaults to the generic failure band most spells share (a total of 11
@@ -13438,7 +13530,7 @@ async function rollSpellAttackRow(row) {
     openFailedSpellburnModal();
   }
   const rollerName = (nameEl && nameEl.value.trim()) || currentPlayerName || "Character";
-  const text = `${label} - Spell Check: d${check.sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(check.modifier)}${critBonus ? ` ${formatSignedNumber(critBonus)}(level)` : ""} = ${markRollTotal(total)}${note}`;
+  const text = `${label} - Spell Check: d${ritualSides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(ritualModifier)}${critBonus ? ` ${formatSignedNumber(critBonus)}(level)` : ""} = ${markRollTotal(total)}${note}`;
   showStatus(text, false, note ? 8000 : 4000);
   // luckTargets (see chatEntryHtml's own comment) - same natural-1
   // exclusion as the cache write further down.
@@ -13446,7 +13538,7 @@ async function rollSpellAttackRow(row) {
     ? [{ type: "spell", itemId: currentItemId, attackId: row.dataset.id, slotKey: slotKeyForBurn, chatKind: "spell", label }]
     : [];
   appendChatLog({ kind: "spell", tokenName: rollerName, text, gmOnly: isGmOnlyRoll("pc", lastRosterItems.find(i => i.id === currentItemId)), luckTargets });
-  broadcastDiceRoll({ rollerName, dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier + critBonus, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
+  broadcastDiceRoll({ rollerName, dice: [{ sides: ritualSides, value: rolled }], modifier: ritualModifier + critBonus, notation: `d${ritualSides}`, total, label: `${label} — Spell Check` });
   if (burnPoints > 0) {
     delete pending[slotKeyForBurn];
     row.dataset.spellburnPending = JSON.stringify(pending);
@@ -17362,6 +17454,58 @@ function consumeSituationalModifiers(isMissile) {
   return { flatMod, diceSteps, detail: parts.join(", "), missileIntoMelee: state.missileIntoMelee };
 }
 
+// Ritualized Magic (DCC RPG core rulebook, Wizard Grimoire section) - a
+// one-shot pre-roll declaration (Dice tab), same "set now, consumed by
+// the very next roll, then clears itself" contract as
+// consumeSituationalModifiers above, just for the next SPELL CHECK
+// instead of the next attack. Several of these amounts are explicitly
+// "up to N, judge's discretion" in the book (Sacrifice, Rare Ingredients,
+// the exact cast-time cost of Location of Power) - this only automates
+// the arithmetic once the amount's been agreed at the table, it doesn't
+// decide the amount itself. Sacrifice's two halves (treasure and
+// creature HD) aren't explicitly ruled stackable or exclusive by RAW -
+// summed here since nothing forbids combining two different sacrifices,
+// but a judge who disagrees can just leave one blank.
+function consumeRitualizedMagicModifiers() {
+  const ids = ["ritual-circle-bonus", "ritual-circle-size", "ritual-sacrifice-gp", "ritual-sacrifice-hd", "ritual-location", "ritual-rare-ingredients", "ritual-extra-duration", "ritual-corruption"];
+  const els = {};
+  ids.forEach(id => { els[id] = document.getElementById(id); });
+  const circleBonusRaw = parseInt(els["ritual-circle-bonus"].value, 10);
+  const circleBonus = Number.isFinite(circleBonusRaw) ? Math.max(0, Math.min(10, circleBonusRaw)) : 0;
+  const circleSizeRaw = parseInt(els["ritual-circle-size"].value, 10);
+  const circleSize = Number.isFinite(circleSizeRaw) && circleSizeRaw >= 1 ? circleSizeRaw : 1;
+  const sacrificeGp = parseInt(els["ritual-sacrifice-gp"].value, 10) || 0;
+  const sacrificeGpTier = sacrificeGp <= 0 ? 0 : sacrificeGp <= 500 ? 1 : sacrificeGp <= 2000 ? 2 : sacrificeGp <= 5000 ? 3 : 4;
+  const sacrificeHd = parseInt(els["ritual-sacrifice-hd"].value, 10) || 0;
+  const sacrificeHdTier = Math.min(4, Math.floor(sacrificeHd / 5));
+  const locationOfPower = !!els["ritual-location"].checked;
+  const rareIngredientsRaw = parseInt(els["ritual-rare-ingredients"].value, 10);
+  const rareIngredients = Number.isFinite(rareIngredientsRaw) ? Math.max(0, Math.min(4, rareIngredientsRaw)) : 0;
+  const extraDurationDays = Math.max(0, parseInt(els["ritual-extra-duration"].value, 10) || 0);
+  const corruptionTier = els["ritual-corruption"].value || "";
+  const corruptionBonus = corruptionTier === "minor" ? 2 : corruptionTier === "major" ? 4 : corruptionTier === "greater" ? 6 : 0;
+  // One-shot: clear every field now, regardless of which were actually
+  // set, so a stale ritual condition never silently carries into a
+  // later, unrelated Spell Check.
+  ids.forEach(id => {
+    const el = els[id];
+    if (!el) return;
+    if (el.type === "checkbox") el.checked = false; else el.value = "";
+  });
+  const flatMod = circleBonus + sacrificeGpTier + sacrificeHdTier + rareIngredients + extraDurationDays + corruptionBonus;
+  const diceSteps = locationOfPower ? 1 : 0;
+  const parts = [];
+  if (circleBonus) parts.push(`Circle of Mages +${circleBonus}`);
+  if (circleSize > 1) parts.push(`Circle of ${circleSize} mages (roll ${circleSize}d, keep highest)`);
+  if (sacrificeGpTier) parts.push(`Sacrifice (treasure) +${sacrificeGpTier}`);
+  if (sacrificeHdTier) parts.push(`Sacrifice (creatures) +${sacrificeHdTier}`);
+  if (locationOfPower) parts.push("Location of Power +1 die");
+  if (rareIngredients) parts.push(`Rare Ingredients +${rareIngredients}`);
+  if (extraDurationDays) parts.push(`Extra Duration +${extraDurationDays}`);
+  if (corruptionBonus) parts.push(`Automatic Corruption +${corruptionBonus} (${corruptionTier}, mandatory)`);
+  return { flatMod, diceSteps, circleSize, corruptionTier, detail: parts.join(", ") };
+}
+
 // A natural 20 is BOTH an automatic hit and a critical hit in DCC RAW
 // (Table 4-3's two-handed-penalty footnote - "scores a critical hit...
 // that also beats target's AC (no automatic hit)" - only makes sense if a
@@ -18081,6 +18225,14 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
     showStatus(msg, true);
     return;
   }
+  // Ritualized Magic - Tracker-side sibling of rollSpellAttackRow's own
+  // call site; see its comment. The Dice tab's own fields are global
+  // (same as consumeForcedD20/consumeSituationalModifiers), not scoped to
+  // this specific itemId, matching how GM Testing already works
+  // regardless of which token's Tracker row triggered the roll.
+  const ritual = consumeRitualizedMagicModifiers();
+  const ritualSides = stepDiceChain(check.sides, ritual.diceSteps);
+  const ritualModifier = check.modifier + ritual.flatMod;
   const label = (effectiveName || "").trim() || "Spell";
   // Regaining spells via Spellburn - same defense-in-depth guard as the
   // Sheet's own rollSpellAttackRow; see spellAttackRowHtml's comment for
@@ -18111,13 +18263,27 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   // second, separate crit path.
   const autoNat = burnPoints >= 20;
   const forcedD20 = autoNat ? null : consumeForcedD20();
-  const rolled = autoNat ? check.sides : (forcedD20 !== null ? Math.min(forcedD20, check.sides) : (Math.floor(Math.random() * check.sides) + 1));
+  // Circle of Mages - see rollSpellAttackRow's own comment (Sheet-side
+  // sibling).
+  const circleRolls = ritual.circleSize > 1
+    ? Array.from({ length: ritual.circleSize }, () => Math.floor(Math.random() * ritualSides) + 1)
+    : null;
+  const rolled = autoNat ? ritualSides
+    : forcedD20 !== null ? Math.min(forcedD20, ritualSides)
+    : circleRolls ? Math.max(...circleRolls)
+    : (Math.floor(Math.random() * ritualSides) + 1);
   // Natural max/natural 1 (see spellCheckNaturalResultText) apply here
   // too, including when the GM forces one via the testing field above -
   // same "a forced roll still triggers the natural-result text" contract
   // rollAttackFor's own crit/fumble handling already follows.
-  const { critBonus, note: baseNote } = spellCheckNaturalResultText(rolled, check.sides, check.level, check.abilityId);
+  const { critBonus, note: baseNote } = spellCheckNaturalResultText(rolled, ritualSides, check.level, check.abilityId);
   let note = autoNat ? `${baseNote} (forced by Spellburn - ${burnPoints} points spent)` : baseNote;
+  if (circleRolls) note += ` 🔮 Circle of ${ritual.circleSize}: rolled ${circleRolls.join(", ")}, kept ${rolled}.`;
+  if (ritual.detail) note += ` (Ritualized Magic: ${ritual.detail})`;
+  if (ritual.corruptionTier) {
+    note += ` ${markFumbleAlert("☣ MANDATORY CORRUPTION")} - opening ${ritual.corruptionTier} Corruption now.`;
+    openCorruptionModal(ritual.corruptionTier);
+  }
   // Disapproval Range (DCC RPG core rulebook, Cleric only) - Tracker-tab
   // sibling of rollSpellAttackRow's own check; see
   // checkAndWidenDisapprovalForStats/checkPcDisapprovalTrigger.
@@ -18128,7 +18294,7 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
   // Reversing Spells - see rollSpellAttackRow's own comment (Sheet-side
   // sibling).
   if (attemptReversed) note += ` 🔄 Reversing Spells: attempting this spell's reverse effect - Spell Check die reduced 1 step.`;
-  const total = rolled + check.modifier + critBonus;
+  const total = rolled + ritualModifier + critBonus;
   // Lost (see isSpellLostForStats/setSpellLostForStats's own comment) -
   // same generic-failure-band default and Wizard/Elf-only gate as the
   // Sheet's own rollSpellAttackRow.
@@ -18151,7 +18317,7 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
     note += ` ${markFumbleAlert("🩸 FAILED SPELLBURN")} - an ability permanently loses 1 more point (choose which next), and this also counts toward Corruption.`;
     openFailedSpellburnModalForStats(itemId);
   }
-  const text = `${label} - Spell Check: d${check.sides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(check.modifier)}${critBonus ? ` ${formatSignedNumber(critBonus)}(level)` : ""} = ${markRollTotal(total)}${note}`;
+  const text = `${label} - Spell Check: d${ritualSides} (${rolled}${forcedD20 !== null ? " forced" : ""}) ${formatSignedNumber(ritualModifier)}${critBonus ? ` ${formatSignedNumber(critBonus)}(level)` : ""} = ${markRollTotal(total)}${note}`;
 
   // This casting spends the same one Action Die a weapon attack at this
   // slot would (see actionSlotKey) - marking it used here hides not just
@@ -18170,7 +18336,7 @@ async function rollSpellAttackForTracker(itemId, attackId, slotKey) {
     ? [{ type: "spell", itemId, attackId, slotKey, chatKind: "spell", label }]
     : [];
   await appendChatLog({ kind: "spell", tokenName: item.name || "Token", text, gmOnly: isGmOnlyRoll(stats.mode, item), luckTargets });
-  broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: check.sides, value: rolled }], modifier: check.modifier + critBonus, notation: `d${check.sides}`, total, label: `${label} — Spell Check` });
+  broadcastDiceRoll({ rollerName: item.name || "Token", dice: [{ sides: ritualSides, value: rolled }], modifier: ritualModifier + critBonus, notation: `d${ritualSides}`, total, label: `${label} — Spell Check` });
   // Burning Luck (post-roll) - see rollSpellAttackRow's own comment
   // (Sheet-side sibling) for why a natural 1 is never cached.
   if (rolled !== 1) {
