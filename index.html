@@ -726,6 +726,7 @@
   .familiar-summary-row { display: flex; gap: 6px; }
   .familiar-summary-label { flex: none; width: 64px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; font-size: 9px; padding-top: 1px; }
   .familiar-summary-value { flex: 1; color: var(--text); }
+  .familiar-roll-hint { font-size: 10px; color: var(--muted); margin: 2px 0 -1px 2px; }
   .mercurial-row > .spell-section-header { margin-top: 0; }
   .mercurial-controls { display: flex; align-items: flex-end; gap: 6px; flex-wrap: wrap; }
   .mercurial-roll { flex: none; width: 40px; font-size: 11px; font-weight: 700; color: var(--accent); padding: 4px 2px; background: var(--border); border: none; border-radius: 5px; text-align: center; }
@@ -1505,7 +1506,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 11:19</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 11:28</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1901,16 +1902,15 @@
           </div>
           <div id="pc-familiar-wrap" style="display:none; margin-top:8px;">
             <div class="spell-section-header">Familiar <span class="spell-section-hint">DCC RPG core rulebook</span></div>
-            <div class="familiar-fields">
-              <input type="text" id="pc-familiar-name" placeholder="Familiar's name" title="Generated when Find familiar succeeds (see the popup) - Type/Physical Configuration/Personality/HP below come from Tables 7-4/7-5/7-6, only this name is yours to fill in." />
-            </div>
             <div class="familiar-summary" id="pc-familiar-summary"></div>
+            <div class="familiar-fields">
+              <input type="text" id="pc-familiar-name" placeholder="Familiar's name" />
+              <input type="text" id="pc-familiar-config" placeholder="Physical Configuration (Table 7-5, your own book)" title="Type and HP above are generated (Table 7-4, plus a roll) when Find familiar succeeds - the actual Table 7-5/7-6 entries are paid content, so Physical Configuration and Personality are player-filled, same as the Patron field above. The 'Familiar Found' popup shows the roll to look up next time this is regenerated." />
+              <input type="text" id="pc-familiar-personality" placeholder="Personality (Table 7-6, your own book)" />
+            </div>
             <button type="button" class="hp-btn" id="add-familiar-token-btn" title="Adds a small linked creature token for this familiar near your own token on the map, using its generated HP/AC/attack - it then shows up in the Combat Tracker like any other creature.">🐾 Add Familiar Token</button>
             <input type="hidden" id="pc-familiar-token-id" value="" />
             <input type="hidden" id="pc-familiar-category" value="" />
-            <input type="hidden" id="pc-familiar-config-name" value="" />
-            <input type="hidden" id="pc-familiar-config-bonus" value="" />
-            <input type="hidden" id="pc-familiar-personality" value="" />
             <input type="hidden" id="pc-familiar-hp" value="" />
             <input type="hidden" id="pc-familiar-hp-bonus-applied" value="" />
           </div>
@@ -2161,7 +2161,7 @@
       <div class="tables-modal-header">
         <div>
           <div class="tables-modal-title">🐾 Familiar Found!</div>
-          <div class="tables-modal-subtitle">Find familiar succeeded (DCC RPG core rulebook) - Type/Physical Configuration/Personality/HP are rolled below (Tables 7-4/7-5/7-6). Just name it. Skip still unlocks the Familiar section - you can reroll by casting Find familiar again later.</div>
+          <div class="tables-modal-subtitle">Find familiar succeeded (DCC RPG core rulebook) - Type and HP are rolled automatically below (Table 7-4). Physical Configuration and Personality (Tables 7-5/7-6) aren't reproduced here - roll numbers are given so you can look them up in your own book, then jot down what you find.</div>
         </div>
         <button type="button" class="tables-modal-close" id="familiar-found-modal-close" title="Close">×</button>
       </div>
@@ -2169,9 +2169,13 @@
         <div class="familiar-summary" id="familiar-found-modal-summary"></div>
         <div class="familiar-fields">
           <input type="text" id="familiar-found-modal-name" placeholder="Name your familiar" />
+          <div class="familiar-roll-hint" id="familiar-found-modal-config-hint"></div>
+          <input type="text" id="familiar-found-modal-config" placeholder="Physical Configuration (Table 7-5)" />
+          <div class="familiar-roll-hint" id="familiar-found-modal-personality-hint"></div>
+          <input type="text" id="familiar-found-modal-personality" placeholder="Personality (Table 7-6)" />
         </div>
         <div class="spellburn-modal-actions">
-          <button type="button" class="spellburn-modal-cancel-btn" id="familiar-found-modal-skip" title="Close without naming it now - the Familiar section still unlocks with everything rolled below, just no name yet">Skip for now</button>
+          <button type="button" class="spellburn-modal-cancel-btn" id="familiar-found-modal-skip" title="Close without filling these in now - the Familiar section still unlocks with Type/HP rolled, just blank Configuration/Personality until you edit them there">Skip for now</button>
           <button type="button" class="spellburn-modal-confirm-btn" id="familiar-found-modal-save">Save</button>
         </div>
       </div>
@@ -2497,7 +2501,7 @@ const MONSTER_NUMBER_FIELD_IDS = ["ac"];
 const MONSTER_SELECT_FIELD_IDS = ["al", "montype"];
 const MONSTER_ALL_FIELD_IDS = [...MONSTER_TEXT_FIELD_IDS, ...MONSTER_NUMBER_FIELD_IDS, ...MONSTER_SELECT_FIELD_IDS];
 
-const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-deity","pc-patron","pc-familiar-name","pc-familiar-category","pc-familiar-config-name","pc-familiar-config-bonus","pc-familiar-personality","pc-familiar-hp","pc-familiar-hp-bonus-applied","pc-familiar-token-id","pc-familiar-unlocked","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto"];
+const PC_TEXT_FIELD_IDS = ["pc-occupation","pc-xp","pc-xp-next","pc-title","pc-str","pc-agi","pc-sta","pc-per","pc-int","pc-lck","pc-init","pc-speed","pc-crit","pc-deed-die","pc-trained-weapon","pc-deity","pc-patron","pc-familiar-name","pc-familiar-category","pc-familiar-config","pc-familiar-personality","pc-familiar-hp","pc-familiar-hp-bonus-applied","pc-familiar-token-id","pc-familiar-unlocked","pc-actdice","pc-fort","pc-ref","pc-will","pc-equip-armor","pc-equip-weapons","pc-equip-gear","pc-equip-food","pc-equip-treasure","pc-languages","pc-notes","pc-ac-misc","pc-spellburnMax","pc-luckMax","pc-corruption-notes","pc-disapprovalRange","pc-racial-language-auto"];
 const PC_NUMBER_FIELD_IDS = ["pc-ac"];
 const PC_SELECT_FIELD_IDS = ["pc-class", "pc-alignment", "pc-hitdie", "pc-level"];
 const PC_ALL_FIELD_IDS = [...PC_TEXT_FIELD_IDS, ...PC_NUMBER_FIELD_IDS, ...PC_SELECT_FIELD_IDS];
@@ -8037,14 +8041,15 @@ function rollFamiliarHp(category) {
 }
 // Shared renderer for both the "Familiar Found" popup's preview and the
 // persistent Familiar section on the Sheet (refreshFamiliarSummary) - one
-// template so the two never drift apart.
+// template so the two never drift apart. Only Type and HP/AC - both
+// generated (Table 7-4 is a mechanical lookup, HP is a plain die roll) -
+// Physical Configuration/Personality are plain player-filled text fields
+// now (see pc-familiar-config/pc-familiar-personality), not rendered here.
 function familiarSummaryHtml(f) {
   const traits = DCC_FAMILIAR_TYPE_TRAITS[f.category] || null;
   const ac = 14 + (traits ? traits.acBonus : 0);
   const rows = [
     ["Type", f.category ? `${f.category}${traits ? ` — ${traits.summary}` : ""}` : "—"],
-    ["Form", f.configName ? `${f.configName}${f.configBonus ? ` (${f.configBonus})` : ""}` : "—"],
-    ["Personality", f.personality || "—"],
     ["HP / AC", f.hp ? `${f.hp} HP, AC ${ac}` : "—"],
   ];
   return rows.map(([label, value]) =>
@@ -8060,42 +8065,51 @@ function refreshFamiliarSummary() {
   if (!summaryEl) return;
   summaryEl.innerHTML = familiarSummaryHtml({
     category: document.getElementById("pc-familiar-category").value,
-    configName: document.getElementById("pc-familiar-config-name").value,
-    configBonus: document.getElementById("pc-familiar-config-bonus").value,
-    personality: document.getElementById("pc-familiar-personality").value,
     hp: document.getElementById("pc-familiar-hp").value,
   });
 }
 
 // Which roll triggered this popup, PLUS this casting's own freshly-rolled
-// results (category/configName/configBonus/personality/hp - set by
-// openFamiliarFoundModal right below) - "sheet" reads/writes the PC
-// sheet's own DOM fields directly (same as openSpellburnModal's "sheet"
-// kind); "tracker" (itemId) writes straight into that token's metadata
-// instead, since a Tracker-tab roll can be for any PC, not just whichever
-// one happens to be open on the Sheet tab right now.
+// results (category/hp - set by openFamiliarFoundModal right below) -
+// "sheet" reads/writes the PC sheet's own DOM fields directly (same as
+// openSpellburnModal's "sheet" kind); "tracker" (itemId) writes straight
+// into that token's metadata instead, since a Tracker-tab roll can be for
+// any PC, not just whichever one happens to be open on the Sheet tab
+// right now.
 let familiarFoundModalCtx = null;
 
 // Opens right after a successful Find familiar cast (see
 // rollSpellAttackRow/rollSpellAttackForTracker, which pass `total` and
 // `alignment`) - rolls Type (Table 7-4, a lookup off total+alignment, not
-// a random roll), Physical Configuration (Table 7-5, d14 by alignment),
-// Personality (Table 7-6, d20) and HP fresh right here, since a NEW
-// familiar has genuinely arrived (recasting after an earlier one died
-// isn't "editing" the old one - see the RAW citations on the tables
-// above). Only the Name field carries over from any existing familiar, as
-// a convenience starting point the player is free to change.
+// a random roll) and HP fresh right here, since a NEW familiar has
+// genuinely arrived (recasting after an earlier one died isn't "editing"
+// the old one). Also rolls d14/d20 for Physical Configuration/Personality
+// (Tables 7-5/7-6) - these tables' actual entries are paid content (see
+// the copyright memory note), so rather than looking them up internally
+// this just shows the roll (and, for 7-5, which Alignment column) for the
+// player to check their own book and type in below. Only the Name field
+// carries over from any existing familiar, as a convenience starting
+// point the player is free to change; Configuration/Personality start
+// blank every time, since a new roll needs a fresh lookup either way.
 function openFamiliarFoundModal(ctx) {
   const category = familiarTypeForRoll(ctx.total, ctx.alignment);
-  const configRows = DCC_FAMILIAR_CONFIG_TABLE[ctx.alignment] || DCC_FAMILIAR_CONFIG_TABLE.N;
-  const configEntry = configRows[rollDie(14) - 1];
-  const personality = DCC_FAMILIAR_PERSONALITY_TABLE[rollDie(20) - 1];
+  const configRoll = rollDie(14);
+  const personalityRoll = rollDie(20);
   const hp = rollFamiliarHp(category);
-  Object.assign(ctx, { category, configName: configEntry.name, configBonus: configEntry.bonus, personality, hp });
+  Object.assign(ctx, { category, hp });
   familiarFoundModalCtx = ctx;
   document.getElementById("familiar-found-modal-summary").innerHTML = familiarSummaryHtml(ctx);
+  const alignLabel = DCC_FAMILIAR_PHYSICAL_ALIGNMENT_LABEL[ctx.alignment] || "your character's Alignment";
+  document.getElementById("familiar-found-modal-config-hint").textContent =
+    `You rolled a ${configRoll} on Table 7-5's ${alignLabel} column - look it up and describe it below.`;
+  document.getElementById("familiar-found-modal-personality-hint").textContent =
+    `You rolled a ${personalityRoll} on Table 7-6 - look it up and describe it below.`;
   const nameFld = document.getElementById("familiar-found-modal-name");
+  const configFld = document.getElementById("familiar-found-modal-config");
+  const personalityFld = document.getElementById("familiar-found-modal-personality");
   nameFld.value = "";
+  configFld.value = "";
+  personalityFld.value = "";
   document.getElementById("familiar-found-modal-backdrop").style.display = "flex";
   if (ctx.kind === "sheet") {
     nameFld.value = document.getElementById("pc-familiar-name").value;
@@ -8133,16 +8147,17 @@ function applyFamiliarHpBonusToWizard(newHp) {
   if (Number.isFinite(curVal)) curEl.value = String(Math.max(0, curVal + delta));
 }
 // Unlocks pc-familiar-wrap (see recalcPcSpellSection), writes this
-// casting's rolled Type/Form/Personality/HP, and applies the Wizard HP
-// bonus - `name` of `null` (Skip) leaves whatever name was already there
-// rather than blanking a familiar this character already had on file.
-function applyFamiliarFoundSheet(ctx, name) {
+// casting's rolled Type/HP, applies the Wizard HP bonus, and - when given
+// (Save, not Skip) - the player's own Configuration/Personality text.
+// `null` for name/config/personality (Skip passes all three) leaves
+// whatever was already there rather than blanking a familiar this
+// character already had on file.
+function applyFamiliarFoundSheet(ctx, name, config, personality) {
   document.getElementById("pc-familiar-unlocked").value = "1";
   if (name !== null) document.getElementById("pc-familiar-name").value = name;
   document.getElementById("pc-familiar-category").value = ctx.category;
-  document.getElementById("pc-familiar-config-name").value = ctx.configName;
-  document.getElementById("pc-familiar-config-bonus").value = ctx.configBonus;
-  document.getElementById("pc-familiar-personality").value = ctx.personality;
+  if (config !== null) document.getElementById("pc-familiar-config").value = config;
+  if (personality !== null) document.getElementById("pc-familiar-personality").value = personality;
   document.getElementById("pc-familiar-hp").value = String(ctx.hp);
   applyFamiliarHpBonusToWizard(ctx.hp);
   scheduleSave();
@@ -8152,7 +8167,7 @@ function applyFamiliarFoundSheet(ctx, name) {
 // bonus delta logic, just written straight into item.metadata (like
 // applySpellburnPointForStats) since the roll that triggered this may not
 // be for whichever PC is open on the Sheet tab right now.
-async function applyFamiliarFoundForStats(ctx, name) {
+async function applyFamiliarFoundForStats(ctx, name, config, personality) {
   await OBR.scene.items.updateItems([ctx.itemId], items => {
     items.forEach(item => {
       const mode = item.metadata[MODE_METADATA_KEY] || "monster";
@@ -8161,9 +8176,8 @@ async function applyFamiliarFoundForStats(ctx, name) {
       data["familiar-unlocked"] = "1";
       if (name !== null) data["familiar-name"] = name;
       data["familiar-category"] = ctx.category;
-      data["familiar-config-name"] = ctx.configName;
-      data["familiar-config-bonus"] = ctx.configBonus;
-      data["familiar-personality"] = ctx.personality;
+      if (config !== null) data["familiar-config"] = config;
+      if (personality !== null) data["familiar-personality"] = personality;
       data["familiar-hp"] = String(ctx.hp);
       const oldBonus = parseInt(data["familiar-hp-bonus-applied"], 10) || 0;
       const delta = ctx.hp - oldBonus;
@@ -8182,10 +8196,12 @@ document.getElementById("familiar-found-modal-save").addEventListener("click", a
   const ctx = familiarFoundModalCtx;
   if (!ctx) return;
   const name = document.getElementById("familiar-found-modal-name").value.trim() || "Familiar";
+  const config = document.getElementById("familiar-found-modal-config").value.trim();
+  const personality = document.getElementById("familiar-found-modal-personality").value.trim();
   if (ctx.kind === "sheet") {
-    applyFamiliarFoundSheet(ctx, name);
+    applyFamiliarFoundSheet(ctx, name, config, personality);
   } else {
-    await applyFamiliarFoundForStats(ctx, name);
+    await applyFamiliarFoundForStats(ctx, name, config, personality);
   }
   closeFamiliarFoundModal();
   showStatus(`${name} saved.`, false, 3000);
@@ -8194,9 +8210,9 @@ async function skipFamiliarFoundModal() {
   const ctx = familiarFoundModalCtx;
   if (!ctx) { closeFamiliarFoundModal(); return; }
   if (ctx.kind === "sheet") {
-    applyFamiliarFoundSheet(ctx, null);
+    applyFamiliarFoundSheet(ctx, null, null, null);
   } else {
-    await applyFamiliarFoundForStats(ctx, null);
+    await applyFamiliarFoundForStats(ctx, null, null, null);
   }
   closeFamiliarFoundModal();
 }
@@ -8262,8 +8278,7 @@ async function addFamiliarToken() {
   const position = { x: boundsMinX + width + size * 0.5, y: boundsMinY };
   const category = document.getElementById("pc-familiar-category").value || "Guardian";
   const traits = DCC_FAMILIAR_TYPE_TRAITS[category] || DCC_FAMILIAR_TYPE_TRAITS.Guardian;
-  const configName = document.getElementById("pc-familiar-config-name").value;
-  const configBonus = document.getElementById("pc-familiar-config-bonus").value;
+  const config = document.getElementById("pc-familiar-config").value;
   const personality = document.getElementById("pc-familiar-personality").value;
   const hp = parseInt(document.getElementById("pc-familiar-hp").value, 10) || rollFamiliarHp(category);
   const ac = 14 + traits.acBonus;
@@ -8280,7 +8295,7 @@ async function addFamiliarToken() {
   const willEl = document.getElementById("pc-will");
   const noteParts = [
     `Familiar of ${pcItem.name || "a Wizard"} - ${category}: ${traits.summary}`,
-    configName ? `Form: ${configName}${configBonus ? ` (${configBonus})` : ""}.` : "",
+    config ? `Form: ${config}.` : "",
     personality ? `Personality: ${personality}.` : "",
     traits.critDie ? `Crit die ${traits.critDie}, Table ${traits.critTable}.` : "",
     `Uses its wizard's saving throws${traits.saveBonus ? ` (+${traits.saveBonus} bonus already folded in below)` : ""}.`,
@@ -8297,7 +8312,7 @@ async function addFamiliarToken() {
     ref: refEl ? addSignedText(refEl.value, traits.saveBonus) : "",
     will: willEl ? addSignedText(willEl.value, traits.saveBonus) : "",
     sp: noteParts.join(" "),
-    attacks: [{ ...emptyAttack(), name: configName || "Bite/Claw", bonus: formatSignedNumber(attackBonus), damage: traits.damage }],
+    attacks: [{ ...emptyAttack(), name: config || "Bite/Claw", bonus: formatSignedNumber(attackBonus), damage: traits.damage }],
   };
   const shape = buildShape()
     .width(size)
@@ -9600,75 +9615,18 @@ const DCC_FAMILIAR_TYPE_TRAITS = {
   },
 };
 
-// Table 7-5: Familiar Physical Configuration (DCC RPG core rulebook) -
-// the specific creature/form a familiar takes, plus the master's own
-// passive benefit from that form. This table (and 7-6 below) isn't in the
-// free Reference Booklet - Familiars are well past that booklet's own
-// table of contents - so unlike Turn Unholy/Lay on Hands/Mercurial Magic
-// this is sourced from the user's own copy, pasted specifically for this
-// feature; see the copyright memory note on this decision. d14, cross-
-// referenced by Alignment - `rows[roll-1]` is the entry for a given roll.
-const DCC_FAMILIAR_CONFIG_TABLE = {
-  L: [
-    { name: "Eagle", bonus: "excellent vision" },
-    { name: "White cat", bonus: "moves very silently" },
-    { name: "Hawk", bonus: "excellent vision" },
-    { name: "Brownie", bonus: "excellent at hiding in forest" },
-    { name: "Miniature armored knight (visor never lifted)", bonus: "+1 AC" },
-    { name: "Giant bee", bonus: "melee attacks deal +1 extra stinging damage" },
-    { name: "Faithful hound", bonus: "your followers/retainers get +2 to morale checks" },
-    { name: "Giant ant", bonus: "+1 to ESP/telepathy/scrying attempts" },
-    { name: "Extraplanar ant", bonus: "+1 to planar travel attempts" },
-    { name: "Miniature ancient version of you", bonus: "an extra life - the first time you die, the familiar dies instead and you're restored to full HP" },
-    { name: "Giant wasp", bonus: "melee attacks poison: DC 12 Fort or temporary loss of 1 Str" },
-    { name: "Miniature cowled wizard (face never revealed)", bonus: "+1 to Spell Checks for one randomly determined spell" },
-    { name: "Miniature gorilla", bonus: "+1 Strength" },
-    { name: "Miniature young/spry version of you", bonus: "+1 Stamina" },
-  ],
-  N: [
-    { name: "Badger", bonus: "melee attacks deal +1 extra damage" },
-    { name: "Wolverine", bonus: "+2 hit points" },
-    { name: "Owl", bonus: "sees at night as well as a human by day, plus excellent hearing" },
-    { name: "Pixie", bonus: "excellent at hiding in forest" },
-    { name: "Miniature minotaur", bonus: "+1 Strength" },
-    { name: "Giant cricket", bonus: "loud, commanding voice" },
-    { name: "Lizard", bonus: "40' movement" },
-    { name: "Turtle", bonus: "+2 AC but movement reduced by 5'" },
-    { name: "Toad", bonus: "can breathe underwater up to 20 minutes" },
-    { name: "Tiny elemental", bonus: "+1 to checks/saves relating to its element (1d12 to determine element)" },
-    { name: "Crow", bonus: "uncanny ability to detect gems/shiny objects" },
-    { name: "Horned slug", bonus: "melee attack causes paralysis: DC 12 Fort or paralyzed 1d4+caster level rounds" },
-    { name: "Giant beetle", bonus: "+1 AC" },
-    { name: "Rat", bonus: "120' infravision" },
-  ],
-  C: [
-    { name: "Giant centipede", bonus: "10' climb speed" },
-    { name: "Black cat", bonus: "moves very silently" },
-    { name: "Bat", bonus: "extraordinary hearing" },
-    { name: "Cobra", bonus: "poisoned bite: DC 16 Fort save or lose 1d6 Stamina" },
-    { name: "Tarantula", bonus: "melee attacks poison: DC 14 Fort or temporary loss of 1 Agility" },
-    { name: "Weasel", bonus: "supernatural ability to squeeze into tight places" },
-    { name: "Spider monkey", bonus: "20' climb speed" },
-    { name: "Pseudo-dragon", bonus: "breath weapon 1/day: 20'x10' cone, 2d6 fire damage" },
-    { name: "Miniature woman of extraordinary beauty", bonus: "+2 Personality" },
-    { name: "Python", bonus: "melee attack constricts: +1d4 extra damage each round after the first, increasing further each round" },
-    { name: "Tiny viper", bonus: "extraordinary sense of smell" },
-    { name: "Tiny demon (imp/quasit)", bonus: "+2 Luck, restoring nightly like a thief's own Luck" },
-    { name: "Scorpion", bonus: "+2 to Fort saves vs. poison" },
-    { name: "Skeletal rat", bonus: "+1 damage against undead" },
-  ],
-};
-
-// Table 7-6: Familiar Personality (DCC RPG core rulebook) - pure flavor,
-// no mechanical effect; d20, `[roll-1]` is the entry. Same sourcing note
-// as Table 7-5 just above.
-const DCC_FAMILIAR_PERSONALITY_TABLE = [
-  "Grumpy", "Angry", "Eager and curious", "Complains constantly about creaky joints",
-  "Normally mellow, but gets oddly animated whenever one particular topic comes up",
-  "Cranky", "Narcissistic", "Wise", "Vapid (constantly polishes its nails)",
-  "Garrulous (won't shut up)", "Stingy", "Jolly", "Introspective", "Convivial",
-  "Lazy", "Aloof", "Charitable", "Seductive", "Mellow", "Sleepy",
-];
+// Tables 7-5 (Physical Configuration, d14 by Alignment) and 7-6
+// (Personality, d20) aren't in the free Reference Booklet - Familiars are
+// well past that booklet's own table of contents - and unlike Table 7-4
+// just above, their actual entries are creature names/flavor descriptions
+// (creative content), not bare mechanical numbers, so they're NOT
+// embedded here (see the copyright memory note on this - an earlier
+// version of this feature did embed them from the user's own paste, then
+// walked that back). The generator still rolls both dice below (a d14/
+// d20 roll, and which Alignment column 7-5 uses, are mechanics/facts, not
+// expression) and shows the raw roll for the player to look up in their
+// own book - see openFamiliarFoundModal.
+const DCC_FAMILIAR_PHYSICAL_ALIGNMENT_LABEL = { L: "Lawful", N: "Neutral", C: "Chaotic" };
 
 // Sentinel <option> value for "this row's spell isn't on the list" -
 // picking it reveals a plain text field for a homebrew spell name (see
