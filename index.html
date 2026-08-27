@@ -1516,7 +1516,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 13:29</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 13:36</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -15908,7 +15908,10 @@ function stepDiceChain(sides, steps) {
 // primaryCrit: "none" (can't crit at all while fighting two-weapon),
 // "maxOnly" (crits only on the die's max face, and that max face does NOT
 // also count as an automatic hit the way a natural 20 normally would),
-// or "normal" (crits exactly like single-weapon fighting).
+// "maxOnlyAutoHit" (same max-face-only crit trigger, but IS also an
+// automatic hit - the Halfling class's own version of this tier, see
+// twoWeaponDiceForHalfling; never produced by this function itself), or
+// "normal" (crits exactly like single-weapon fighting).
 function twoWeaponDiceForAgility(agiScore) {
   const agi = Number.isFinite(agiScore) ? agiScore : 0;
   if (agi <= 8) return { primarySides: 20, primarySteps: 3, offhandSides: 20, offhandSteps: 4, primaryCrit: "none" };
@@ -15918,20 +15921,27 @@ function twoWeaponDiceForAgility(agiScore) {
   return { primarySides: 20, primarySteps: 0, offhandSides: 20, offhandSteps: 1, primaryCrit: "normal" };
 }
 
-// Halfling class "Two Weapons" special ability (referenced by Table 4-3's
-// footnote as living in the Halfling class description, not reproduced in
-// the Reference Booklet itself) - a Halfling ignores Table 4-3 entirely
-// and always fights two-weapon at a flat -1 die step on BOTH hands
-// (d20->d16), regardless of Agility, per published summaries of the
-// ability (best-available secondary source; the primary-hand crit
-// eligibility at this die step specifically isn't confirmed by any source
-// found, so it's modeled the same as Table 4-3's Agi 16-17 row - crits
-// only on the die's max face, no automatic-hit bonus - pending correction
-// against the actual class writeup). halflingFumbleRule flags the
-// Halfling-specific fumble condition: a Halfling fighting two-weapon only
-// fumbles if BOTH dice come up a natural 1, not just one.
+// Halfling class "Two-weapon Fighting" special ability (DCC RPG core
+// rulebook, confirmed against the actual class writeup - the earlier
+// "pending confirmation" state of this function is resolved): a halfling
+// is always treated as having a minimum Agility of 16 for two-weapon
+// fighting purposes, which lands on Table 4-3's own Agi 16-17 row (-1 die
+// step each hand, typically d20->d16 for both) - same die sizes the
+// generic table would already give a real Agi-16-17 character, but with
+// two halfling-specific overrides that row's generic version doesn't get:
+// "maxOnlyAutoHit" (a natural max on the primary hand IS an automatic hit,
+// unlike Table 4-3's own Agi 16-17 row, which crits on a max roll but
+// still has to beat AC - see the "maxOnly" vs "maxOnlyAutoHit" branches
+// everywhere primaryCrit is read) and halflingFumbleRule (fumbles only
+// when BOTH dice come up a natural 1, not just one). Only actually used
+// when the halfling's own real Agility is 17 or under - see
+// twoWeaponProfileForStats's own halflingRuleApplies check for "if the
+// halfling has an Agility score higher than 17, he instead uses the
+// normal two-weapon fighting rules for his Agility" (same source), which
+// drops ALL of this back to the plain Agi-driven table, including losing
+// the fumble-only-on-double-1s break.
 function twoWeaponDiceForHalfling() {
-  return { primarySides: 20, primarySteps: 1, offhandSides: 20, offhandSteps: 1, primaryCrit: "maxOnly", halflingFumbleRule: true };
+  return { primarySides: 20, primarySteps: 1, offhandSides: 20, offhandSteps: 1, primaryCrit: "maxOnlyAutoHit", halflingFumbleRule: true };
 }
 
 // Resolves which two-weapon dice profile applies for a given stats blob
@@ -15956,9 +15966,21 @@ function shieldEquippedForStats(stats) {
 function twoWeaponProfileForStats(stats) {
   const isHalfling = (stats.data.class || "").trim() === "Halfling";
   const agiScore = parseAbilityScore(stats.data.agi);
-  const base = isHalfling ? twoWeaponDiceForHalfling() : twoWeaponDiceForAgility(agiScore);
+  // "If the halfling has an Agility score higher than 17, he instead uses
+  // the normal two-weapon fighting rules for his Agility" (DCC RPG core
+  // rulebook, Halfling class) - the whole special ruleset (die floor,
+  // auto-hit-on-max, fumble-only-on-double-1s) falls away in that case,
+  // not just the die sizes, so this is a plain either/or between
+  // twoWeaponDiceForHalfling and the generic Agility table, never a mix
+  // of the two. A blank/unparseable Agility score doesn't trigger the
+  // exception (same "missing data isn't a penalty" stance this app takes
+  // elsewhere) - a halfling with nothing on file still gets their own
+  // ability rather than silently losing it.
+  const halflingRuleApplies = isHalfling && !(Number.isFinite(agiScore) && agiScore > 17);
+  const base = halflingRuleApplies ? twoWeaponDiceForHalfling() : twoWeaponDiceForAgility(agiScore);
   return {
     isHalfling,
+    halflingRuleApplies,
     agiScore,
     primaryCrit: base.primaryCrit,
     halflingFumbleRule: !!base.halflingFumbleRule,
@@ -16014,17 +16036,20 @@ function updateTwoWeaponNote() {
     noteEl.textContent = 'Mark one attack "Primary" and another "Off-hand" to fight with two weapons (Table 4-3). A row can also be switched to "🔮 Cast a Spell" or "🛡️ Turn Unholy" from its own dropdown.';
     return;
   }
-  const classEl = document.getElementById("pc-class");
-  const isHalfling = classEl && classEl.value === "Halfling";
   const profile = liveTwoWeaponProfile();
   let critText;
   if (profile.primaryCrit === "none") critText = "Neither hand can score a critical hit while fighting two-weapon.";
+  else if (profile.primaryCrit === "maxOnlyAutoHit") critText = `Primary hand scores an automatic critical hit on a natural max roll (d${profile.primarySides}, Halfling Two-Weapon Fighting); off-hand can never crit.`;
   else if (profile.primaryCrit === "maxOnly") critText = `Primary hand crits only on a natural max roll (d${profile.primarySides}), with no automatic hit; off-hand can never crit.`;
   else critText = "Primary hand crits normally; off-hand can never crit.";
   const fumbleText = profile.halflingFumbleRule
     ? "As a Halfling, this only counts as a fumble if BOTH dice come up their lowest face."
     : "Each hand fumbles independently on a roll of its own die's lowest face.";
-  const agiNote = isHalfling ? "Halfling special ability - ignores Agility" : `Agility ${profile.agiScore ?? "?"}`;
+  const agiNote = profile.halflingRuleApplies
+    ? "Halfling special ability - minimum Agility 16 assumed"
+    : profile.isHalfling
+      ? `Agility ${profile.agiScore ?? "?"} - over 17, so normal Two-Weapon Fighting rules apply instead of the Halfling ability`
+      : `Agility ${profile.agiScore ?? "?"}`;
   noteEl.textContent = `Two-weapon fighting active - ${primary.name || "Primary"}: d${profile.primarySides}, ${offhand.name || "Off-hand"}: d${profile.offhandSides} (${agiNote}). ${critText} ${fumbleText}`;
 }
 
@@ -16551,18 +16576,24 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
         : critDieProfile.critTable
           ? `Crit Table ${critDieProfile.critTable} isn't preloaded in this app — check your Reference Booklet for the ${critDieProfile.critDie} result.`
           : `No Crit field set — rolled a plain ${critDieProfile.critDie} crit die.`;
-      // The 16-17 Agility tier (and the Halfling ability, modeled the
-      // same way pending confirmation - see the comment on
-      // twoWeaponDiceForHalfling) explicitly is NOT an automatic hit the
-      // way a normal natural-max roll is - Table 4-3 says it still has to
-      // beat the target's AC. This app doesn't track target AC for any
-      // roll, so that check is left to the table, same as everywhere else
-      // here - the difference is just this line's wording. A Backstab-
-      // triggered crit (see critEligible above) gets its own wording
-      // instead, same as single-weapon rollAttackFor.
+      // The 16-17 Agility tier's own "maxOnly" crit explicitly is NOT an
+      // automatic hit the way a normal natural-max roll is - Table 4-3
+      // says it still has to beat the target's AC. The Halfling class's
+      // own version of this tier ("maxOnlyAutoHit" - see
+      // twoWeaponDiceForHalfling) is confirmed different: "a halfling
+      // scores a crit and automatic hit on any roll of a natural 16."
+      // This app doesn't track target AC for any roll, so the "must still
+      // beat AC" check is left to the table either way - the difference
+      // is just this line's wording. A Backstab-triggered crit (see
+      // critEligible above) gets its own wording instead, same as
+      // single-weapon rollAttackFor.
       const autoHitNote = backstabActive
         ? " — any successful Backstab is an automatic critical hit (Table 3-1), but still must beat the target's AC to actually hit"
-        : (twProfile.primaryCrit === "maxOnly" ? " (not an automatic hit — must still beat the target's AC)" : " — automatic hit");
+        : twProfile.primaryCrit === "maxOnly"
+          ? " (not an automatic hit — must still beat the target's AC)"
+          : twProfile.primaryCrit === "maxOnlyAutoHit"
+            ? " — automatic hit (Halfling Two-Weapon Fighting)"
+            : " — automatic hit";
       const critReasonText = backstabActive ? "🗡️ Backstab attack" : `Natural ${roll}${forcedNote}`;
       critLine = ` ${markCritAlert("💥 CRITICAL HIT!")} ${critReasonText}${autoHitNote}. ${critDieText ? `${critDieText} — ` : ""}${rowText}`;
     }
