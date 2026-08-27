@@ -1225,6 +1225,21 @@
   .fumble-die-note {
     font-size: 10px;
   }
+  .sitmod-checks {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-top: 6px;
+  }
+  .sitmod-checks label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11.5px;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .sitmod-checks input { flex: none; cursor: pointer; }
   /* Shared shape for a small "current value of a tracked stat" pill - Max
      Luck (refreshPcLuckMaxNote) and Disapproval Range
      (refreshPcDisapprovalRangeNote) both use this instead of a plain
@@ -1597,7 +1612,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 17:56</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 18:31</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2200,6 +2215,35 @@
         </div>
         <div class="fumble-die-note" style="margin-top:4px;">
           Set 1-20 and the next d20 roll - attack, ability check, save, skill, or Spell Check, Sheet or Tracker - uses that number instead of a random roll (stepped-down dice cap at their own max face) - handy for testing crit/fumble/Disapproval outcomes on demand. Clears itself after one use.
+        </div>
+      </fieldset>
+
+      <fieldset id="sitmod-row">
+        <legend>Situational Modifiers (Table 4-1)</legend>
+        <div class="row">
+          <div>
+            <label>Missile fire range</label>
+            <select id="sitmod-range">
+              <option value="">Short (no modifier)</option>
+              <option value="medium">Medium (-2 missile only)</option>
+              <option value="long">Long (-1d missile only)</option>
+            </select>
+          </div>
+        </div>
+        <div class="sitmod-checks">
+          <label><input type="checkbox" id="sitmod-invisible" /> Attacker invisible (+2 melee)</label>
+          <label><input type="checkbox" id="sitmod-higher-ground" /> Attacker on higher ground (+1 melee)</label>
+          <label><input type="checkbox" id="sitmod-squeezing" /> Attacker squeezing through a tight space (-1d)</label>
+          <label><input type="checkbox" id="sitmod-entangled-attacker" /> Attacker entangled (-1d)</label>
+          <label><input type="checkbox" id="sitmod-missile-into-melee" /> Firing a missile into melee (-1 missile, 50% friendly fire on a miss)</label>
+          <label><input type="checkbox" id="sitmod-cover" /> Defender behind cover (-2)</label>
+          <label><input type="checkbox" id="sitmod-blinded" /> Defender blinded (+2)</label>
+          <label><input type="checkbox" id="sitmod-entangled-defender" /> Defender entangled (+1d)</label>
+          <label><input type="checkbox" id="sitmod-helpless" /> Defender helpless (paralyzed/sleeping/bound) (+1d)</label>
+          <label><input type="checkbox" id="sitmod-prone" /> Defender kneeling, sitting, or prone (+2 melee, -2 missile)</label>
+        </div>
+        <div class="fumble-die-note" style="margin-top:4px;">
+          Check whatever applies, then roll the attack - the next attack roll (Sheet or Tracker, melee or missile) reads and consumes these, folding in the right modifier for its own weapon type. Clears itself after one use, so a stale condition never silently carries into a later, unrelated attack.
         </div>
       </fieldset>
 
@@ -16991,6 +17035,68 @@ function consumeForcedD20() {
   return n;
 }
 
+// Table 4-1: Attack Roll Modifiers (DCC RPG core rulebook) - a one-shot
+// pre-roll declaration (Dice tab > "Situational Modifiers"), same "set
+// now, consumed by the very next roll, then clears itself" contract as
+// consumeForcedD20 above - but available to EVERY player, not GM-only,
+// since these are the attacker's own conditions for their own next
+// attack, not a testing aid. `isMissile` picks which half of the table's
+// two columns applies (melee vs missile fire) - a monster attack (no
+// weapon-type tracking on that row) is always treated as melee, same
+// fallback isWeaponUntrained's own missile check already uses. Returns
+// `{ flatMod, diceSteps, detail, missileIntoMelee }` - diceSteps feeds
+// stepDiceChain (positive = up the chain, negative = down), detail is a
+// player-readable summary of whatever applied, and missileIntoMelee is
+// surfaced separately since firing into melee also risks 50% friendly
+// fire on a miss (see rollAttackFor's own comment on that).
+function consumeSituationalModifiers(isMissile) {
+  const ids = ["sitmod-range", "sitmod-invisible", "sitmod-higher-ground", "sitmod-squeezing", "sitmod-entangled-attacker", "sitmod-missile-into-melee", "sitmod-cover", "sitmod-blinded", "sitmod-entangled-defender", "sitmod-helpless", "sitmod-prone"];
+  const els = {};
+  ids.forEach(id => { els[id] = document.getElementById(id); });
+  const state = {
+    range: els["sitmod-range"] ? els["sitmod-range"].value : "",
+    invisible: !!(els["sitmod-invisible"] && els["sitmod-invisible"].checked),
+    higherGround: !!(els["sitmod-higher-ground"] && els["sitmod-higher-ground"].checked),
+    squeezing: !!(els["sitmod-squeezing"] && els["sitmod-squeezing"].checked),
+    entangledAttacker: !!(els["sitmod-entangled-attacker"] && els["sitmod-entangled-attacker"].checked),
+    missileIntoMelee: !!(els["sitmod-missile-into-melee"] && els["sitmod-missile-into-melee"].checked),
+    cover: !!(els["sitmod-cover"] && els["sitmod-cover"].checked),
+    blinded: !!(els["sitmod-blinded"] && els["sitmod-blinded"].checked),
+    entangledDefender: !!(els["sitmod-entangled-defender"] && els["sitmod-entangled-defender"].checked),
+    helpless: !!(els["sitmod-helpless"] && els["sitmod-helpless"].checked),
+    prone: !!(els["sitmod-prone"] && els["sitmod-prone"].checked),
+  };
+  // One-shot: clear every field now, regardless of which ones were
+  // actually set, so a stale toggle never silently carries into a LATER
+  // roll of a different (melee/missile) type.
+  ids.forEach(id => {
+    const el = els[id];
+    if (!el) return;
+    if (el.type === "checkbox") el.checked = false; else el.value = "";
+  });
+  let flatMod = 0;
+  let diceSteps = 0;
+  const parts = [];
+  if (isMissile) {
+    if (state.range === "medium") { flatMod -= 2; parts.push("medium range -2"); }
+    else if (state.range === "long") { diceSteps -= 1; parts.push("long range -1d"); }
+  }
+  if (state.invisible && !isMissile) { flatMod += 2; parts.push("invisible +2"); }
+  if (state.higherGround && !isMissile) { flatMod += 1; parts.push("higher ground +1"); }
+  if (state.squeezing) { diceSteps -= 1; parts.push("squeezing -1d"); }
+  if (state.entangledAttacker) { diceSteps -= 1; parts.push("entangled -1d"); }
+  if (state.missileIntoMelee && isMissile) { flatMod -= 1; parts.push("firing into melee -1"); }
+  if (state.cover) { flatMod -= 2; parts.push("cover -2"); }
+  if (state.blinded) { flatMod += 2; parts.push("defender blinded +2"); }
+  if (state.entangledDefender) { diceSteps += 1; parts.push("defender entangled +1d"); }
+  if (state.helpless) { diceSteps += 1; parts.push("defender helpless +1d"); }
+  if (state.prone) {
+    if (isMissile) { flatMod -= 2; parts.push("defender prone -2"); }
+    else { flatMod += 2; parts.push("defender prone +2"); }
+  }
+  return { flatMod, diceSteps, detail: parts.join(", "), missileIntoMelee: state.missileIntoMelee };
+}
+
 // A natural 20 is BOTH an automatic hit and a critical hit in DCC RAW
 // (Table 4-3's two-handed-penalty footnote - "scores a critical hit...
 // that also beats target's AC (no automatic hit)" - only makes sense if a
@@ -17071,7 +17177,14 @@ async function rollAttackFor(itemId, attackId, slotKey) {
   // whichever Action Die this row is using) - it does NOT touch damage.
   // See isWeaponUntrained for exactly who's exempt (Warriors always are).
   const untrained = isWeaponUntrained(stats, atk);
-  const atkSides = untrained ? stepDiceChainDown(actionDieProfile.sides, 1) : actionDieProfile.sides;
+  // Table 4-1: Attack Roll Modifiers (DCC RPG core rulebook) - the rest of
+  // this same table, consumed as a one-shot pre-roll declaration (Dice
+  // tab). PC-only weapon-type lookup; a monster row (no tracked type) is
+  // always treated as melee, same fallback isWeaponUntrained's own
+  // missile check uses elsewhere.
+  const isMissileAttack = stats.mode === "pc" && !!(weaponEntryForAmmo && weaponEntryForAmmo.type === "ranged");
+  const sitMod = consumeSituationalModifiers(isMissileAttack);
+  const atkSides = stepDiceChain(actionDieProfile.sides, (untrained ? -1 : 0) + sitMod.diceSteps);
   const forcedD20 = consumeForcedD20();
   const d20Roll = forcedD20 !== null ? Math.min(forcedD20, atkSides) : (Math.floor(Math.random() * atkSides) + 1);
   const wasForced = forcedD20 !== null;
@@ -17093,6 +17206,21 @@ async function rollAttackFor(itemId, attackId, slotKey) {
   const isFumble = d20Roll === 1;
   const rollDice = [{ sides: atkSides, value: d20Roll }];
   const untrainedNote = untrained ? " (untrained weapon, Table 4-1: -1 die)" : "";
+  const sitModNote = sitMod.detail ? ` (Table 4-1: ${sitMod.detail})` : "";
+  // Firing a missile weapon into melee (DCC RPG core rulebook, Table 4-1
+  // footnote): "50% chance of friendly fire if attack misses." A fumble
+  // is already a guaranteed miss, so that roll is definite; an ordinary
+  // result's hit/miss depends on the target's AC, which this app never
+  // tracks for any roll - so it's shown as a reminder to check only if
+  // this attack actually misses, same "left to the player to judge"
+  // treatment every AC-dependent note elsewhere in this app already gets.
+  let friendlyFireNote = "";
+  if (sitMod.missileIntoMelee) {
+    const ffRoll = Math.random() < 0.5;
+    friendlyFireNote = isFumble
+      ? ` 🎯 Firing into melee: friendly fire check - ${ffRoll ? "HIT an ally instead!" : "no friendly fire"}.`
+      : ` 🎯 Firing into melee - if this misses, 50% chance of friendly fire (this check: ${ffRoll ? "would hit an ally" : "would not"}).`;
+  }
   // A Favorite Weapon's Luck modifier (Table 1-10/1-14) is already folded
   // into atkMod above - it's part of the Bonus field's own number now (see
   // composedAttackBonusText), not a separate addition here, so it's never
@@ -17134,13 +17262,13 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     // poisonedToggleHtml), independent of the Fumble Die/table above.
     const poisonNote = atk.poisoned ? " ☠️ The poisoned blade turns on its wielder too - you're poisoned!" : "";
     fumbleCancelEligible = stats.mode === "pc" && fumbleCancelClassEligible(stats.data.class);
-    text = `${atk.name || "Attack"}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${wasForced ? " (GM-forced)" : ""} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}${fumbleLuckNote}${fumbleTotal !== null ? ` = ${fumbleTotal}` : ""}).${untrainedNote} ${rowText}${poisonNote}`;
+    text = `${atk.name || "Attack"}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${wasForced ? " (GM-forced)" : ""} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}${fumbleLuckNote}${fumbleTotal !== null ? ` = ${fumbleTotal}` : ""}).${untrainedNote}${sitModNote} ${rowText}${poisonNote}${friendlyFireNote}`;
     label = "💀 FUMBLE! Natural 1 — automatic miss";
   } else {
     // Fresh Deed Die roll for THIS attack - see rollDeedDieForStats (no
     // longer shared/cached across other attacks the same round).
     const deed = rollDeedDieForStats(stats);
-    const toHit = d20Roll + atkMod + backstabBonus + (deed ? deed.total : 0);
+    const toHit = d20Roll + atkMod + backstabBonus + sitMod.flatMod + (deed ? deed.total : 0);
     // A Backstab declared on this specific slot (Combat Tracker, Thief
     // only) swaps in the weapon's sneak-attack die for THIS roll instead
     // of the row's normal stored Damage text - computed fresh here rather
@@ -17211,11 +17339,12 @@ async function rollAttackFor(itemId, attackId, slotKey) {
 
     const backstabModText = backstabActive && backstabBonus ? `${formatModifier(backstabBonus)}(backstab)` : "";
     const augurDamageModText = augurDamageMod ? `${formatModifier(augurDamageMod)}(Birth Augur)` : "";
-    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${atkSides} ${d20Roll}${wasForced ? " forced" : ""}${formatModifier(atkMod)}${deedText}${backstabModText})${untrainedNote}`;
+    const sitModText = sitMod.flatMod ? `${formatModifier(sitMod.flatMod)}(Table 4-1)` : "";
+    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${atkSides} ${d20Roll}${wasForced ? " forced" : ""}${formatModifier(atkMod)}${deedText}${backstabModText}${sitModText})${untrainedNote}${sitModNote}`;
     const dmgText = dmg !== null
       ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${isCrit ? " +crit" : ""}${augurDamageModText})`
       : "";
-    text = `${atk.name || "Attack"}: ${toHitText}${dmgText}${critLine}${deedLine}${backstabLine}`;
+    text = `${atk.name || "Attack"}: ${toHitText}${dmgText}${critLine}${deedLine}${backstabLine}${friendlyFireNote}`;
     label = isCrit
       ? `💥 CRITICAL HIT! ${toHit} to hit${dmg !== null ? `, ${dmgTotal} dmg` : ""}`
       : (dmg !== null ? `${toHit} to hit, ${dmgTotal} dmg` : `${toHit} to hit`);
@@ -17344,8 +17473,13 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
   // one Agility/Halfling-driven number for the whole character).
   const primaryUntrained = isWeaponUntrained(stats, primaryAtk);
   const offhandUntrained = isWeaponUntrained(stats, offhandAtk);
-  const primarySides = primaryUntrained ? stepDiceChainDown(twProfile.primarySides, 1) : twProfile.primarySides;
-  const offhandSides = offhandUntrained ? stepDiceChainDown(twProfile.offhandSides, 1) : twProfile.offhandSides;
+  // Table 4-1: Attack Roll Modifiers (DCC RPG core rulebook) - two-weapon
+  // fighting is melee-only in this app (Table 4-3 itself), so this always
+  // reads the melee column, consumed once for the whole action (both
+  // hands share the same battlefield conditions).
+  const sitMod = consumeSituationalModifiers(false);
+  const primarySides = stepDiceChain(twProfile.primarySides, (primaryUntrained ? -1 : 0) + sitMod.diceSteps);
+  const offhandSides = stepDiceChain(twProfile.offhandSides, (offhandUntrained ? -1 : 0) + sitMod.diceSteps);
 
   const forcedD20 = consumeForcedD20();
   const wasForced = forcedD20 !== null;
@@ -17427,7 +17561,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
       const rowText = fumbleRow ? fumbleRow.text : "";
       const fumbleLuckNote = fumbleLuckMod ? ` ${formatSignedNumber(fumbleLuckMod)} Luck` : "";
       if (twFumbleCancelEligible) fumbleCancelQueue.push({ attackId: atk.id, label: atk.name || label });
-      return `${label}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${forcedNote} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}${fumbleLuckNote}${fumbleTotal !== null ? ` = ${fumbleTotal}` : ""}). ${rowText}${poisonNote}`;
+      return `${label}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${forcedNote} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}${fumbleLuckNote}${fumbleTotal !== null ? ` = ${fumbleTotal}` : ""}).${sitMod.detail ? ` (Table 4-1: ${sitMod.detail})` : ""} ${rowText}${poisonNote}`;
     }
     if (isPlainMiss) {
       return `${label}: Natural 1${forcedNote} — miss (Halfling two-weapon fighting: a lone natural 1 doesn't fumble by itself).${poisonNote}`;
@@ -17452,7 +17586,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     // though they're one action.
     const deed = rollDeedDieForStats(stats);
     if (deed) rollDice.push({ sides: deed.sides, value: deed.roll });
-    const toHit = roll + atkMod + backstabBonus + (deed ? deed.total : 0);
+    const toHit = roll + atkMod + backstabBonus + sitMod.flatMod + (deed ? deed.total : 0);
     luckCacheQueue.push({ attackId: atk.id, total: toHit, label: atk.name || label });
     // Same on-the-fly Backstab swap as single-weapon rollAttackFor, per
     // hand - see its comment for why this never mutates atk.damage itself.
@@ -17533,7 +17667,8 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
 
     const backstabModText = backstabActive && backstabBonus ? `${formatModifier(backstabBonus)}(backstab)` : "";
     const augurDamageModText = augurDamageMod ? `${formatModifier(augurDamageMod)}(Birth Augur)` : "";
-    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${sides} ${roll}${forcedNote}${formatModifier(atkMod)}${deedText}${backstabModText})${untrainedNote}`;
+    const sitModText = sitMod.flatMod ? `${formatModifier(sitMod.flatMod)}(Table 4-1)` : "";
+    const toHitText = `${markRollTotal(`${toHit} to hit`)} (d${sides} ${roll}${forcedNote}${formatModifier(atkMod)}${deedText}${backstabModText}${sitModText})${untrainedNote}${sitMod.detail ? ` (Table 4-1: ${sitMod.detail})` : ""}`;
     const dmgText = dmg !== null
       ? `, ${markRollTotal(`${dmgTotal} dmg`)} (${dmg.notation} ${dmg.dieTotal}${formatModifier(dmg.mod)}${deedText}${critEligible ? " +crit" : ""}${augurDamageModText})`
       : "";
