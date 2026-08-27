@@ -1135,6 +1135,74 @@
     margin-top: 8px;
     line-height: 1.4;
   }
+  .injury-list-header {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    padding: 0 6px;
+    margin-bottom: 4px;
+  }
+  .injury-list-header span {
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--muted);
+  }
+  .injury-header-text { flex: 1.6; min-width: 0; }
+  .injury-header-extra { flex: 0.6; min-width: 0; text-align: center; }
+  .injury-header-permanent { flex: none; width: 74px; text-align: center; }
+  .injury-header-status { flex: 1; min-width: 0; }
+  .injury-header-remove-spacer { flex: none; width: 20px; }
+  .injury-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+  .injury-row {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 6px;
+  }
+  .injury-text {
+    flex: 1.6;
+    min-width: 0;
+    padding: 4px 6px;
+    font-size: 12px;
+  }
+  .injury-extra-damage {
+    flex: 0.6;
+    text-align: center;
+    padding: 4px 4px;
+    font-size: 12px;
+    min-width: 0;
+  }
+  .injury-permanent-label {
+    flex: none;
+    width: 74px;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10px;
+    color: var(--muted);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .injury-permanent {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--good);
+  }
+  .injury-status {
+    flex: 1;
+    min-width: 0;
+    font-size: 10px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .armor-check-penalty-line span#pc-check-penalty {
     color: var(--text);
     font-weight: 700;
@@ -1527,7 +1595,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 15:49</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-27 15:57</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1889,6 +1957,19 @@
         <input type="hidden" id="pc-body-recovery-attempted" value="" />
         <div class="fumble-die-note" id="pc-dying-note" style="display:none;"></div>
         <button type="button" class="hp-btn" id="pc-recover-body-btn" style="display:none; margin-bottom:8px;" title="Recovering the Body (DCC RPG core rulebook) - if a dead ally reaches your body within one hour, you may make a Luck check (1d20 ≤ your Luck score) to find you were only badly hurt.">🎲 Recover the Body (Luck Check)</button>
+
+        <fieldset>
+          <legend>Injuries</legend>
+          <div class="injury-list-header">
+            <span class="injury-header-text">Injury</span>
+            <span class="injury-header-extra" title="Extra damage this crit inflicted - the injury auto-clears once you've healed that many hit points back (DCC RPG core rulebook: &quot;critical hits heal when the associated damage heals&quot;).">Extra Dmg</span>
+            <span class="injury-header-permanent">Permanent</span>
+            <span class="injury-header-status"></span>
+            <span class="injury-header-remove-spacer"></span>
+          </div>
+          <div class="injury-list" id="injuries-list-pc"></div>
+          <button type="button" class="add-attack-btn" id="add-injury-pc">+ Add Injury</button>
+        </fieldset>
 
         <div class="saves pc-saves">
           <div class="save-box">
@@ -2769,6 +2850,7 @@ function defaultData(mode) {
   d.armorItems = [];
   d.pcSpells = [];
   d.pcSkillOverrides = {};
+  d.injuries = [];
   return d;
 }
 
@@ -2782,6 +2864,7 @@ function fillForm(mode, data) {
   renderAttacks(mode, d.attacks || []);
   if (mode === "pc") renderArmorItems(d.armorItems || []);
   if (mode === "pc") renderSpellItems(d.pcSpells || []);
+  if (mode === "pc") renderInjuries(d.injuries || []);
   // One-time migration for a token saved before Equipment was split into
   // Armor/Weapons/Adventuring Gear/Food & Drink/Treasure fields: the old
   // single blob still sits in this token's raw metadata under `equipment`
@@ -2931,6 +3014,7 @@ function readForm(mode) {
   d.armorItems = mode === "pc" ? readArmorItems() : [];
   d.pcSpells = mode === "pc" ? readSpellItems() : [];
   d.pcSkillOverrides = mode === "pc" ? readPcSkillOverrides() : {};
+  d.injuries = mode === "pc" ? readInjuries() : [];
   if (mode === "pc") {
     const autoFlags = {};
     Object.keys(PC_DERIVED_FIELD_SOURCES).forEach(fieldId => {
@@ -6531,6 +6615,9 @@ function renderPcStatline(d) {
   // calls in adjustHp/the hp-current input listener only fire for a
   // LOCAL edit.
   refreshPcDyingState();
+  // Injuries (DCC RPG core rulebook) - same every-render-pass contract,
+  // so a healed injury clears itself regardless of how hp got there.
+  refreshInjuries();
   // Same reasoning, for the Deed Die row - Warrior/Dwarf only (see
   // updatePcDeedDieVisibility).
   updatePcDeedDieVisibility();
@@ -6840,7 +6927,10 @@ if (pcTrainedWeaponSyncBtn) {
 }
 ["hp-current", "hp-max", "pc-hp-current", "pc-hp-max"].forEach(id => {
   document.getElementById(id).addEventListener("input", () => {
-    if (id === "pc-hp-current" || id === "pc-hp-max") refreshPcDyingState();
+    if (id === "pc-hp-current" || id === "pc-hp-max") {
+      refreshPcDyingState();
+      refreshInjuries();
+    }
     scheduleSave();
   });
 });
@@ -6849,7 +6939,10 @@ function adjustHp(curId, maxId, delta) {
   const el = document.getElementById(curId);
   const max = Number(document.getElementById(maxId).value) || Infinity;
   el.value = Math.max(0, Math.min(max, (Number(el.value) || 0) + delta));
-  if (curId === "pc-hp-current") refreshPcDyingState();
+  if (curId === "pc-hp-current") {
+    refreshPcDyingState();
+    refreshInjuries();
+  }
   scheduleSave();
 }
 
@@ -7505,10 +7598,12 @@ function openNewDayModal() {
   // Lost spell but nothing currently burned would never get it back.
   const lostCleared = clearAllLostSpells();
   const hpHealed = healPcHpOvernight(amount);
-  // HP just moved - resync Bleeding Out state (see refreshPcDyingState's
-  // own comment on why this is checked after every HP change) in case a
-  // night's rest is what pushes someone from 0 hp back to positive.
+  // HP just moved - resync Bleeding Out state and any healed Injuries
+  // (see their own comments on why this is checked after every HP
+  // change) in case a night's rest is what pushes someone from 0 hp back
+  // to positive, or what heals an injury's remaining points.
   refreshPcDyingState();
+  refreshInjuries();
   const disapprovalReset = resetPcDisapprovalRange();
   const extraNote = newDayExtraNote(hpHealed, lostCleared, disapprovalReset);
   const classEl = document.getElementById("pc-class");
@@ -9978,6 +10073,154 @@ document.getElementById("add-armor-pc").addEventListener("click", () => {
   recalcPcFumbleDie();
   syncArmorIntoEquipment();
 });
+
+// ---- Injuries (DCC RPG core rulebook) ----
+//
+// "Critical hits heal when the associated damage heals... The wounded
+// kneecab [sic - kneecap] (and associated speed penalty) heals when the
+// character has recovered 4 hit points. Note that some crits may create
+// permanent injuries which can only be healed by magical or
+// extraordinary means." This app has no way to auto-populate this from a
+// crit roll - a crit is rolled from the ATTACKER's own sheet/Tracker row,
+// which has no linked "defender" token to write an injury onto (same
+// "can't check against a specific target" limitation every attack roll's
+// own comments already note) - so this is a manual log the player fills
+// in themselves off whatever crit result they (or the GM) read out,
+// mirroring how HP damage itself is already applied by hand. A
+// non-Permanent row's `healThreshold` (stored on the row as a data
+// attribute, not a visible field) is frozen the first time a valid Extra
+// Damage number is entered, at CURRENT pc-hp-current + that number - so
+// once pc-hp-current reaches that same absolute value again (however it
+// gets there - the +/- buttons, typing, or New Day), the injury has
+// "healed alongside the damage" and clears itself. A Permanent row never
+// auto-clears; it's removed only by hand via the same remove button.
+function emptyInjuryItem() {
+  return { id: "j" + Math.random().toString(36).slice(2, 9), text: "", extraDamage: "", permanent: false, healThreshold: "" };
+}
+
+function injuryStatusText(item) {
+  if (item.permanent) return "🔒 Permanent - needs magical or extraordinary healing";
+  const threshold = parseInt(item.healThreshold, 10);
+  return Number.isFinite(threshold) ? `Heals at ${threshold} hp` : "";
+}
+
+function injuryRowHtml(item) {
+  return `
+    <div class="injury-row" data-id="${item.id}" data-heal-threshold="${escapeHtml(item.healThreshold ?? "")}">
+      <input type="text" class="injury-text" placeholder="e.g. Kneecap strike - -10' speed" value="${escapeHtml(item.text || "")}" />
+      <input type="text" class="injury-extra-damage" placeholder="dmg" title="Extra damage this crit inflicted - the injury auto-clears once you've healed that many hit points back. Frozen the first time you enter a valid number here; clear the field and re-type to re-freeze from a fresh hp baseline." value="${escapeHtml(item.extraDamage ?? "")}" />
+      <label class="injury-permanent-label" title="Only magical or extraordinary healing removes a permanent injury (DCC RPG core rulebook) - it will never auto-clear from ordinary rest.">
+        <input type="checkbox" class="injury-permanent" ${item.permanent ? "checked" : ""} /><span>Permanent</span>
+      </label>
+      <span class="injury-status">${injuryStatusText(item)}</span>
+      <button type="button" class="attack-remove-btn" title="Remove">×</button>
+    </div>`;
+}
+
+function injuriesListEl() {
+  return document.getElementById("injuries-list-pc");
+}
+
+function renderInjuries(items) {
+  const listEl = injuriesListEl();
+  if (!listEl) return;
+  listEl.innerHTML = (items || []).map(injuryRowHtml).join("");
+  attachInjuryRowListeners();
+}
+
+function readInjuries() {
+  const listEl = injuriesListEl();
+  if (!listEl) return [];
+  return Array.from(listEl.querySelectorAll(".injury-row")).map(row => ({
+    id: row.dataset.id,
+    text: row.querySelector(".injury-text").value,
+    extraDamage: row.querySelector(".injury-extra-damage").value,
+    permanent: row.querySelector(".injury-permanent").checked,
+    healThreshold: row.dataset.healThreshold || "",
+  }));
+}
+
+// Recomputes one row's status text/freeze state from its own current
+// Extra Damage/Permanent fields - see the Injuries section's own top
+// comment for the freeze-once contract.
+function recomputeInjuryThreshold(row) {
+  const extraEl = row.querySelector(".injury-extra-damage");
+  const permEl = row.querySelector(".injury-permanent");
+  const statusEl = row.querySelector(".injury-status");
+  if (permEl.checked) {
+    row.dataset.healThreshold = "";
+    statusEl.textContent = "🔒 Permanent - needs magical or extraordinary healing";
+    return;
+  }
+  const extra = parseInt(extraEl.value, 10);
+  if (!Number.isFinite(extra) || extra <= 0) {
+    row.dataset.healThreshold = "";
+    statusEl.textContent = "";
+    return;
+  }
+  if (row.dataset.healThreshold) {
+    statusEl.textContent = `Heals at ${row.dataset.healThreshold} hp`;
+    return;
+  }
+  const hpEl = document.getElementById("pc-hp-current");
+  const currentHp = Number(hpEl ? hpEl.value : NaN);
+  if (!Number.isFinite(currentHp)) return;
+  const threshold = currentHp + extra;
+  row.dataset.healThreshold = String(threshold);
+  statusEl.textContent = `Heals at ${threshold} hp`;
+}
+
+function attachInjuryRowListeners() {
+  const listEl = injuriesListEl();
+  if (!listEl) return;
+  listEl.querySelectorAll(".injury-row").forEach(row => {
+    row.querySelector(".injury-text").addEventListener("input", scheduleSave);
+    const extraEl = row.querySelector(".injury-extra-damage");
+    extraEl.addEventListener("input", () => {
+      recomputeInjuryThreshold(row);
+      scheduleSave();
+    });
+    row.querySelector(".injury-permanent").addEventListener("change", () => {
+      recomputeInjuryThreshold(row);
+      scheduleSave();
+    });
+    row.querySelector(".attack-remove-btn").addEventListener("click", () => {
+      row.remove();
+      scheduleSave();
+    });
+  });
+}
+
+document.getElementById("add-injury-pc").addEventListener("click", () => {
+  injuriesListEl().insertAdjacentHTML("beforeend", injuryRowHtml(emptyInjuryItem()));
+  attachInjuryRowListeners();
+  scheduleSave();
+});
+
+// Passive resync (same "check every render pass, and reactively on every
+// HP change" contract refreshPcDyingState follows) - auto-clears any
+// non-Permanent injury whose frozen healThreshold pc-hp-current has now
+// reached, regardless of how HP got there.
+function refreshInjuries() {
+  const listEl = injuriesListEl();
+  if (!listEl) return;
+  const hpEl = document.getElementById("pc-hp-current");
+  const currentHp = Number(hpEl ? hpEl.value : NaN);
+  if (!Number.isFinite(currentHp)) return;
+  const rows = Array.from(listEl.querySelectorAll(".injury-row"));
+  let healedCount = 0;
+  rows.forEach(row => {
+    const threshold = parseInt(row.dataset.healThreshold, 10);
+    if (Number.isFinite(threshold) && currentHp >= threshold) {
+      row.remove();
+      healedCount++;
+    }
+  });
+  if (healedCount > 0) {
+    scheduleSave();
+    showStatus(`🩹 ${healedCount} injur${healedCount === 1 ? "y" : "ies"} healed alongside the damage.`, false, 6000);
+  }
+}
 
 // ---- Table 5-8: Wizard Spells (with page number) ----
 //
