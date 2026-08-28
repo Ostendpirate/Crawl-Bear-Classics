@@ -816,7 +816,7 @@
      auto-width/padded treatment .backstab-toggle-btn already gets for the
      same reason. */
   .spell-attack-burn-btn, .tracker-burn-btn, .newday-modal-recover, #pc-corruption-btn, #pc-disapproval-btn,
-  .spell-attack-reversed-btn, .tracker-reversed-btn, .roll-language-btn, .disapproval-range-btn, #pc-secret-doors-btn, #pc-luck-augur-btn,
+  .spell-attack-reversed-btn, .tracker-reversed-btn, .roll-language-btn, .disapproval-range-btn, #pc-secret-doors-btn,
   #morale-btn, #pc-recover-body-btn, #add-familiar-token-btn, #rulebook-import-clear-btn, #corruption-modal-luck-burn-btn,
   #lay-on-hands-modal-apply-btn, #pc-patron-taint-btn, #pc-spell-duel-btn, #pc-clear-groggy-btn, #ritual-magic-open-btn {
     width: auto;
@@ -1636,7 +1636,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 10:16</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 10:22</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1875,7 +1875,42 @@
             </div>
           </div>
           <div class="fumble-die-note" id="pc-luck-augur-note" style="display:none; margin-bottom:6px;"></div>
-          <button type="button" class="hp-btn" id="pc-luck-augur-btn" title="Table 1-2: Luck Score (DCC RPG core rulebook) - roll once, typically at 0-level character creation, to determine which single roll type this character's Luck modifier applies to for their whole career. That bonus is fixed at whatever Luck was AT THE MOMENT OF THIS ROLL - it never changes later even if Luck does.">🎲 Roll Birth Augur</button>
+          <div class="field-sync-row" style="margin-bottom:6px;">
+            <select id="pc-luck-augur-select" title="Table 1-2: Luck Score (DCC RPG core rulebook) - which single roll type this character's Luck modifier applies to for their whole career. Pick directly, or use the 🎲 button to roll randomly (1d30) instead. Either way, the bonus is fixed at whatever Luck was AT THE MOMENT OF THIS PICK - it never changes later even if Luck does.">
+              <option value="">— Birth Augur (Table 1-2): none picked yet —</option>
+              <option value="1">All attack rolls</option>
+              <option value="2">Melee attack rolls</option>
+              <option value="3">Missile fire attack rolls</option>
+              <option value="4">Unarmed attack rolls</option>
+              <option value="5">Mounted attack rolls</option>
+              <option value="6">Damage rolls</option>
+              <option value="7">Melee damage rolls</option>
+              <option value="8">Missile fire damage rolls</option>
+              <option value="9">Attack and damage rolls for 0-level starting weapon</option>
+              <option value="10">Skill checks (including thief skills)</option>
+              <option value="11">Find/disable traps</option>
+              <option value="12">Find secret doors</option>
+              <option value="13">Spell checks</option>
+              <option value="14">Spell damage</option>
+              <option value="15">Turn Unholy checks</option>
+              <option value="16">Magical healing</option>
+              <option value="17">Saving throws</option>
+              <option value="18">Saving throws to escape traps</option>
+              <option value="19">Saving throws against poison</option>
+              <option value="20">Reflex saving throws</option>
+              <option value="21">Fortitude saving throws</option>
+              <option value="22">Willpower saving throws</option>
+              <option value="23">Armor Class</option>
+              <option value="24">Initiative</option>
+              <option value="25">Hit points (applies at each level)</option>
+              <option value="26">Critical hit tables (modifier doubled)</option>
+              <option value="27">Corruption rolls</option>
+              <option value="28">Fumbles (modifier doubled)</option>
+              <option value="29">Number of languages</option>
+              <option value="30">Speed</option>
+            </select>
+            <button type="button" class="hp-btn" id="pc-luck-augur-btn" title="Roll Table 1-2 randomly (1d30) instead of picking directly.">🎲</button>
+          </div>
           <input type="hidden" id="pc-luck-augur-roll" value="" />
           <input type="hidden" id="pc-luck-augur-mod" value="" />
           <input type="hidden" id="pc-luck-augur-hp-bonus-applied" value="" />
@@ -6953,10 +6988,10 @@ function renderPcStatline(d) {
   // depends on having already run this pass (it reads the same Favorite
   // Weapon value that call keeps current).
   syncFavoriteWeaponLuckSnapshot();
-  // Birth Augur (Table 1-2) note/button label, and its HP-per-level bonus
+  // Birth Augur (Table 1-2) note/select sync, and its HP-per-level bonus
   // (the one category that needs re-applying whenever Level changes, not
-  // just whenever the augur itself is rolled) - same every-render-pass
-  // contract as the rest of this block.
+  // just whenever the augur itself is picked/rolled) - same every-render-
+  // pass contract as the rest of this block.
   refreshBirthAugurNote();
   applyLuckAugurHpBonus();
   // Death/Bleeding Out (DCC RPG core rulebook) - same every-render-pass
@@ -8661,26 +8696,30 @@ function luckAugurDamageCategories(entry) {
   if (!entry || entry.key === "unarmed") return ["allDamage"];
   return entry.type === "ranged" ? ["allDamage", "missileDamage"] : ["allDamage", "meleeDamage"];
 }
-// Updates the note under the 🎲 Roll Birth Augur button and the button's
-// own label - passive, every-render-pass resync (called from
-// renderPcStatline) same as every other derived note in this app.
+// Updates the note under the Birth Augur select, and keeps the select's
+// own displayed value in sync with pc-luck-augur-roll (the actual source
+// of truth - see luckAugurEntry) - passive, every-render-pass resync
+// (called from renderPcStatline) same as every other derived note in this
+// app. Needed because pc-luck-augur-roll can change from either the select
+// itself (a manual pick) or the 🎲 button (a random reroll), and a freshly
+// loaded token's saved roll also needs to show as the matching option on
+// first render.
 function refreshBirthAugurNote() {
   const noteEl = document.getElementById("pc-luck-augur-note");
-  const btnEl = document.getElementById("pc-luck-augur-btn");
-  if (!noteEl || !btnEl) return;
+  const selectEl = document.getElementById("pc-luck-augur-select");
+  if (!noteEl || !selectEl) return;
+  const rollEl = document.getElementById("pc-luck-augur-roll");
+  selectEl.value = rollEl && rollEl.value ? rollEl.value : "";
   const entry = luckAugurEntry();
   if (!entry) {
     noteEl.style.display = "none";
-    btnEl.textContent = "🎲 Roll Birth Augur";
     return;
   }
-  const rollEl = document.getElementById("pc-luck-augur-roll");
   const modEl = document.getElementById("pc-luck-augur-mod");
   const mod = modEl ? parseInt(modEl.value, 10) || 0 : 0;
   const supported = DCC_LUCK_AUGUR_SUPPORTED.has(entry.category);
   noteEl.style.display = "";
-  noteEl.textContent = `Birth Augur (Table 1-2): rolled ${rollEl.value} - Lucky Roll: ${entry.label}, ${formatSignedNumber(mod)} (fixed since this roll - doesn't change even if Luck does later).${supported ? "" : " Not currently wired to a mechanic in this app - tracked here for reference only."}`;
-  btnEl.textContent = "🎲 Reroll Birth Augur";
+  noteEl.textContent = `Birth Augur (Table 1-2): ${entry.label}, ${formatSignedNumber(mod)} (fixed since this was picked - doesn't change even if Luck does later).${supported ? "" : " Not currently wired to a mechanic in this app - tracked here for reference only."}`;
 }
 // "Bountiful harvest: Hit points (applies at each level)" - modeled as
 // frozen-Luck-modifier x current Level, recomputed (and the delta applied
@@ -8709,8 +8748,11 @@ function applyLuckAugurHpBonus() {
   const curVal = curEl ? parseInt(curEl.value, 10) : NaN;
   if (Number.isFinite(curVal)) curEl.value = String(Math.max(0, curVal + delta));
 }
-document.getElementById("pc-luck-augur-btn").addEventListener("click", () => {
-  const roll = Math.floor(Math.random() * 30) + 1;
+// Shared by both ways of setting a Table 1-2 result: the 🎲 button (random,
+// `verb` "rolled") and the select itself (manual, `verb` "picked"). Either
+// way the frozen modifier is captured fresh at THIS moment, per Table 1-2's
+// own "does not change over time as Luck changes" rule.
+function applyLuckAugurRoll(roll, verb) {
   const mod = pcLuckModifierLive();
   document.getElementById("pc-luck-augur-roll").value = String(roll);
   document.getElementById("pc-luck-augur-mod").value = String(mod);
@@ -8723,7 +8765,15 @@ document.getElementById("pc-luck-augur-btn").addEventListener("click", () => {
   cfgRenderFromCurrentForm("pc");
   const entry = DCC_LUCK_AUGUR_TABLE[roll - 1];
   const supported = DCC_LUCK_AUGUR_SUPPORTED.has(entry.category);
-  showStatus(`Birth Augur: rolled ${roll} - Lucky Roll: ${entry.label} (${formatSignedNumber(mod)}).${supported ? "" : " Not currently wired to a mechanic in this app."}`, false, 8000);
+  showStatus(`Birth Augur: ${verb} ${roll} - Lucky Roll: ${entry.label} (${formatSignedNumber(mod)}).${supported ? "" : " Not currently wired to a mechanic in this app."}`, false, 8000);
+}
+document.getElementById("pc-luck-augur-btn").addEventListener("click", () => {
+  applyLuckAugurRoll(Math.floor(Math.random() * 30) + 1, "rolled");
+});
+document.getElementById("pc-luck-augur-select").addEventListener("change", (e) => {
+  const roll = parseInt(e.target.value, 10);
+  if (!Number.isFinite(roll) || roll < 1 || roll > 30) return;
+  applyLuckAugurRoll(roll, "picked");
 });
 
 // Table 1-7's own Luck Die column (DCC RPG core rulebook) - independently
