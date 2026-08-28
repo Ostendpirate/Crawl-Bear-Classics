@@ -1636,7 +1636,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 11:03</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 11:07</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -8658,30 +8658,30 @@ const DCC_LUCK_AUGUR_TABLE = [
 // three general Fort/Ref/Will saves, no finer per-circumstance categories
 // to single out - aliasing them to Reflex/Fortitude wholesale would apply
 // the bonus to EVERY such save, not just trap-escapes/poison specifically,
-// which is more generous than RAW intends); critTables (there's no
-// existing "Luck applies to crits" baseline in this app to double - see
-// the Luck rules text's own separate, unconditional "affects other
-// rolls... critical hits, fumbles, corruption" line - fumbles/corruption
-// both have that baseline already, crits don't yet); corruption (ALREADY
-// gets live Luck unconditionally, per that same separate rule - see
-// openCorruptionModal - so this augur category would be redundant with
-// the baseline even if wired, not a genuine gap).
+// which is more generous than RAW intends); corruption (ALREADY gets live
+// Luck unconditionally, per the Luck rules text's own separate,
+// unconditional "affects other rolls... critical hits, fumbles,
+// corruption" line - so this augur category would be redundant with the
+// baseline even if wired, not a genuine gap).
 //
 // secretDoors WAS on this list too until rollPcSecretDoorCheck existed -
-// now wired below like any other category. startingWeapon and fumbles
-// followed the same path: startingWeapon via isStartingWeaponMatch/
-// isStartingWeaponMatchLive (the 0-level Trained Weapon field turns out to
-// survive being classed - only HIDDEN, not cleared, for every class except
-// Warrior/Dwarf, who repurpose it for their own Favorite Weapon instead -
-// see isStartingWeaponMatch's own comment); fumbles by doubling the
-// existing reverse-Luck fumble modifier (rollAttackFor/rollTwoWeaponAttack)
-// whenever this category is the active result.
+// now wired below like any other category. startingWeapon, fumbles, and
+// critTables followed the same path: startingWeapon via
+// isStartingWeaponMatch/isStartingWeaponMatchLive (the 0-level Trained
+// Weapon field turns out to survive being classed - only HIDDEN, not
+// cleared, for every class except Warrior/Dwarf, who repurpose it for
+// their own Favorite Weapon instead - see isStartingWeaponMatch's own
+// comment); fumbles by doubling the existing reverse-Luck fumble modifier
+// (rollAttackFor/rollTwoWeaponAttack); critTables similarly, except that
+// baseline didn't exist yet (unlike fumbles/corruption) - added it there
+// too (unreversed, since a higher crit-table roll is a better result, not
+// a worse one) before doubling it for this category.
 const DCC_LUCK_AUGUR_SUPPORTED = new Set([
   "allAttack", "meleeAttack", "missileAttack", "unarmedAttack", "startingWeapon",
   "allDamage", "meleeDamage", "missileDamage",
   "skillChecks", "findDisableTraps", "secretDoors", "spellChecks", "turnUnholy", "magicalHealing",
   "allSaves", "reflexSaves", "fortitudeSaves", "willpowerSaves",
-  "armorClass", "initiative", "hitPoints", "languages", "speed", "fumbles",
+  "armorClass", "initiative", "hitPoints", "languages", "speed", "fumbles", "critTables",
 ]);
 function luckAugurEntry() {
   const rollEl = document.getElementById("pc-luck-augur-roll");
@@ -18346,8 +18346,20 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     let critLine = "";
     if (isCrit) {
       const critDieRoll = rollDamage(profile.critDie);
+      // Luck rules text: the Luck modifier applies unconditionally to
+      // critical hit table rolls too (same "affects other rolls...
+      // critical hits, fumbles, corruption" baseline the reverse-Luck
+      // fumble modifier already implements above) - unlike fumbles, NOT
+      // reversed here, since a higher crit-table roll is a BETTER result,
+      // not a worse one. Doubled if this character's own Table 1-2 Birth
+      // Augur result is "Critical hit tables". PC-only - a monster crit
+      // has no Luck to add.
+      const critAugurEntry = stats.mode === "pc" ? luckAugurEntryForStats(stats) : null;
+      const critAugurDoubled = !!(critAugurEntry && critAugurEntry.category === "critTables");
+      const critLuckMod = stats.mode === "pc" ? abilityModifierFromRaw(stats.data.lck) * (critAugurDoubled ? 2 : 1) : 0;
+      const critRollTotal = critDieRoll !== null ? critDieRoll.total + critLuckMod : null;
       const table = profile.critTable ? CRIT_TABLES[profile.critTable] : null;
-      const row = critDieRoll && table ? lookupTableRow(table, critDieRoll.total) : null;
+      const row = critRollTotal !== null && table ? lookupTableRow(table, critRollTotal) : null;
       let bonusDamage = null;
       if (row) {
         const bm = row.text.match(/\+(\d*d\d+)/i);
@@ -18358,8 +18370,9 @@ async function rollAttackFor(itemId, attackId, slotKey) {
         rollDice.push(...bonusDamage.dice);
         dmgTotal = (dmgTotal ?? 0) + bonusDamage.total;
       }
+      const critLuckNote = critLuckMod ? ` ${formatSignedNumber(critLuckMod)} Luck${critAugurDoubled ? " (Birth Augur doubled)" : ""}` : "";
       const critDieText = critDieRoll
-        ? `${table ? table.label : profile.critTable ? `Crit Table ${profile.critTable}` : "Crit die"}: rolled ${critDieRoll.total} (${profile.critDie})`
+        ? `${table ? table.label : profile.critTable ? `Crit Table ${profile.critTable}` : "Crit die"}: rolled ${critDieRoll.total}${critLuckNote}${critLuckMod ? ` = ${critRollTotal}` : ""} (${profile.critDie})`
         : "";
       const rowText = row
         ? row.text
@@ -18671,8 +18684,14 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     if (critEligible) {
       anyCrit = true;
       const critDieRoll = rollDamage(critDieProfile.critDie);
+      // Luck rules text - see rollAttackFor's own identical comment
+      // (including the Birth Augur "Critical hit tables" doubling).
+      const critAugurEntry = luckAugurEntryForStats(stats);
+      const critAugurDoubled = !!(critAugurEntry && critAugurEntry.category === "critTables");
+      const critLuckMod = abilityModifierFromRaw(stats.data.lck) * (critAugurDoubled ? 2 : 1);
+      const critRollTotal = critDieRoll !== null ? critDieRoll.total + critLuckMod : null;
       const table = critDieProfile.critTable ? CRIT_TABLES[critDieProfile.critTable] : null;
-      const row = critDieRoll && table ? lookupTableRow(table, critDieRoll.total) : null;
+      const row = critRollTotal !== null && table ? lookupTableRow(table, critRollTotal) : null;
       let bonusDamage = null;
       if (row) {
         const bm = row.text.match(/\+(\d*d\d+)/i);
@@ -18683,8 +18702,9 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
         rollDice.push(...bonusDamage.dice);
         dmgTotal = (dmgTotal ?? 0) + bonusDamage.total;
       }
+      const critLuckNote = critLuckMod ? ` ${formatSignedNumber(critLuckMod)} Luck${critAugurDoubled ? " (Birth Augur doubled)" : ""}` : "";
       const critDieText = critDieRoll
-        ? `${table ? table.label : critDieProfile.critTable ? `Crit Table ${critDieProfile.critTable}` : "Crit die"}: rolled ${critDieRoll.total} (${critDieProfile.critDie})`
+        ? `${table ? table.label : critDieProfile.critTable ? `Crit Table ${critDieProfile.critTable}` : "Crit die"}: rolled ${critDieRoll.total}${critLuckNote}${critLuckMod ? ` = ${critRollTotal}` : ""} (${critDieProfile.critDie})`
         : "";
       const rowText = row
         ? row.text
