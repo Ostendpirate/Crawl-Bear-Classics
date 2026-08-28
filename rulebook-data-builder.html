@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Rulebook Data Builder</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #1e1b18;
+    --panel: #2a2521;
+    --border: #45392e;
+    --text: #ecdfc8;
+    --muted: #a89684;
+    --accent: #c97b3d;
+    --good: #5f8f5b;
+    --bad: #c97b7b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+  }
+  #app { max-width: 900px; margin: 0 auto; padding: 16px 18px 60px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); font-size: 12px; margin-bottom: 16px; line-height: 1.5; }
+  .subtitle b { color: var(--text); }
+  fieldset {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 14px;
+    background: var(--panel);
+  }
+  legend { padding: 0 6px; font-weight: 600; color: var(--accent); }
+  label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); margin-bottom: 3px; margin-top: 8px; }
+  label:first-child { margin-top: 0; }
+  input[type="text"], textarea, select {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 13px;
+  }
+  textarea { resize: vertical; min-height: 44px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; min-width: 0; }
+  .effect-row { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
+  .effect-row input[type="text"]:first-child { flex: 0 0 90px; }
+  .effect-row input[type="text"]:nth-child(2) { flex: 1; }
+  button {
+    font-family: inherit;
+    cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    background: var(--border);
+    color: var(--text);
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+  button:hover { filter: brightness(1.15); }
+  .btn-primary { background: var(--accent); color: #1e1b18; font-weight: 600; }
+  .btn-remove { background: transparent; color: var(--bad); padding: 2px 8px; font-size: 14px; line-height: 1; }
+  .btn-row { display: flex; gap: 8px; margin-top: 10px; }
+  .entry-list { list-style: none; margin: 10px 0 0; padding: 0; }
+  .entry-list li {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 4px;
+    background: var(--bg); cursor: pointer; font-size: 12px;
+  }
+  .entry-list li:hover { border-color: var(--accent); }
+  .entry-list li.editing { border-color: var(--accent); background: #332a20; }
+  .entry-list .entry-name { flex: 1; }
+  .entry-list .entry-meta { color: var(--muted); font-size: 11px; margin-right: 8px; }
+  .empty-note { color: var(--muted); font-size: 12px; font-style: italic; }
+  #export-json { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; min-height: 160px; }
+  .status { font-size: 12px; margin-top: 6px; min-height: 16px; }
+  .status.good { color: var(--good); }
+  .status.bad { color: var(--bad); }
+  .count-badge { display: inline-block; background: var(--accent); color: #1e1b18; border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 700; margin-left: 6px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>Rulebook Data Builder</h1>
+  <div class="subtitle">
+    A local, offline helper for typing up your own DCC RPG rulebook transcriptions — <b>not</b> part of the Owlbear Rodeo extension itself, doesn't talk to OBR or the internet at all. Fill in each field from your own copy of the rulebook, then copy or download the JSON at the bottom and paste it into the actual DCC Suite extension's own <b>📖 Import Rulebook Data</b> popup (Dice tab). Everything you type here stays in this browser tab (and this tab's own local storage) until you export it — nothing is sent anywhere.
+  </div>
+
+  <fieldset>
+    <legend>Spell</legend>
+    <label for="spell-name">Spell name (exact — must match the character sheet's own spell name)</label>
+    <input type="text" id="spell-name" list="spell-names" placeholder="e.g. Magic missile" />
+    <datalist id="spell-names"></datalist>
+
+    <label for="spell-manifestation">Manifestation</label>
+    <textarea id="spell-manifestation" placeholder="What casting this spell looks/sounds/feels like, per your own book's entry"></textarea>
+
+    <label>Effect Table</label>
+    <div id="effect-rows"></div>
+    <div class="btn-row">
+      <button type="button" id="add-effect-row">+ Add Roll Range</button>
+    </div>
+
+    <label for="spell-corruption">Corruption</label>
+    <textarea id="spell-corruption" placeholder="This spell's own Corruption table entry, if it has one"></textarea>
+
+    <label for="spell-misfire">Misfire</label>
+    <textarea id="spell-misfire" placeholder="This spell's own Misfire table entry, if it has one (patron spells only)"></textarea>
+
+    <div class="btn-row">
+      <button type="button" class="btn-primary" id="save-spell">Add / Update Spell</button>
+      <button type="button" id="clear-spell-form">Clear Form</button>
+    </div>
+    <div class="status" id="spell-status"></div>
+
+    <div id="spell-list-wrap">
+      <label style="margin-top:14px;">Spells added so far <span class="count-badge" id="spell-count">0</span></label>
+      <ul class="entry-list" id="spell-list"></ul>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Patron / Deity Write-up</legend>
+    <div class="row">
+      <div>
+        <label for="pd-kind">Type</label>
+        <select id="pd-kind">
+          <option value="patrons">Patron</option>
+          <option value="deities">Deity</option>
+        </select>
+      </div>
+      <div>
+        <label for="pd-name">Name (exact — must match the character sheet's own Patron/Deity field)</label>
+        <input type="text" id="pd-name" placeholder="e.g. a lord of a hidden fey court" />
+      </div>
+    </div>
+    <label for="pd-writeup">Write-up</label>
+    <textarea id="pd-writeup" placeholder="This patron/deity's own write-up from your book"></textarea>
+    <div class="btn-row">
+      <button type="button" class="btn-primary" id="save-pd">Add / Update</button>
+      <button type="button" id="clear-pd-form">Clear Form</button>
+    </div>
+    <div class="status" id="pd-status"></div>
+
+    <label style="margin-top:14px;">Patrons/Deities added so far <span class="count-badge" id="pd-count">0</span></label>
+    <ul class="entry-list" id="pd-list"></ul>
+  </fieldset>
+
+  <fieldset>
+    <legend>Export</legend>
+    <div class="subtitle" style="margin-bottom:8px;">
+      This is the exact JSON the extension's own Import popup expects. Copy it, or download it as a file, then paste/load it there.
+    </div>
+    <textarea id="export-json" readonly></textarea>
+    <div class="btn-row">
+      <button type="button" class="btn-primary" id="copy-json">Copy to Clipboard</button>
+      <button type="button" id="download-json">Download .json</button>
+      <button type="button" id="clear-all">Clear Everything</button>
+    </div>
+    <div class="status" id="export-status"></div>
+  </fieldset>
+</div>
+
+<script>
+(function() {
+  "use strict";
+
+  const SPELL_NAMES = ["Affliction of the gods", "Animal summoning", "Animate dead", "Arcane affinity", "Banish", "Binding", "Blade of Atropos", "Blessing", "Bolt from the blue", "Bottomfeeder bond", "Breathe life", "Cantrip", "Cause earthquake", "Charm person", "Chill touch", "Choking cloud", "Color spray", "Comprehend languages", "Consult spirit", "Control fire", "Control ice", "Cure paralysis", "Curse", "Curse of Moirae", "Darkness", "Demon summoning", "Detect evil", "Detect invisible", "Detect magic", "Dispel magic", "Divine symbol", "Ekim's mystical mask", "Eldritch hound", "Emirikol's entropic maelstrom", "Enlarge", "ESP", "Eternal champion", "Exorcise", "Feather fall", "Find familiar", "Fire resistance", "Fireball", "Flaming hands", "Fly", "Food of the gods", "Force manipulation", "Forest walk", "Forget", "Glorious mire", "Gust of wind", "Haste", "Hepsoj's fecund fungi", "Holy sanctuary", "Invisibility", "Invisible companion", "Invoke patron", "Kith of the hydra", "Knock", "Levitate", "Lightning bolt", "Locate object", "Lokerimon's orderly assistance", "Lokerimon's un-erring hunter", "Lotus stare", "Magic bulwark", "Magic missile", "Magic mouth", "Magic shield", "Make potion", "Mending", "Mind purge", "Mirror image", "Monster summoning", "Neutralize poison or disease", "Nythuul's porcupine coat", "Paralysis", "Patron bond", "Phantasm", "Phylactery of the soul", "Planar step", "Polymorph", "Protection from evil", "Ray of enfeeblement", "Read magic", "Reap the whirlwind", "Remove curse", "Replication", "Resist cold or heat", "Restore vitality", "Righteous fire", "Ropework", "Runic alphabet, fey", "Runic alphabet, mortal", "Sanctify / desecrate", "Scare", "Scorching ray", "Second sight", "Sequester", "Shatter", "Shield maiden", "Sleep", "Slow", "Snake charm", "Snake trick", "Speak with the dead", "Spider climb", "Spider web", "Spiritual weapon", "Stinging stone", "Strength", "Sword magic", "Tadpole transformation", "The dreaming", "Transference", "Transmute Earth", "True name", "Turn to stone", "Ventriloquism", "Vermin blight", "Ward portal", "Warhorn of Elfland", "Warp & weft", "Water breathing", "Weather control", "Whirling doom", "Wizard sense", "Wizard staff", "Wood wyrding", "Word of command", "Write magic"];
+
+  const STORAGE_KEY = "rulebook-data-builder/v1";
+
+  // All state lives in this one object, persisted to localStorage on every
+  // change - closing the tab mid-transcription (easy to do with a book open
+  // in another window) shouldn't lose an hour of typing.
+  let state = { spells: {}, patrons: {}, deities: {} };
+  let editingSpellName = null;
+  let editingPdKind = null;
+  let editingPdName = null;
+
+  function loadState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        state = {
+          spells: parsed.spells || {},
+          patrons: parsed.patrons || {},
+          deities: parsed.deities || {},
+        };
+      }
+    } catch (e) { /* corrupted storage - start fresh rather than crash */ }
+  }
+  function saveState() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* storage full/blocked - export still works */ }
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  // ---- Spell datalist ----
+  const datalistEl = document.getElementById("spell-names");
+  datalistEl.innerHTML = SPELL_NAMES.map(n => `<option value="${escapeHtml(n)}"></option>`).join("");
+
+  // ---- Effect rows (dynamic add/remove, same shape the extension itself uses) ----
+  const effectRowsEl = document.getElementById("effect-rows");
+  function addEffectRowEl(range, text) {
+    const row = document.createElement("div");
+    row.className = "effect-row";
+    row.innerHTML = `
+      <input type="text" class="effect-range" placeholder="12-13" value="${escapeHtml(range || "")}" />
+      <input type="text" class="effect-text" placeholder="What this roll range does" value="${escapeHtml(text || "")}" />
+      <button type="button" class="btn-remove" title="Remove">×</button>
+    `;
+    row.querySelector(".btn-remove").addEventListener("click", () => row.remove());
+    effectRowsEl.appendChild(row);
+  }
+  document.getElementById("add-effect-row").addEventListener("click", () => addEffectRowEl("", ""));
+  function readEffectRows() {
+    return Array.from(effectRowsEl.querySelectorAll(".effect-row")).map(row => ({
+      range: row.querySelector(".effect-range").value.trim(),
+      text: row.querySelector(".effect-text").value.trim(),
+    })).filter(r => r.range || r.text);
+  }
+  function clearEffectRows() { effectRowsEl.innerHTML = ""; }
+
+  // ---- Spell form ----
+  const spellNameEl = document.getElementById("spell-name");
+  const spellManifestationEl = document.getElementById("spell-manifestation");
+  const spellCorruptionEl = document.getElementById("spell-corruption");
+  const spellMisfireEl = document.getElementById("spell-misfire");
+  const spellStatusEl = document.getElementById("spell-status");
+
+  function clearSpellForm() {
+    spellNameEl.value = "";
+    spellManifestationEl.value = "";
+    spellCorruptionEl.value = "";
+    spellMisfireEl.value = "";
+    clearEffectRows();
+    editingSpellName = null;
+    spellStatusEl.textContent = "";
+    spellStatusEl.className = "status";
+  }
+  document.getElementById("clear-spell-form").addEventListener("click", clearSpellForm);
+
+  document.getElementById("save-spell").addEventListener("click", () => {
+    const name = spellNameEl.value.trim();
+    if (!name) {
+      spellStatusEl.textContent = "Spell name is required.";
+      spellStatusEl.className = "status bad";
+      return;
+    }
+    const entry = {
+      manifestation: spellManifestationEl.value.trim(),
+      effectRows: readEffectRows(),
+      corruption: spellCorruptionEl.value.trim(),
+      misfire: spellMisfireEl.value.trim(),
+    };
+    // Renaming while editing: drop the old key so it doesn't linger as a
+    // separate, now-orphaned entry alongside the renamed one.
+    if (editingSpellName && editingSpellName !== name) delete state.spells[editingSpellName];
+    state.spells[name] = entry;
+    saveState();
+    renderSpellList();
+    renderExport();
+    clearSpellForm();
+    spellStatusEl.textContent = `Saved "${name}".`;
+    spellStatusEl.className = "status good";
+  });
+
+  function loadSpellIntoForm(name) {
+    const entry = state.spells[name];
+    if (!entry) return;
+    editingSpellName = name;
+    spellNameEl.value = name;
+    spellManifestationEl.value = entry.manifestation || "";
+    spellCorruptionEl.value = entry.corruption || "";
+    spellMisfireEl.value = entry.misfire || "";
+    clearEffectRows();
+    (entry.effectRows || []).forEach(r => addEffectRowEl(r.range, r.text));
+    spellStatusEl.textContent = `Editing "${name}" - Add/Update to save changes.`;
+    spellStatusEl.className = "status";
+  }
+
+  function renderSpellList() {
+    const listEl = document.getElementById("spell-list");
+    const names = Object.keys(state.spells).sort((a, b) => a.localeCompare(b));
+    document.getElementById("spell-count").textContent = names.length;
+    if (!names.length) {
+      listEl.innerHTML = `<li class="empty-note" style="cursor:default;">Nothing added yet.</li>`;
+      return;
+    }
+    listEl.innerHTML = names.map(name => {
+      const entry = state.spells[name];
+      const filledCount = ["manifestation", "corruption", "misfire"].filter(k => entry[k]).length + (entry.effectRows && entry.effectRows.length ? 1 : 0);
+      return `<li data-name="${escapeHtml(name)}" class="${name === editingSpellName ? "editing" : ""}">
+        <span class="entry-name">${escapeHtml(name)}</span>
+        <span class="entry-meta">${filledCount} field${filledCount === 1 ? "" : "s"} filled</span>
+        <button type="button" class="btn-remove" data-remove="${escapeHtml(name)}" title="Remove">×</button>
+      </li>`;
+    }).join("");
+    listEl.querySelectorAll("li[data-name]").forEach(li => {
+      li.addEventListener("click", (e) => {
+        if (e.target.closest("[data-remove]")) return;
+        loadSpellIntoForm(li.dataset.name);
+      });
+    });
+    listEl.querySelectorAll("[data-remove]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const name = btn.dataset.remove;
+        delete state.spells[name];
+        if (editingSpellName === name) clearSpellForm();
+        saveState();
+        renderSpellList();
+        renderExport();
+      });
+    });
+  }
+
+  // ---- Patron/Deity form ----
+  const pdKindEl = document.getElementById("pd-kind");
+  const pdNameEl = document.getElementById("pd-name");
+  const pdWriteupEl = document.getElementById("pd-writeup");
+  const pdStatusEl = document.getElementById("pd-status");
+
+  function clearPdForm() {
+    pdNameEl.value = "";
+    pdWriteupEl.value = "";
+    editingPdKind = null;
+    editingPdName = null;
+    pdStatusEl.textContent = "";
+    pdStatusEl.className = "status";
+  }
+  document.getElementById("clear-pd-form").addEventListener("click", clearPdForm);
+
+  document.getElementById("save-pd").addEventListener("click", () => {
+    const kind = pdKindEl.value;
+    const name = pdNameEl.value.trim();
+    if (!name) {
+      pdStatusEl.textContent = "Name is required.";
+      pdStatusEl.className = "status bad";
+      return;
+    }
+    if (editingPdName && (editingPdKind !== kind || editingPdName !== name)) {
+      delete state[editingPdKind][editingPdName];
+    }
+    state[kind][name] = pdWriteupEl.value.trim();
+    saveState();
+    renderPdList();
+    renderExport();
+    clearPdForm();
+    pdStatusEl.textContent = `Saved "${name}" (${kind.slice(0, -1)}).`;
+    pdStatusEl.className = "status good";
+  });
+
+  function loadPdIntoForm(kind, name) {
+    editingPdKind = kind;
+    editingPdName = name;
+    pdKindEl.value = kind;
+    pdNameEl.value = name;
+    pdWriteupEl.value = state[kind][name] || "";
+    pdStatusEl.textContent = `Editing "${name}" - Add/Update to save changes.`;
+    pdStatusEl.className = "status";
+  }
+
+  function renderPdList() {
+    const listEl = document.getElementById("pd-list");
+    const rows = [];
+    ["patrons", "deities"].forEach(kind => {
+      Object.keys(state[kind]).sort((a, b) => a.localeCompare(b)).forEach(name => rows.push({ kind, name }));
+    });
+    document.getElementById("pd-count").textContent = rows.length;
+    if (!rows.length) {
+      listEl.innerHTML = `<li class="empty-note" style="cursor:default;">Nothing added yet.</li>`;
+      return;
+    }
+    listEl.innerHTML = rows.map(({ kind, name }) => `<li data-kind="${kind}" data-name="${escapeHtml(name)}" class="${kind === editingPdKind && name === editingPdName ? "editing" : ""}">
+      <span class="entry-name">${escapeHtml(name)}</span>
+      <span class="entry-meta">${kind === "patrons" ? "Patron" : "Deity"}</span>
+      <button type="button" class="btn-remove" data-remove-kind="${kind}" data-remove-name="${escapeHtml(name)}" title="Remove">×</button>
+    </li>`).join("");
+    listEl.querySelectorAll("li[data-name]").forEach(li => {
+      li.addEventListener("click", (e) => {
+        if (e.target.closest("[data-remove-name]")) return;
+        loadPdIntoForm(li.dataset.kind, li.dataset.name);
+      });
+    });
+    listEl.querySelectorAll("[data-remove-name]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const kind = btn.dataset.removeKind, name = btn.dataset.removeName;
+        delete state[kind][name];
+        if (editingPdKind === kind && editingPdName === name) clearPdForm();
+        saveState();
+        renderPdList();
+        renderExport();
+      });
+    });
+  }
+
+  // ---- Export ----
+  function currentExportObject() {
+    // Only include a category if it actually has entries, matching the
+    // extension's own "any subset of spells/patrons/deities is fine"
+    // import validation - an empty {} for an unused category is harmless
+    // either way, but omitting it keeps the pasted JSON shorter.
+    const out = {};
+    if (Object.keys(state.spells).length) out.spells = state.spells;
+    if (Object.keys(state.patrons).length) out.patrons = state.patrons;
+    if (Object.keys(state.deities).length) out.deities = state.deities;
+    return out;
+  }
+  function renderExport() {
+    document.getElementById("export-json").value = JSON.stringify(currentExportObject(), null, 2);
+  }
+
+  document.getElementById("copy-json").addEventListener("click", async () => {
+    const statusEl = document.getElementById("export-status");
+    const text = document.getElementById("export-json").value;
+    try {
+      await navigator.clipboard.writeText(text);
+      statusEl.textContent = "Copied to clipboard.";
+      statusEl.className = "status good";
+    } catch (e) {
+      // Clipboard API can be blocked (permissions, non-secure context) -
+      // fall back to select-all so the user can still Cmd/Ctrl+C manually.
+      const el = document.getElementById("export-json");
+      el.focus();
+      el.select();
+      statusEl.textContent = "Couldn't auto-copy - text is selected, press Ctrl/Cmd+C.";
+      statusEl.className = "status bad";
+    }
+  });
+
+  document.getElementById("download-json").addEventListener("click", () => {
+    const text = document.getElementById("export-json").value;
+    const blob = new Blob([text], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "rulebook-data.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    const statusEl = document.getElementById("export-status");
+    statusEl.textContent = "Downloaded rulebook-data.json.";
+    statusEl.className = "status good";
+  });
+
+  document.getElementById("clear-all").addEventListener("click", () => {
+    if (!confirm("Clear every spell/patron/deity entered here? This can't be undone.")) return;
+    state = { spells: {}, patrons: {}, deities: {} };
+    saveState();
+    clearSpellForm();
+    clearPdForm();
+    renderSpellList();
+    renderPdList();
+    renderExport();
+    document.getElementById("export-status").textContent = "Cleared.";
+    document.getElementById("export-status").className = "status";
+  });
+
+  // ---- Init ----
+  loadState();
+  renderSpellList();
+  renderPdList();
+  renderExport();
+})();
+</script>
+</body>
+</html>
