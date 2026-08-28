@@ -90,8 +90,27 @@
 <div id="app">
   <h1>Rulebook Data Builder</h1>
   <div class="subtitle">
-    A local, offline helper for typing up your own DCC RPG rulebook transcriptions — <b>not</b> part of the Owlbear Rodeo extension itself, doesn't talk to OBR or the internet at all. Fill in each field from your own copy of the rulebook, then copy or download the JSON at the bottom and paste it into the actual DCC Suite extension's own <b>📖 Import Rulebook Data</b> popup (Dice tab). Everything you type here stays in this browser tab (and this tab's own local storage) until you export it — nothing is sent anywhere.
+    A local, offline helper for typing up your own DCC RPG rulebook transcriptions — <b>not</b> part of the Owlbear Rodeo extension itself, doesn't talk to OBR or the internet at all. Fill in each field from your own copy of the rulebook, then copy or download the JSON at the bottom and paste it into the actual DCC Suite extension's own <b>📖 Import Rulebook Data</b> popup (Dice tab). Everything you type here stays in this browser tab (and this tab's own local storage) until you export it — nothing is sent anywhere. Picking up a previous session? Load its JSON file below first.
   </div>
+
+  <fieldset>
+    <legend>Load Existing JSON</legend>
+    <div class="subtitle" style="margin-bottom:8px;">
+      Resuming a previous session, or starting from the empty template? Load that file (or paste its JSON) here first - it merges into whatever's already below, so loading the same spell twice just keeps the newer version.
+    </div>
+    <div class="row">
+      <div>
+        <label for="load-file">Load a .json file</label>
+        <input type="file" id="load-file" accept="application/json,.json" />
+      </div>
+    </div>
+    <label for="load-textarea">Or paste JSON directly</label>
+    <textarea id="load-textarea" style="font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 11px; min-height: 70px;" placeholder='{"spells": {"Magic missile": {"manifestation": "...", ...}}}'></textarea>
+    <div class="btn-row">
+      <button type="button" class="btn-primary" id="load-json-btn">Load Into This Session</button>
+    </div>
+    <div class="status" id="load-status"></div>
+  </fieldset>
 
   <fieldset>
     <legend>Spell</legend>
@@ -204,6 +223,79 @@
   function escapeHtml(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
+
+  // ---- Load existing JSON (a previous export, or the empty template) ----
+  // Merges into the current session's state rather than replacing it - same
+  // "re-loading the same key overwrites just that entry" contract the
+  // extension's own Import popup uses, so loading a file twice (or loading
+  // two different partial exports) never loses anything already typed here.
+  function mergeLoadedData(parsed) {
+    const hasSpells = parsed && typeof parsed === "object" && parsed.spells && typeof parsed.spells === "object";
+    const hasPatrons = parsed && typeof parsed === "object" && parsed.patrons && typeof parsed.patrons === "object";
+    const hasDeities = parsed && typeof parsed === "object" && parsed.deities && typeof parsed.deities === "object";
+    if (!hasSpells && !hasPatrons && !hasDeities) return null;
+    let spellCount = 0, patronCount = 0, deityCount = 0;
+    if (hasSpells) {
+      Object.entries(parsed.spells).forEach(([name, entry]) => {
+        state.spells[name] = {
+          manifestation: (entry && entry.manifestation) || "",
+          effectRows: (entry && Array.isArray(entry.effectRows)) ? entry.effectRows.map(r => ({ range: (r && r.range) || "", text: (r && r.text) || "" })) : [],
+          corruption: (entry && entry.corruption) || "",
+          misfire: (entry && entry.misfire) || "",
+        };
+        spellCount++;
+      });
+    }
+    if (hasPatrons) {
+      Object.entries(parsed.patrons).forEach(([name, text]) => { state.patrons[name] = text || ""; patronCount++; });
+    }
+    if (hasDeities) {
+      Object.entries(parsed.deities).forEach(([name, text]) => { state.deities[name] = text || ""; deityCount++; });
+    }
+    return { spellCount, patronCount, deityCount };
+  }
+  document.getElementById("load-file").addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { document.getElementById("load-textarea").value = String(reader.result || ""); };
+    reader.readAsText(file);
+  });
+  document.getElementById("load-json-btn").addEventListener("click", () => {
+    const statusEl = document.getElementById("load-status");
+    const raw = document.getElementById("load-textarea").value.trim();
+    if (!raw) {
+      statusEl.textContent = "Load a .json file or paste JSON first.";
+      statusEl.className = "status bad";
+      return;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      statusEl.textContent = `Couldn't parse that as JSON: ${err.message}`;
+      statusEl.className = "status bad";
+      return;
+    }
+    const result = mergeLoadedData(parsed);
+    if (!result) {
+      statusEl.textContent = `Expected a top-level "spells", "patrons", and/or "deities" object.`;
+      statusEl.className = "status bad";
+      return;
+    }
+    saveState();
+    renderSpellList();
+    renderPdList();
+    renderExport();
+    const parts = [];
+    if (result.spellCount) parts.push(`${result.spellCount} spell${result.spellCount === 1 ? "" : "s"}`);
+    if (result.patronCount) parts.push(`${result.patronCount} patron${result.patronCount === 1 ? "" : "s"}`);
+    if (result.deityCount) parts.push(`${result.deityCount} deit${result.deityCount === 1 ? "y" : "ies"}`);
+    statusEl.textContent = `Loaded ${parts.join(", ")}.`;
+    statusEl.className = "status good";
+    document.getElementById("load-textarea").value = "";
+    document.getElementById("load-file").value = "";
+  });
 
   // ---- Spell datalist ----
   const datalistEl = document.getElementById("spell-names");
