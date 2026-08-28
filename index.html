@@ -818,7 +818,7 @@
   .spell-attack-burn-btn, .tracker-burn-btn, .newday-modal-recover, #pc-corruption-btn, #pc-disapproval-btn,
   .spell-attack-reversed-btn, .tracker-reversed-btn, .roll-language-btn, .disapproval-range-btn, #pc-secret-doors-btn, #pc-luck-augur-btn,
   #morale-btn, #pc-recover-body-btn, #add-familiar-token-btn, #rulebook-import-clear-btn, #corruption-modal-luck-burn-btn,
-  #lay-on-hands-modal-apply-btn, #pc-patron-taint-btn, #pc-spell-duel-btn, #pc-clear-groggy-btn {
+  #lay-on-hands-modal-apply-btn, #pc-patron-taint-btn, #pc-spell-duel-btn, #pc-clear-groggy-btn, #ritual-magic-open-btn {
     width: auto;
     height: auto;
     padding: 3px 8px;
@@ -1314,15 +1314,16 @@
     z-index: 500;
     padding: 12px;
   }
-  /* The Corruption/Disapproval buttons live INSIDE #spells-modal-backdrop
-     (moved there when the whole Spells section became a popup), so
-     opening either while that popup is still open stacks two same-
-     z-index .tables-modal-backdrop siblings at once - whichever comes
-     LATER in the HTML (spells-modal-backdrop does) painted on top,
-     making the Corruption/Disapproval modal open but be completely
+  /* The Corruption/Disapproval/Spell Duel/Ritualized Magic buttons live
+     INSIDE #spells-modal-backdrop (moved there when the whole Spells
+     section became a popup), so opening any of them while that popup is
+     still open stacks two same-z-index .tables-modal-backdrop siblings at
+     once - whichever comes LATER in the HTML (spells-modal-backdrop does)
+     painted on top, making the nested modal open but be completely
      invisible/unclickable behind it. Bumped above the shared 500 so a
      modal opened from within another modal always stacks on top of it. */
-  #corruption-modal-backdrop, #disapproval-modal-backdrop, #turn-unholy-modal-backdrop, #lay-on-hands-modal-backdrop, #cause-wounds-modal-backdrop { z-index: 510; }
+  #corruption-modal-backdrop, #disapproval-modal-backdrop, #turn-unholy-modal-backdrop, #lay-on-hands-modal-backdrop, #cause-wounds-modal-backdrop,
+  #spell-duel-modal-backdrop, #ritual-magic-modal-backdrop { z-index: 510; }
   .tables-modal {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -1635,7 +1636,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 10:06</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 10:12</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2259,59 +2260,6 @@
         <button type="button" class="btn-next" id="rulebook-import-open-btn" style="width:100%; padding:8px 0;">📖 Import Rulebook Data<span class="open-spells-count" id="rulebook-import-open-count"></span></button>
       </fieldset>
 
-      <fieldset id="ritual-magic-row">
-        <legend>Ritualized Magic</legend>
-        <div class="row">
-          <div>
-            <label title="Each additional wizard past the primary caster contributes HALF their own spell check bonus (including spellburn) to the circle, tracked fractionally by you (two +1 contributors = +1 to the circle) - max +10. Minimum casting time 1 turn/mage, often closer to 1 hour/mage. Any corruption is shared by every mage in the circle.">Circle of Mages: collective bonus</label>
-            <input type="number" id="ritual-circle-bonus" placeholder="e.g. 3, max 10" min="0" max="10" />
-          </div>
-          <div>
-            <label title="The caster rolls this many d20s and keeps only the highest, ignoring the rest.">Circle of Mages: mages in circle</label>
-            <input type="number" id="ritual-circle-size" placeholder="e.g. 3" min="1" />
-          </div>
-        </div>
-        <div class="row">
-          <div>
-            <label title="Treasure sacrificed as a spell ingredient: up to 500gp=+1, 501-2,000gp=+2, 2,001-5,000gp=+3, 5,001gp+=+4 (max +4).">Sacrifice: treasure value (gp)</label>
-            <input type="number" id="ritual-sacrifice-gp" placeholder="e.g. 1200" min="0" />
-          </div>
-          <div>
-            <label title="Creatures sacrificed as a spell ingredient: +1 per 5 HD sacrificed, max +4.">Sacrifice: creature HD sacrificed</label>
-            <input type="number" id="ritual-sacrifice-hd" placeholder="e.g. 8" min="0" />
-          </div>
-        </div>
-        <div class="sitmod-checks">
-          <label title="Casting at a ley line, standing stone, or other place of significance to the spell - typically increases the spell check die one step up the dice chain, at the cost of at least 1 extra turn, possibly a full hour, of casting time.">
-            <input type="checkbox" id="ritual-location" /> Location of Power (+1 die step, extra casting time)
-          </label>
-        </div>
-        <div class="row">
-          <div>
-            <label title="Extraordinarily rare spell components, requiring a quest to obtain, prep time, and casting time.">Rare Ingredients bonus</label>
-            <input type="number" id="ritual-rare-ingredients" placeholder="0-4" min="0" max="4" />
-          </div>
-          <div>
-            <label title="Extended casting time (chanting, incense, fasting) - every full day spent casting adds +1. No natural rest or spell recovery happens during this time.">Extra Duration (days spent casting)</label>
-            <input type="number" id="ritual-extra-duration" placeholder="e.g. 2" min="0" />
-          </div>
-        </div>
-        <div class="row">
-          <div>
-            <label title="Offering one's own mortal shell for the consumption of supernatural powers - extremely painful, but adds a bonus at the cost of a MANDATORY Corruption roll of the matching tier (the ☣ Corruption button, Spells section, opens pre-set to that tier once you roll this Spell Check).">Automatic Corruption</label>
-            <select id="ritual-corruption">
-              <option value="">None</option>
-              <option value="minor">Minor (+2, mandatory Minor Corruption)</option>
-              <option value="major">Major (+4, mandatory Major Corruption)</option>
-              <option value="greater">Greater (+6, mandatory Greater Corruption)</option>
-            </select>
-          </div>
-        </div>
-        <div class="fumble-die-note" style="margin-top:4px;">
-          Fill in whatever applies, then roll a Spell Check (Sheet or Tracker) - it reads and consumes these once, folding the combined bonus/die-step/circle-roll into that one Spell Check. Clears itself after one use. Judge's discretion applies to several of these amounts (Sacrifice/Rare Ingredients/Location of Power cast-time cost) - this only automates the arithmetic once you and your judge have agreed the amount.
-        </div>
-      </fieldset>
-
       <div class="status" id="dice-status"></div>
     </div>
 
@@ -2799,6 +2747,7 @@
             <button type="button" id="pc-disapproval-btn" class="hp-btn" style="display:none;" title="Roll Disapproval (Table 5-7) - Cleric only.">😇 Disapproval</button>
             <button type="button" id="pc-patron-taint-btn" class="hp-btn" style="display:none;" title="Roll Patron Taint Check (DCC RPG core rulebook) - Wizard/Elf only. Click after casting invoke patron, patron bond, or any other patron-based spell. Chance starts at 1% and rises by 1 point with each such casting that doesn't taint; a taint resets it back to 1%. On a taint, roll on your own patron's specific taint table (consult your book).">🔮 Patron Taint</button>
             <button type="button" id="pc-spell-duel-btn" class="hp-btn" style="display:none;" title="Spell Duel Calculator (DCC RPG core rulebook) - both wizards and clerics can spell duel. Enter both casters' already-rolled Spell Check totals to resolve a counterspell exchange.">⚔️ Spell Duel</button>
+            <button type="button" id="ritual-magic-open-btn" class="hp-btn" title="Ritualized Magic (DCC RPG core rulebook, Wizard Grimoire section) - Circle of Mages, Sacrifice, Location of Power, Rare Ingredients, Extra Duration, and Automatic Corruption bonuses for the next Spell Check.">🔮 Ritualized Magic<span class="open-spells-count" id="ritual-magic-open-count"></span></button>
           </div>
           <div class="attack-list" id="pc-spells-list"></div>
           <button type="button" class="add-attack-btn" id="add-spell-pc">+ Add Spell</button>
@@ -2867,6 +2816,66 @@
           <label><input type="checkbox" id="sitmod-entangled-defender" /> Defender entangled (+1d)</label>
           <label><input type="checkbox" id="sitmod-helpless" /> Defender helpless (paralyzed/sleeping/bound) (+1d)</label>
           <label><input type="checkbox" id="sitmod-prone" /> Defender kneeling, sitting, or prone (+2 melee, -2 missile)</label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="ritual-magic-modal-backdrop" class="tables-modal-backdrop" style="display:none">
+    <div class="tables-modal">
+      <div class="tables-modal-header">
+        <div>
+          <div class="tables-modal-title">Ritualized Magic</div>
+          <div class="tables-modal-subtitle">Fill in whatever applies, then roll a Spell Check (Sheet or Tracker) - it reads and consumes these once, folding the combined bonus/die-step/circle-roll into that one Spell Check. Clears itself after one use. Judge's discretion applies to several of these amounts (Sacrifice/Rare Ingredients/Location of Power cast-time cost) - this only automates the arithmetic once you and your judge have agreed the amount.</div>
+        </div>
+        <button type="button" class="tables-modal-close" id="ritual-magic-modal-close" title="Close">×</button>
+      </div>
+      <div class="tables-modal-body">
+        <div class="row">
+          <div>
+            <label title="Each additional wizard past the primary caster contributes HALF their own spell check bonus (including spellburn) to the circle, tracked fractionally by you (two +1 contributors = +1 to the circle) - max +10. Minimum casting time 1 turn/mage, often closer to 1 hour/mage. Any corruption is shared by every mage in the circle.">Circle of Mages: collective bonus</label>
+            <input type="number" id="ritual-circle-bonus" placeholder="e.g. 3, max 10" min="0" max="10" />
+          </div>
+          <div>
+            <label title="The caster rolls this many d20s and keeps only the highest, ignoring the rest.">Circle of Mages: mages in circle</label>
+            <input type="number" id="ritual-circle-size" placeholder="e.g. 3" min="1" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label title="Treasure sacrificed as a spell ingredient: up to 500gp=+1, 501-2,000gp=+2, 2,001-5,000gp=+3, 5,001gp+=+4 (max +4).">Sacrifice: treasure value (gp)</label>
+            <input type="number" id="ritual-sacrifice-gp" placeholder="e.g. 1200" min="0" />
+          </div>
+          <div>
+            <label title="Creatures sacrificed as a spell ingredient: +1 per 5 HD sacrificed, max +4.">Sacrifice: creature HD sacrificed</label>
+            <input type="number" id="ritual-sacrifice-hd" placeholder="e.g. 8" min="0" />
+          </div>
+        </div>
+        <div class="sitmod-checks">
+          <label title="Casting at a ley line, standing stone, or other place of significance to the spell - typically increases the spell check die one step up the dice chain, at the cost of at least 1 extra turn, possibly a full hour, of casting time.">
+            <input type="checkbox" id="ritual-location" /> Location of Power (+1 die step, extra casting time)
+          </label>
+        </div>
+        <div class="row">
+          <div>
+            <label title="Extraordinarily rare spell components, requiring a quest to obtain, prep time, and casting time.">Rare Ingredients bonus</label>
+            <input type="number" id="ritual-rare-ingredients" placeholder="0-4" min="0" max="4" />
+          </div>
+          <div>
+            <label title="Extended casting time (chanting, incense, fasting) - every full day spent casting adds +1. No natural rest or spell recovery happens during this time.">Extra Duration (days spent casting)</label>
+            <input type="number" id="ritual-extra-duration" placeholder="e.g. 2" min="0" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label title="Offering one's own mortal shell for the consumption of supernatural powers - extremely painful, but adds a bonus at the cost of a MANDATORY Corruption roll of the matching tier (this Spells popup's own ☣ Corruption button opens pre-set to that tier once you roll this Spell Check).">Automatic Corruption</label>
+            <select id="ritual-corruption">
+              <option value="">None</option>
+              <option value="minor">Minor (+2, mandatory Minor Corruption)</option>
+              <option value="major">Major (+4, mandatory Major Corruption)</option>
+              <option value="greater">Greater (+6, mandatory Greater Corruption)</option>
+            </select>
+          </div>
         </div>
       </div>
     </div>
@@ -17946,19 +17955,20 @@ SITMOD_FIELD_IDS.forEach(id => {
 });
 
 // Ritualized Magic (DCC RPG core rulebook, Wizard Grimoire section) - a
-// one-shot pre-roll declaration (Dice tab), same "set now, consumed by
-// the very next roll, then clears itself" contract as
-// consumeSituationalModifiers above, just for the next SPELL CHECK
-// instead of the next attack. Several of these amounts are explicitly
-// "up to N, judge's discretion" in the book (Sacrifice, Rare Ingredients,
-// the exact cast-time cost of Location of Power) - this only automates
-// the arithmetic once the amount's been agreed at the table, it doesn't
-// decide the amount itself. Sacrifice's two halves (treasure and
+// one-shot pre-roll declaration (Spells popup > "🔮 Ritualized Magic"),
+// same "set now, consumed by the very next roll, then clears itself"
+// contract as consumeSituationalModifiers above, just for the next SPELL
+// CHECK instead of the next attack. Several of these amounts are
+// explicitly "up to N, judge's discretion" in the book (Sacrifice, Rare
+// Ingredients, the exact cast-time cost of Location of Power) - this only
+// automates the arithmetic once the amount's been agreed at the table, it
+// doesn't decide the amount itself. Sacrifice's two halves (treasure and
 // creature HD) aren't explicitly ruled stackable or exclusive by RAW -
 // summed here since nothing forbids combining two different sacrifices,
 // but a judge who disagrees can just leave one blank.
+const RITUAL_FIELD_IDS = ["ritual-circle-bonus", "ritual-circle-size", "ritual-sacrifice-gp", "ritual-sacrifice-hd", "ritual-location", "ritual-rare-ingredients", "ritual-extra-duration", "ritual-corruption"];
 function consumeRitualizedMagicModifiers() {
-  const ids = ["ritual-circle-bonus", "ritual-circle-size", "ritual-sacrifice-gp", "ritual-sacrifice-hd", "ritual-location", "ritual-rare-ingredients", "ritual-extra-duration", "ritual-corruption"];
+  const ids = RITUAL_FIELD_IDS;
   const els = {};
   ids.forEach(id => { els[id] = document.getElementById(id); });
   const circleBonusRaw = parseInt(els["ritual-circle-bonus"].value, 10);
@@ -17983,6 +17993,7 @@ function consumeRitualizedMagicModifiers() {
     if (!el) return;
     if (el.type === "checkbox") el.checked = false; else el.value = "";
   });
+  refreshRitualMagicStatus();
   const flatMod = circleBonus + sacrificeGpTier + sacrificeHdTier + rareIngredients + extraDurationDays + corruptionBonus;
   const diceSteps = locationOfPower ? 1 : 0;
   const parts = [];
@@ -17996,6 +18007,42 @@ function consumeRitualizedMagicModifiers() {
   if (corruptionBonus) parts.push(`Automatic Corruption +${corruptionBonus} (${corruptionTier}, mandatory)`);
   return { flatMod, diceSteps, circleSize, corruptionTier, detail: parts.join(", ") };
 }
+
+// Small count badge on the Spells popup's own collapsed trigger button
+// (same .open-spells-count treatment the Spells/Rulebook Import/
+// Situational Modifiers buttons use) - so a caster can see at a glance
+// whether anything's currently staged without opening the popup. Wired
+// below to every field's own change event, and also called from
+// consumeRitualizedMagicModifiers itself so the badge clears back to
+// blank the moment a Spell Check consumes them.
+function refreshRitualMagicStatus() {
+  const countEl = document.getElementById("ritual-magic-open-count");
+  if (!countEl) return;
+  let count = 0;
+  RITUAL_FIELD_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.type === "checkbox") { if (el.checked) count++; }
+    else if (el.tagName === "SELECT") { if (el.value) count++; }
+    else if ((parseFloat(el.value) || 0) > 0) count++;
+  });
+  countEl.textContent = count > 0 ? ` (${count} active)` : "";
+}
+function openRitualMagicModal() {
+  document.getElementById("ritual-magic-modal-backdrop").style.display = "flex";
+}
+function closeRitualMagicModal() {
+  document.getElementById("ritual-magic-modal-backdrop").style.display = "none";
+}
+document.getElementById("ritual-magic-open-btn").addEventListener("click", openRitualMagicModal);
+document.getElementById("ritual-magic-modal-close").addEventListener("click", closeRitualMagicModal);
+document.getElementById("ritual-magic-modal-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "ritual-magic-modal-backdrop") closeRitualMagicModal();
+});
+RITUAL_FIELD_IDS.forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("change", refreshRitualMagicStatus);
+});
 
 // A natural 20 is BOTH an automatic hit and a critical hit in DCC RAW
 // (Table 4-3's two-handed-penalty footnote - "scores a critical hit...
