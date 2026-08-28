@@ -1635,7 +1635,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 09:49</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 09:59</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2254,22 +2254,8 @@
       </fieldset>
 
       <fieldset class="gm-only-row" id="rulebook-import-row" style="display:none;">
-        <legend>Import Rulebook Data</legend>
-        <div class="fumble-die-note" style="margin-bottom:6px;">
-          Paste JSON you've personally transcribed from your own copy of the rulebook - spell Manifestation/Effect Table/Corruption/Misfire text keyed by exact spell name, and/or Patron/Deity write-ups keyed by exact patron/deity name (matching whatever's typed in that character's own Patron/Deity field). This is stored in THIS SCENE's own data (shared with everyone at this table, same as the roll log), never saved to this app's own source code or public repo. Format: <code>{"spells":{"Magic missile":{"manifestation":"...","effectRows":[{"range":"12-13","text":"..."}],"corruption":"...","misfire":"..."}},"patrons":{"a lord of a hidden fey court":"..."},"deities":{"a Lawful war-god":"..."}}</code> - any subset of "spells"/"patrons"/"deities" is fine. Every field above only auto-fills when its own name is picked/typed and it's currently blank - it never overwrites something already typed in.
-        </div>
-        <textarea id="rulebook-import-textarea" rows="4" placeholder='{"spells": {"Magic missile": {"manifestation": "...", "effectRows": [{"range": "12-13", "text": "..."}], "corruption": "...", "misfire": "..."}}, "patrons": {"a lord of a hidden fey court": "..."}, "deities": {"a Lawful war-god": "..."}}' style="width:100%; box-sizing:border-box; font-family:monospace; font-size:11px;"></textarea>
-        <div class="row" style="margin-top:6px;">
-          <div>
-            <label>Or load a .json file</label>
-            <input type="file" id="rulebook-import-file" accept="application/json,.json" />
-          </div>
-        </div>
-        <div class="roll-modal-inputs" style="margin-top:6px;">
-          <button type="button" class="btn-next" id="rulebook-import-btn">Import</button>
-          <button type="button" class="hp-btn" id="rulebook-import-clear-btn" title="Wipes ALL imported rulebook data from this scene - does not touch anything already auto-filled on a character's own Sheet.">Clear All</button>
-        </div>
-        <div class="fumble-die-note" id="rulebook-import-status" style="margin-top:6px;"></div>
+        <legend>Rulebook Data</legend>
+        <button type="button" class="btn-next" id="rulebook-import-open-btn" style="width:100%; padding:8px 0;">📖 Import Rulebook Data<span class="open-spells-count" id="rulebook-import-open-count"></span></button>
       </fieldset>
 
       <fieldset id="sitmod-row">
@@ -2845,6 +2831,35 @@
           <div class="attack-list" id="pc-spells-list"></div>
           <button type="button" class="add-attack-btn" id="add-spell-pc">+ Add Spell</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="rulebook-import-modal-backdrop" class="tables-modal-backdrop" style="display:none">
+    <div class="tables-modal">
+      <div class="tables-modal-header">
+        <div>
+          <div class="tables-modal-title">Import Rulebook Data</div>
+          <div class="tables-modal-subtitle">Paste JSON you've personally transcribed from your own copy of the rulebook - spell Manifestation/Effect Table/Corruption/Misfire text keyed by exact spell name, and/or Patron/Deity write-ups keyed by exact patron/deity name (matching whatever's typed in that character's own Patron/Deity field). This is stored in THIS SCENE's own data (shared with everyone at this table, same as the roll log), never saved to this app's own source code or public repo.</div>
+        </div>
+        <button type="button" class="tables-modal-close" id="rulebook-import-modal-close" title="Close">×</button>
+      </div>
+      <div class="tables-modal-body">
+        <div class="fumble-die-note" style="margin-bottom:6px;">
+          Format: <code>{"spells":{"Magic missile":{"manifestation":"...","effectRows":[{"range":"12-13","text":"..."}],"corruption":"...","misfire":"..."}},"patrons":{"a lord of a hidden fey court":"..."},"deities":{"a Lawful war-god":"..."}}</code> - any subset of "spells"/"patrons"/"deities" is fine. Every field above only auto-fills when its own name is picked/typed and it's currently blank - it never overwrites something already typed in.
+        </div>
+        <textarea id="rulebook-import-textarea" rows="6" placeholder='{"spells": {"Magic missile": {"manifestation": "...", "effectRows": [{"range": "12-13", "text": "..."}], "corruption": "...", "misfire": "..."}}, "patrons": {"a lord of a hidden fey court": "..."}, "deities": {"a Lawful war-god": "..."}}' style="width:100%; box-sizing:border-box; font-family:monospace; font-size:11px;"></textarea>
+        <div class="row" style="margin-top:6px;">
+          <div>
+            <label>Or load a .json file</label>
+            <input type="file" id="rulebook-import-file" accept="application/json,.json" />
+          </div>
+        </div>
+        <div class="roll-modal-inputs" style="margin-top:6px;">
+          <button type="button" class="btn-next" id="rulebook-import-btn">Import</button>
+          <button type="button" class="hp-btn" id="rulebook-import-clear-btn" title="Wipes ALL imported rulebook data from this scene - does not touch anything already auto-filled on a character's own Sheet.">Clear All</button>
+        </div>
+        <div class="fumble-die-note" id="rulebook-import-status" style="margin-top:6px;"></div>
       </div>
     </div>
   </div>
@@ -20112,8 +20127,6 @@ async function appendChatLog(entry) {
 // batch adds to the first instead of clobbering it - re-importing the SAME
 // key overwrites just that entry.
 function refreshRulebookImportStatus() {
-  const el = document.getElementById("rulebook-import-status");
-  if (!el) return;
   const spellCount = lastRulebookData && lastRulebookData.spells ? Object.keys(lastRulebookData.spells).length : 0;
   const patronCount = lastRulebookData && lastRulebookData.patrons ? Object.keys(lastRulebookData.patrons).length : 0;
   const deityCount = lastRulebookData && lastRulebookData.deities ? Object.keys(lastRulebookData.deities).length : 0;
@@ -20121,8 +20134,27 @@ function refreshRulebookImportStatus() {
   if (spellCount > 0) parts.push(`${spellCount} spell${spellCount === 1 ? "" : "s"}`);
   if (patronCount > 0) parts.push(`${patronCount} patron${patronCount === 1 ? "" : "s"}`);
   if (deityCount > 0) parts.push(`${deityCount} deit${deityCount === 1 ? "y" : "ies"}`);
-  el.textContent = parts.length ? `${parts.join(", ")} currently loaded for this scene.` : "Nothing imported yet.";
+  const el = document.getElementById("rulebook-import-status");
+  if (el) el.textContent = parts.length ? `${parts.join(", ")} currently loaded for this scene.` : "Nothing imported yet.";
+  // Small count badge on the collapsed trigger button (same
+  // .open-spells-count treatment the Spells modal's own button uses) - so a
+  // GM can see at a glance whether anything's loaded without opening the
+  // popup at all.
+  const countEl = document.getElementById("rulebook-import-open-count");
+  if (countEl) countEl.textContent = parts.length ? ` (${parts.join(", ")})` : "";
 }
+function openRulebookImportModal() {
+  refreshRulebookImportStatus();
+  document.getElementById("rulebook-import-modal-backdrop").style.display = "flex";
+}
+function closeRulebookImportModal() {
+  document.getElementById("rulebook-import-modal-backdrop").style.display = "none";
+}
+document.getElementById("rulebook-import-open-btn").addEventListener("click", openRulebookImportModal);
+document.getElementById("rulebook-import-modal-close").addEventListener("click", closeRulebookImportModal);
+document.getElementById("rulebook-import-modal-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "rulebook-import-modal-backdrop") closeRulebookImportModal();
+});
 document.getElementById("rulebook-import-file").addEventListener("change", (e) => {
   const file = e.target.files && e.target.files[0];
   if (!file) return;
