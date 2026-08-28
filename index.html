@@ -1635,7 +1635,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 09:59</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 10:06</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2162,6 +2162,7 @@
           <button class="hp-btn" id="reset-tracker" title="Reset round & turns">⟲</button>
         </div>
       </div>
+      <button type="button" class="btn-next" id="sitmod-open-btn" style="width:100%; padding:8px 0; margin-bottom:10px;">⚔️ Situational Modifiers (Table 4-1)<span class="open-spells-count" id="sitmod-open-count"></span></button>
       <div class="status" id="tracker-status"></div>
 
       <div class="tracker-row tracker-row-header">
@@ -2256,35 +2257,6 @@
       <fieldset class="gm-only-row" id="rulebook-import-row" style="display:none;">
         <legend>Rulebook Data</legend>
         <button type="button" class="btn-next" id="rulebook-import-open-btn" style="width:100%; padding:8px 0;">📖 Import Rulebook Data<span class="open-spells-count" id="rulebook-import-open-count"></span></button>
-      </fieldset>
-
-      <fieldset id="sitmod-row">
-        <legend>Situational Modifiers (Table 4-1)</legend>
-        <div class="row">
-          <div>
-            <label>Missile fire range</label>
-            <select id="sitmod-range">
-              <option value="">Short (no modifier)</option>
-              <option value="medium">Medium (-2 missile only)</option>
-              <option value="long">Long (-1d missile only)</option>
-            </select>
-          </div>
-        </div>
-        <div class="sitmod-checks">
-          <label><input type="checkbox" id="sitmod-invisible" /> Attacker invisible (+2 melee)</label>
-          <label><input type="checkbox" id="sitmod-higher-ground" /> Attacker on higher ground (+1 melee)</label>
-          <label><input type="checkbox" id="sitmod-squeezing" /> Attacker squeezing through a tight space (-1d)</label>
-          <label><input type="checkbox" id="sitmod-entangled-attacker" /> Attacker entangled (-1d)</label>
-          <label><input type="checkbox" id="sitmod-missile-into-melee" /> Firing a missile into melee (-1 missile, 50% friendly fire on a miss)</label>
-          <label><input type="checkbox" id="sitmod-cover" /> Defender behind cover (-2)</label>
-          <label><input type="checkbox" id="sitmod-blinded" /> Defender blinded (+2)</label>
-          <label><input type="checkbox" id="sitmod-entangled-defender" /> Defender entangled (+1d)</label>
-          <label><input type="checkbox" id="sitmod-helpless" /> Defender helpless (paralyzed/sleeping/bound) (+1d)</label>
-          <label><input type="checkbox" id="sitmod-prone" /> Defender kneeling, sitting, or prone (+2 melee, -2 missile)</label>
-        </div>
-        <div class="fumble-die-note" style="margin-top:4px;">
-          Check whatever applies, then roll the attack - the next attack roll (Sheet or Tracker, melee or missile) reads and consumes these, folding in the right modifier for its own weapon type. Clears itself after one use, so a stale condition never silently carries into a later, unrelated attack.
-        </div>
       </fieldset>
 
       <fieldset id="ritual-magic-row">
@@ -2860,6 +2832,42 @@
           <button type="button" class="hp-btn" id="rulebook-import-clear-btn" title="Wipes ALL imported rulebook data from this scene - does not touch anything already auto-filled on a character's own Sheet.">Clear All</button>
         </div>
         <div class="fumble-die-note" id="rulebook-import-status" style="margin-top:6px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="sitmod-modal-backdrop" class="tables-modal-backdrop" style="display:none">
+    <div class="tables-modal">
+      <div class="tables-modal-header">
+        <div>
+          <div class="tables-modal-title">Situational Modifiers (Table 4-1)</div>
+          <div class="tables-modal-subtitle">Check whatever applies, then roll the attack - the next attack roll (Sheet or Tracker, melee or missile) reads and consumes these, folding in the right modifier for its own weapon type. Clears itself after one use, so a stale condition never silently carries into a later, unrelated attack.</div>
+        </div>
+        <button type="button" class="tables-modal-close" id="sitmod-modal-close" title="Close">×</button>
+      </div>
+      <div class="tables-modal-body">
+        <div class="row">
+          <div>
+            <label>Missile fire range</label>
+            <select id="sitmod-range">
+              <option value="">Short (no modifier)</option>
+              <option value="medium">Medium (-2 missile only)</option>
+              <option value="long">Long (-1d missile only)</option>
+            </select>
+          </div>
+        </div>
+        <div class="sitmod-checks">
+          <label><input type="checkbox" id="sitmod-invisible" /> Attacker invisible (+2 melee)</label>
+          <label><input type="checkbox" id="sitmod-higher-ground" /> Attacker on higher ground (+1 melee)</label>
+          <label><input type="checkbox" id="sitmod-squeezing" /> Attacker squeezing through a tight space (-1d)</label>
+          <label><input type="checkbox" id="sitmod-entangled-attacker" /> Attacker entangled (-1d)</label>
+          <label><input type="checkbox" id="sitmod-missile-into-melee" /> Firing a missile into melee (-1 missile, 50% friendly fire on a miss)</label>
+          <label><input type="checkbox" id="sitmod-cover" /> Defender behind cover (-2)</label>
+          <label><input type="checkbox" id="sitmod-blinded" /> Defender blinded (+2)</label>
+          <label><input type="checkbox" id="sitmod-entangled-defender" /> Defender entangled (+1d)</label>
+          <label><input type="checkbox" id="sitmod-helpless" /> Defender helpless (paralyzed/sleeping/bound) (+1d)</label>
+          <label><input type="checkbox" id="sitmod-prone" /> Defender kneeling, sitting, or prone (+2 melee, -2 missile)</label>
+        </div>
       </div>
     </div>
   </div>
@@ -17840,21 +17848,22 @@ function consumeForcedD20() {
 }
 
 // Table 4-1: Attack Roll Modifiers (DCC RPG core rulebook) - a one-shot
-// pre-roll declaration (Dice tab > "Situational Modifiers"), same "set
-// now, consumed by the very next roll, then clears itself" contract as
-// consumeForcedD20 above - but available to EVERY player, not GM-only,
-// since these are the attacker's own conditions for their own next
-// attack, not a testing aid. `isMissile` picks which half of the table's
-// two columns applies (melee vs missile fire) - a monster attack (no
-// weapon-type tracking on that row) is always treated as melee, same
+// pre-roll declaration (Tracker tab > "⚔️ Situational Modifiers" popup),
+// same "set now, consumed by the very next roll, then clears itself"
+// contract as consumeForcedD20 above - but available to EVERY player, not
+// GM-only, since these are the attacker's own conditions for their own
+// next attack, not a testing aid. `isMissile` picks which half of the
+// table's two columns applies (melee vs missile fire) - a monster attack
+// (no weapon-type tracking on that row) is always treated as melee, same
 // fallback isWeaponUntrained's own missile check already uses. Returns
 // `{ flatMod, diceSteps, detail, missileIntoMelee }` - diceSteps feeds
 // stepDiceChain (positive = up the chain, negative = down), detail is a
 // player-readable summary of whatever applied, and missileIntoMelee is
 // surfaced separately since firing into melee also risks 50% friendly
 // fire on a miss (see rollAttackFor's own comment on that).
+const SITMOD_FIELD_IDS = ["sitmod-range", "sitmod-invisible", "sitmod-higher-ground", "sitmod-squeezing", "sitmod-entangled-attacker", "sitmod-missile-into-melee", "sitmod-cover", "sitmod-blinded", "sitmod-entangled-defender", "sitmod-helpless", "sitmod-prone"];
 function consumeSituationalModifiers(isMissile) {
-  const ids = ["sitmod-range", "sitmod-invisible", "sitmod-higher-ground", "sitmod-squeezing", "sitmod-entangled-attacker", "sitmod-missile-into-melee", "sitmod-cover", "sitmod-blinded", "sitmod-entangled-defender", "sitmod-helpless", "sitmod-prone"];
+  const ids = SITMOD_FIELD_IDS;
   const els = {};
   ids.forEach(id => { els[id] = document.getElementById(id); });
   const state = {
@@ -17878,6 +17887,7 @@ function consumeSituationalModifiers(isMissile) {
     if (!el) return;
     if (el.type === "checkbox") el.checked = false; else el.value = "";
   });
+  refreshSitmodStatus();
   let flatMod = 0;
   let diceSteps = 0;
   const parts = [];
@@ -17900,6 +17910,40 @@ function consumeSituationalModifiers(isMissile) {
   }
   return { flatMod, diceSteps, detail: parts.join(", "), missileIntoMelee: state.missileIntoMelee };
 }
+
+// Small count badge on the Tracker tab's own collapsed trigger button
+// (same .open-spells-count treatment the Spells/Rulebook Import buttons
+// use) - so a player can see at a glance whether anything's currently
+// staged without opening the popup. Wired below to every field's own
+// change event, and also called from consumeSituationalModifiers itself
+// so the badge clears back to blank the moment a roll consumes them.
+function refreshSitmodStatus() {
+  const countEl = document.getElementById("sitmod-open-count");
+  if (!countEl) return;
+  const rangeEl = document.getElementById("sitmod-range");
+  let count = rangeEl && rangeEl.value ? 1 : 0;
+  SITMOD_FIELD_IDS.forEach(id => {
+    if (id === "sitmod-range") return;
+    const el = document.getElementById(id);
+    if (el && el.checked) count++;
+  });
+  countEl.textContent = count > 0 ? ` (${count} active)` : "";
+}
+function openSitmodModal() {
+  document.getElementById("sitmod-modal-backdrop").style.display = "flex";
+}
+function closeSitmodModal() {
+  document.getElementById("sitmod-modal-backdrop").style.display = "none";
+}
+document.getElementById("sitmod-open-btn").addEventListener("click", openSitmodModal);
+document.getElementById("sitmod-modal-close").addEventListener("click", closeSitmodModal);
+document.getElementById("sitmod-modal-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "sitmod-modal-backdrop") closeSitmodModal();
+});
+SITMOD_FIELD_IDS.forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("change", refreshSitmodStatus);
+});
 
 // Ritualized Magic (DCC RPG core rulebook, Wizard Grimoire section) - a
 // one-shot pre-roll declaration (Dice tab), same "set now, consumed by
