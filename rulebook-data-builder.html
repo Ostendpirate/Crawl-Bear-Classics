@@ -213,8 +213,20 @@
           patrons: parsed.patrons || {},
           deities: parsed.deities || {},
         };
+        return;
       }
     } catch (e) { /* corrupted storage - start fresh rather than crash */ }
+    // Genuinely first visit (nothing in storage, corrupted or otherwise) -
+    // seed every known spell name with blank fields, same starting point
+    // the standalone empty template gives, so there's a full pick-and-fill
+    // list immediately instead of an empty form. Only ever happens once;
+    // "Clear Everything" deliberately does NOT reseed (it says "clear
+    // everything" and means it) - reload the page afterward to get the
+    // name list back, since storage will be empty again at that point.
+    SPELL_NAMES.forEach(name => {
+      state.spells[name] = { manifestation: "", effectRows: [], corruption: "", misfire: "" };
+    });
+    saveState();
   }
   function saveState() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* storage full/blocked - export still works */ }
