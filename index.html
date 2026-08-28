@@ -1636,7 +1636,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 11:07</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 12:49</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2796,15 +2796,15 @@
       <div class="tables-modal-header">
         <div>
           <div class="tables-modal-title">Import Rulebook Data</div>
-          <div class="tables-modal-subtitle">Paste JSON you've personally transcribed from your own copy of the rulebook - spell Manifestation/Effect Table/Corruption/Misfire text keyed by exact spell name, and/or Patron/Deity write-ups keyed by exact patron/deity name (matching whatever's typed in that character's own Patron/Deity field). This is stored in THIS SCENE's own data (shared with everyone at this table, same as the roll log), never saved to this app's own source code or public repo.</div>
+          <div class="tables-modal-subtitle">Paste JSON you've personally transcribed from your own copy of the rulebook - spell Description/Manifestation/Effect Table/Corruption/Misfire text keyed by exact spell name, and/or Patron/Deity write-ups keyed by exact patron/deity name (matching whatever's typed in that character's own Patron/Deity field). This is stored in THIS SCENE's own data (shared with everyone at this table, same as the roll log), never saved to this app's own source code or public repo.</div>
         </div>
         <button type="button" class="tables-modal-close" id="rulebook-import-modal-close" title="Close">×</button>
       </div>
       <div class="tables-modal-body">
         <div class="fumble-die-note" style="margin-bottom:6px;">
-          Format: <code>{"spells":{"Magic missile":{"manifestation":"...","effectRows":[{"range":"12-13","text":"..."}],"corruption":"...","misfire":"..."}},"patrons":{"a lord of a hidden fey court":"..."},"deities":{"a Lawful war-god":"..."}}</code> - any subset of "spells"/"patrons"/"deities" is fine. Every field above only auto-fills when its own name is picked/typed and it's currently blank - it never overwrites something already typed in.
+          Format: <code>{"spells":{"Magic missile":{"description":"...","manifestation":"...","effectRows":[{"range":"12-13","text":"..."}],"corruption":"...","misfire":"..."}},"patrons":{"a lord of a hidden fey court":"..."},"deities":{"a Lawful war-god":"..."}}</code> - any subset of "spells"/"patrons"/"deities" is fine. Every field above only auto-fills when its own name is picked/typed and it's currently blank - it never overwrites something already typed in.
         </div>
-        <textarea id="rulebook-import-textarea" rows="6" placeholder='{"spells": {"Magic missile": {"manifestation": "...", "effectRows": [{"range": "12-13", "text": "..."}], "corruption": "...", "misfire": "..."}}, "patrons": {"a lord of a hidden fey court": "..."}, "deities": {"a Lawful war-god": "..."}}' style="width:100%; box-sizing:border-box; font-family:monospace; font-size:11px;"></textarea>
+        <textarea id="rulebook-import-textarea" rows="6" placeholder='{"spells": {"Magic missile": {"description": "...", "manifestation": "...", "effectRows": [{"range": "12-13", "text": "..."}], "corruption": "...", "misfire": "..."}}, "patrons": {"a lord of a hidden fey court": "..."}, "deities": {"a Lawful war-god": "..."}}' style="width:100%; box-sizing:border-box; font-family:monospace; font-size:11px;"></textarea>
         <div class="row" style="margin-top:6px;">
           <div>
             <label>Or load a .json file</label>
@@ -2943,8 +2943,8 @@ const CHAT_LOG_METADATA_KEY = "com.claude.monster-sheet/chat-log";
 const CHAT_LOG_MAX_ENTRIES = 60;
 // Rulebook Data Import (see rulebook-import-row on the Dice tab) - a
 // GM-supplied, personally-transcribed JSON blob of paid-rulebook content
-// (spell Manifestation/Effect Table text, so far), stored in THIS
-// SCENE's own metadata - shared with everyone at this table exactly like
+// (spell Description/Manifestation/Effect Table text, so far), stored in
+// THIS SCENE's own metadata - shared with everyone at this table exactly like
 // the chat log above, never written into this app's own source/repo.
 const RULEBOOK_DATA_METADATA_KEY = "com.claude.monster-sheet/rulebook-data";
 
@@ -11906,7 +11906,7 @@ function divineAidModifierForStats(stats, slotKey) {
 }
 
 function emptySpellItem() {
-  return { id: "g" + Math.random().toString(36).slice(2, 9), name: "", mercurial: null, mercurialNote: "", mercurialBonus: "", mercurialDieSteps: "", manifestation: "", concentration: false, lost: false, level: "", range: "", duration: "", castingTime: "", save: "", effectRows: [], corruption: "", misfire: "" };
+  return { id: "g" + Math.random().toString(36).slice(2, 9), name: "", mercurial: null, mercurialNote: "", mercurialBonus: "", mercurialDieSteps: "", description: "", manifestation: "", concentration: false, lost: false, level: "", range: "", duration: "", castingTime: "", save: "", effectRows: [], corruption: "", misfire: "" };
 }
 
 function emptySpellEffectRow() {
@@ -12074,6 +12074,7 @@ function spellRowHtml(item, index, allItems) {
         </div>
         ${spellStatblockHtml(item)}
         <div class="spell-row-collapsible"${expanded ? "" : ' style="display:none"'}>
+          ${descriptionFieldHtml(item)}
           ${manifestationFieldHtml(item)}
           ${spellEffectRowsHtml(item)}
           ${corruptionFieldHtml(item)}
@@ -12163,6 +12164,7 @@ function spellRowHtml(item, index, allItems) {
       </div>
       ${spellStatblockHtml(item)}
       <div class="spell-row-collapsible"${expanded ? "" : ' style="display:none"'}>
+        ${descriptionFieldHtml(item)}
         ${manifestationFieldHtml(item)}
         ${mercurialRowHtml}
         ${spellEffectRowsHtml(item)}
@@ -12205,6 +12207,16 @@ function lostCheckboxHtml(item) {
   return `<label class="spell-lost-wrap" title="Lost (DCC RPG core rulebook) - a failed Spell Check loses this spell until you rest. This app defaults to flagging any total of 11 or under (see the Cast-a-Spell row's own 🔒 badge) - check this spell's own casting table for exceptions and correct it here if needed.">
     <input type="checkbox" class="spell-lost" ${item.lost ? "checked" : ""} />🔒
   </label>`;
+}
+
+// Description - the spell's own general write-up (what it does overall,
+// before getting into the roll-by-roll Effect Table below) - same
+// "no per-spell tables to model, just a plain persistent note" treatment
+// as Manifestation right below it, and the same reasoning for why it's
+// always rendered rather than gated on anything.
+function descriptionFieldHtml(item) {
+  return `<div class="spell-section-header">Description <span class="spell-section-hint">optional</span></div>
+    <textarea class="spell-description-note" placeholder="This spell's own general write-up, per your own rulebook" rows="2">${escapeHtml(item.description || "")}</textarea>`;
 }
 
 // Manifestation - what casting a spell actually looks/sounds/feels like -
@@ -12285,6 +12297,10 @@ function readSpellItems() {
     const mercurialBonus = mercurialBonusEl ? mercurialBonusEl.value : "";
     const mercurialDieStepsEl = row.querySelector(".mercurial-die-steps");
     const mercurialDieSteps = mercurialDieStepsEl ? mercurialDieStepsEl.value : "";
+    // Description (see descriptionFieldHtml) - same "always there, no
+    // appear-later gap" contract as Manifestation right below it.
+    const descriptionEl = row.querySelector(".spell-description-note");
+    const description = descriptionEl ? descriptionEl.value : "";
     // Manifestation (see manifestationFieldHtml) - a plain persistent
     // note field, rendered for every row regardless of class/name, so no
     // null-guard-driven "hasn't appeared yet" gap like Mercurial's roll
@@ -12329,7 +12345,7 @@ function readSpellItems() {
     const corruption = corruptionEl ? corruptionEl.value : "";
     const misfireEl = row.querySelector(".spell-misfire-note");
     const misfire = misfireEl ? misfireEl.value : "";
-    return { id: row.dataset.id, name, mercurial, mercurialNote, mercurialBonus, mercurialDieSteps, manifestation, concentration, lost, level, range, duration, castingTime, save, effectRows, corruption, misfire };
+    return { id: row.dataset.id, name, mercurial, mercurialNote, mercurialBonus, mercurialDieSteps, description, manifestation, concentration, lost, level, range, duration, castingTime, save, effectRows, corruption, misfire };
   });
 }
 
@@ -12359,19 +12375,25 @@ function attachEffectRowListeners(effectRow) {
 }
 
 // Rulebook Data Import's own auto-fill (see appendChatLog's neighboring
-// comment for the storage side) - only ever fills in a row's Manifestation/
-// Effect Table/Corruption/Misfire when they're CURRENTLY BLANK, so a
-// player's own typed-in notes are never silently overwritten by a later
-// import or a name picked, then changed back. Operates directly on this
-// row's own DOM (not a data-level re-render) so it can reuse effectRowHtml/
-// attachEffectRowListeners exactly as the "+ Add Roll Range" button
-// already does, and auto-expands the row if it was collapsed so the
-// newly-filled content is actually visible.
+// comment for the storage side) - only ever fills in a row's Description/
+// Manifestation/Effect Table/Corruption/Misfire when they're CURRENTLY
+// BLANK, so a player's own typed-in notes are never silently overwritten
+// by a later import or a name picked, then changed back. Operates
+// directly on this row's own DOM (not a data-level re-render) so it can
+// reuse effectRowHtml/attachEffectRowListeners exactly as the "+ Add Roll
+// Range" button already does, and auto-expands the row if it was
+// collapsed so the newly-filled content is actually visible.
 function applyRulebookDataToRow(row, spellName) {
   if (!row || !spellName || !lastRulebookData || !lastRulebookData.spells) return false;
   const entry = lastRulebookData.spells[spellName];
   if (!entry) return false;
   let changed = false;
+  const descriptionEl = row.querySelector(".spell-description-note");
+  if (descriptionEl && !descriptionEl.value.trim() && entry.description) {
+    descriptionEl.value = entry.description;
+    autoResizeTextarea(descriptionEl);
+    changed = true;
+  }
   const manifestationEl = row.querySelector(".manifestation-note");
   if (manifestationEl && !manifestationEl.value.trim() && entry.manifestation) {
     manifestationEl.value = entry.manifestation;
@@ -12441,7 +12463,7 @@ function attachSpellRowListeners() {
         toggleBtn.title = `${nowExpanded ? "Collapse" : "Expand"} this spell's details`;
         if (nowExpanded) {
           expandedSpellRows.add(row.dataset.id);
-          collapsibleEl.querySelectorAll(".manifestation-note, .mercurial-note, .spell-effect-text, .spell-corruption-note, .spell-misfire-note").forEach(autoResizeTextarea);
+          collapsibleEl.querySelectorAll(".manifestation-note, .mercurial-note, .spell-effect-text, .spell-corruption-note, .spell-misfire-note, .spell-description-note").forEach(autoResizeTextarea);
         } else {
           expandedSpellRows.delete(row.dataset.id);
         }
@@ -12461,10 +12483,10 @@ function attachSpellRowListeners() {
         scheduleSave();
       });
     }
-    // Corruption/Misfire (see corruptionFieldHtml/misfireFieldHtml) - same
-    // "always there, auto-resized, harmless when blank" contract as
-    // Manifestation above.
-    [".spell-corruption-note", ".spell-misfire-note"].forEach(sel => {
+    // Description/Corruption/Misfire (see descriptionFieldHtml/
+    // corruptionFieldHtml/misfireFieldHtml) - same "always there,
+    // auto-resized, harmless when blank" contract as Manifestation above.
+    [".spell-description-note", ".spell-corruption-note", ".spell-misfire-note"].forEach(sel => {
       const el = row.querySelector(sel);
       if (!el) return;
       autoResizeTextarea(el);
@@ -12975,7 +12997,7 @@ function openSpellsModal() {
   // regardless of whether this popup happens to be open) ends up stuck
   // at the wrong height. Redo it now that the content is actually laid
   // out and visible.
-  document.querySelectorAll("#spells-modal-backdrop .mercurial-note, #spells-modal-backdrop .manifestation-note, #spells-modal-backdrop .spell-effect-text, #spells-modal-backdrop .spell-corruption-note, #spells-modal-backdrop .spell-misfire-note")
+  document.querySelectorAll("#spells-modal-backdrop .mercurial-note, #spells-modal-backdrop .manifestation-note, #spells-modal-backdrop .spell-effect-text, #spells-modal-backdrop .spell-corruption-note, #spells-modal-backdrop .spell-misfire-note, #spells-modal-backdrop .spell-description-note")
     .forEach(autoResizeTextarea);
 }
 function closeSpellsModal() {
@@ -20339,7 +20361,7 @@ async function appendChatLog(entry) {
 // uses) - never written into this app's own source/repo, since the DATA
 // lives entirely in OBR's own scene storage, not in index.html. Three
 // independent top-level categories - spells (keyed by spell name, feeds
-// applyRulebookDataToRow: manifestation/effectRows/corruption/misfire),
+// applyRulebookDataToRow: description/manifestation/effectRows/corruption/misfire),
 // patrons and deities (each keyed by name, feeds applyRulebookWriteupField)
 // - a GM can import any subset of the three. Each category merges with
 // (rather than replaces) whatever's already there, so importing a second
@@ -20401,7 +20423,7 @@ document.getElementById("rulebook-import-btn").addEventListener("click", async (
   const hasPatrons = parsed && typeof parsed === "object" && parsed.patrons && typeof parsed.patrons === "object";
   const hasDeities = parsed && typeof parsed === "object" && parsed.deities && typeof parsed.deities === "object";
   if (!hasSpells && !hasPatrons && !hasDeities) {
-    el.textContent = `Expected a top-level "spells", "patrons", and/or "deities" object, e.g. {"spells":{"Magic missile":{"manifestation":"...","effectRows":[...],"corruption":"...","misfire":"..."}},"patrons":{"a lord of a hidden fey court":"..."},"deities":{"a Lawful war-god":"..."}}.`;
+    el.textContent = `Expected a top-level "spells", "patrons", and/or "deities" object, e.g. {"spells":{"Magic missile":{"description":"...","manifestation":"...","effectRows":[...],"corruption":"...","misfire":"..."}},"patrons":{"a lord of a hidden fey court":"..."},"deities":{"a Lawful war-god":"..."}}.`;
     return;
   }
   try {

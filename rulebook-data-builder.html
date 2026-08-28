@@ -118,6 +118,9 @@
     <input type="text" id="spell-name" list="spell-names" placeholder="e.g. Magic missile" />
     <datalist id="spell-names"></datalist>
 
+    <label for="spell-description">Description</label>
+    <textarea id="spell-description" placeholder="This spell's own general write-up, per your own book's entry"></textarea>
+
     <label for="spell-manifestation">Manifestation</label>
     <textarea id="spell-manifestation" placeholder="What casting this spell looks/sounds/feels like, per your own book's entry"></textarea>
 
@@ -224,7 +227,7 @@
     // everything" and means it) - reload the page afterward to get the
     // name list back, since storage will be empty again at that point.
     SPELL_NAMES.forEach(name => {
-      state.spells[name] = { manifestation: "", effectRows: [], corruption: "", misfire: "" };
+      state.spells[name] = { description: "", manifestation: "", effectRows: [], corruption: "", misfire: "" };
     });
     saveState();
   }
@@ -250,6 +253,7 @@
     if (hasSpells) {
       Object.entries(parsed.spells).forEach(([name, entry]) => {
         state.spells[name] = {
+          description: (entry && entry.description) || "",
           manifestation: (entry && entry.manifestation) || "",
           effectRows: (entry && Array.isArray(entry.effectRows)) ? entry.effectRows.map(r => ({ range: (r && r.range) || "", text: (r && r.text) || "" })) : [],
           corruption: (entry && entry.corruption) || "",
@@ -337,6 +341,7 @@
 
   // ---- Spell form ----
   const spellNameEl = document.getElementById("spell-name");
+  const spellDescriptionEl = document.getElementById("spell-description");
   const spellManifestationEl = document.getElementById("spell-manifestation");
   const spellCorruptionEl = document.getElementById("spell-corruption");
   const spellMisfireEl = document.getElementById("spell-misfire");
@@ -344,6 +349,7 @@
 
   function clearSpellForm() {
     spellNameEl.value = "";
+    spellDescriptionEl.value = "";
     spellManifestationEl.value = "";
     spellCorruptionEl.value = "";
     spellMisfireEl.value = "";
@@ -362,6 +368,7 @@
       return;
     }
     const entry = {
+      description: spellDescriptionEl.value.trim(),
       manifestation: spellManifestationEl.value.trim(),
       effectRows: readEffectRows(),
       corruption: spellCorruptionEl.value.trim(),
@@ -384,6 +391,7 @@
     if (!entry) return;
     editingSpellName = name;
     spellNameEl.value = name;
+    spellDescriptionEl.value = entry.description || "";
     spellManifestationEl.value = entry.manifestation || "";
     spellCorruptionEl.value = entry.corruption || "";
     spellMisfireEl.value = entry.misfire || "";
@@ -403,7 +411,7 @@
     }
     listEl.innerHTML = names.map(name => {
       const entry = state.spells[name];
-      const filledCount = ["manifestation", "corruption", "misfire"].filter(k => entry[k]).length + (entry.effectRows && entry.effectRows.length ? 1 : 0);
+      const filledCount = ["description", "manifestation", "corruption", "misfire"].filter(k => entry[k]).length + (entry.effectRows && entry.effectRows.length ? 1 : 0);
       return `<li data-name="${escapeHtml(name)}" class="${name === editingSpellName ? "editing" : ""}">
         <span class="entry-name">${escapeHtml(name)}</span>
         <span class="entry-meta">${filledCount} field${filledCount === 1 ? "" : "s"} filled</span>
