@@ -1637,7 +1637,7 @@
       <button class="tab-btn" id="nav-chat">Log</button>
       <button class="tab-btn" id="nav-notes" style="display:none;">Notes</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 14:34</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 14:44</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2311,24 +2311,6 @@
         Attack and initiative rolls from the Tracker will show up here.
       </div>
     </div>
-
-    <div id="view-notes" style="display:none">
-      <h1>GM Notes</h1>
-      <div class="subtitle">Private scratch space, hidden from players in this popover - session prep, secrets, NPC motives, whatever. It's still ordinary scene data underneath (same as the roll log), not encrypted, so treat it as "a player won't casually stumble onto this," not "a player can never access this."</div>
-      <div class="row" style="margin-top:8px;">
-        <div>
-          <label>Import from PDF or Markdown/Text</label>
-          <input type="file" id="gm-notes-pdf-file" accept="application/pdf,.pdf,.md,.markdown,text/markdown,.txt,text/plain" />
-        </div>
-      </div>
-      <div class="fumble-die-note" id="gm-notes-import-status" style="margin-top:4px;"></div>
-      <textarea id="gm-notes-textarea" rows="18" placeholder="Session prep, secrets, NPC motives..." style="width:100%; box-sizing:border-box; margin-top:8px;"></textarea>
-      <div class="roll-modal-inputs" style="margin-top:6px;">
-        <button type="button" class="btn-next" id="gm-notes-save-btn">💾 Save</button>
-        <button type="button" class="hp-btn" id="gm-notes-clear-btn" title="Wipes these notes from this scene.">Clear</button>
-      </div>
-      <div class="fumble-die-note" id="gm-notes-save-status" style="margin-top:6px;"></div>
-    </div>
   </div>
 
   <div id="tables-modal-backdrop" class="tables-modal-backdrop" style="display:none">
@@ -2967,12 +2949,17 @@ const CHAT_LOG_MAX_ENTRIES = 60;
 // this table exactly like the chat log above, never written into this
 // app's own source/repo.
 const RULEBOOK_DATA_METADATA_KEY = "com.claude.monster-sheet/rulebook-data";
-// GM Notes (Notes tab) - free text, GM-only in the UI (see
-// refreshNotesTabVisibility), stored in THIS SCENE's own metadata like the
-// two keys above. There's no actual server-side privacy in OBR's extension
-// model - this only hides the tab/button from non-GM clients, it doesn't
-// stop a technically determined player from reading scene metadata.
-const GM_NOTES_METADATA_KEY = "com.claude.monster-sheet/gm-notes";
+// GM Notes (Notes button) - opens as a real OBR.modal (gm-notes-modal.html)
+// rather than a tab in this narrow popover, so it gets a fixed, larger
+// canvas. That page owns the free-text notes entirely (its own scene
+// metadata read/write, PDF/markdown import) - this file only launches it.
+// The button that launches it is GM-only in the UI (see
+// refreshNotesTabVisibility), but there's no actual server-side privacy in
+// OBR's extension model - this only hides the button from non-GM clients,
+// it doesn't stop a technically determined player from reading scene
+// metadata directly.
+const GM_NOTES_MODAL_ID = "com.claude.monster-sheet/gm-notes-modal";
+const GM_NOTES_MODAL_URL = "https://ostendpirate.github.io/Crawl-Bear-Classics/gm-notes-modal.html";
 
 const EMPTY_STATE_DEFAULT_HTML = `Select a token on the map to view or edit its DCC character sheet.<br/><br/>Changes save automatically to the token so anyone in the room sees the same sheet.`;
 const EMPTY_STATE_NOT_OWNED_HTML = `This token isn't assigned to you.<br/><br/>Ask your GM to assign it to you, or pick one of your own tokens from the list above.`;
@@ -16006,29 +15993,28 @@ const viewSheetEl = document.getElementById("view-sheet");
 const viewTrackerEl = document.getElementById("view-tracker");
 const viewDiceEl = document.getElementById("view-dice");
 const viewChatEl = document.getElementById("view-chat");
-const viewNotesEl = document.getElementById("view-notes");
 
 function setView(view) {
   document.getElementById("nav-sheet").classList.toggle("active", view === "sheet");
   document.getElementById("nav-tracker").classList.toggle("active", view === "tracker");
   document.getElementById("nav-dice").classList.toggle("active", view === "dice");
   document.getElementById("nav-chat").classList.toggle("active", view === "chat");
-  document.getElementById("nav-notes").classList.toggle("active", view === "notes");
   viewSheetEl.style.display = view === "sheet" ? "block" : "none";
   viewTrackerEl.style.display = view === "tracker" ? "block" : "none";
   viewDiceEl.style.display = view === "dice" ? "block" : "none";
   viewChatEl.style.display = view === "chat" ? "block" : "none";
-  viewNotesEl.style.display = view === "notes" ? "block" : "none";
   if (view === "sheet") refreshTokenRoster();
   if (view === "tracker") refreshTracker();
   if (view === "chat") renderChatLog();
-  if (view === "notes") refreshGmNotesTextarea();
 }
 document.getElementById("nav-sheet").addEventListener("click", () => setView("sheet"));
 document.getElementById("nav-tracker").addEventListener("click", () => setView("tracker"));
 document.getElementById("nav-dice").addEventListener("click", () => setView("dice"));
 document.getElementById("nav-chat").addEventListener("click", () => setView("chat"));
-document.getElementById("nav-notes").addEventListener("click", () => setView("notes"));
+// Notes isn't a tab/view like the others - it opens as a real OBR.modal
+// (see openGmNotesModal) instead of switching the popover's own narrow
+// panel, so it gets a fixed, much larger canvas to write/read/import in.
+document.getElementById("nav-notes").addEventListener("click", () => openGmNotesModal());
 
 // ---- Combat Tracker & Chat Log ----
 let sceneState = { round: 1, activeId: null };
@@ -16037,7 +16023,6 @@ let lastChatLog = [];
 // { spells: { "Spell Name": { manifestation, effectRows } } } once
 // something's been imported - see rulebook-import-row/applyRulebookDataToRow.
 let lastRulebookData = null;
-let lastGmNotes = "";
 let currentPlayerRole = "PLAYER";
 let currentPlayerId = "";
 let lastRosterItems = [];
@@ -16902,15 +16887,23 @@ function refreshClearLogVisibility() {
   if (row) row.style.display = currentPlayerRole === "GM" ? "flex" : "none";
 }
 
-// The Notes tab button itself is GM-only - unlike the other GM-only
-// controls above (which sit inside an always-visible tab), there's no
-// reason for a non-GM to even see this tab exists, so it's hidden rather
-// than shown-but-empty. If a player is looking over the GM's shoulder when
-// the role changes mid-session, switch them off the tab too.
+// The Notes button itself is GM-only - there's no reason for a non-GM to
+// even see it exists, so it's hidden rather than shown-but-disabled. If
+// the role flips away from GM while the modal happens to be open (e.g. the
+// GM hands off control mid-session), close it too.
 function refreshNotesTabVisibility() {
   const btn = document.getElementById("nav-notes");
   if (btn) btn.style.display = currentPlayerRole === "GM" ? "" : "none";
-  if (currentPlayerRole !== "GM" && viewNotesEl.style.display !== "none") setView("sheet");
+  if (currentPlayerRole !== "GM") OBR.modal.close(GM_NOTES_MODAL_ID).catch(() => {});
+}
+
+function openGmNotesModal() {
+  OBR.modal.open({
+    id: GM_NOTES_MODAL_ID,
+    url: GM_NOTES_MODAL_URL,
+    width: 900,
+    height: 680,
+  }).catch(err => console.error("DCC sheet: failed to open GM notes modal", err));
 }
 
 // Builds the <option> list for the Owner select. Always includes the
@@ -20580,116 +20573,6 @@ document.getElementById("rulebook-import-clear-btn").addEventListener("click", a
   }
 });
 
-// Pulls the in-memory value into the textarea - called on view switch and
-// on an incoming scene metadata change. Skipped while the textarea itself
-// has focus so a same-client save echoing back (or another GM's edit)
-// never clobbers text this client is mid-typing.
-function refreshGmNotesTextarea() {
-  const el = document.getElementById("gm-notes-textarea");
-  if (el && document.activeElement !== el) el.value = lastGmNotes;
-}
-
-// pdf.js is only ever needed by the GM, and only once they actually pick a
-// file, so it's loaded lazily from the same esm.sh CDN this file already
-// pulls the OBR SDK from - no bundler/build step here to vendor it into.
-let pdfjsLibPromise = null;
-function loadPdfJs() {
-  if (!pdfjsLibPromise) {
-    pdfjsLibPromise = import("https://esm.sh/pdfjs-dist@4.6.82/build/pdf.mjs").then((lib) => {
-      lib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
-      return lib;
-    });
-  }
-  return pdfjsLibPromise;
-}
-
-function appendToGmNotes(file, text) {
-  const textarea = document.getElementById("gm-notes-textarea");
-  const heading = `--- Imported from ${file.name} ---\n`;
-  textarea.value = (textarea.value ? `${textarea.value}\n\n` : "") + heading + text;
-}
-
-document.getElementById("gm-notes-pdf-file").addEventListener("change", async (e) => {
-  const file = e.target.files && e.target.files[0];
-  e.target.value = "";
-  if (!file) return;
-  const statusEl = document.getElementById("gm-notes-import-status");
-  statusEl.style.color = "";
-
-  // Markdown/plain text is already exactly what the notes field holds, so
-  // it skips pdf.js entirely and just reads as text - same FileReader
-  // approach the Rulebook Data importer uses for its own .json file input.
-  if (/\.(md|markdown|txt)$/i.test(file.name)) {
-    statusEl.textContent = "Reading file...";
-    const reader = new FileReader();
-    reader.onload = () => {
-      appendToGmNotes(file, String(reader.result || ""));
-      statusEl.textContent = `Imported ${file.name} - review below, then Save.`;
-      statusEl.style.color = "var(--good)";
-    };
-    reader.onerror = () => {
-      console.error("DCC sheet: GM notes text import failed", reader.error);
-      statusEl.textContent = "Couldn't read that file.";
-      statusEl.style.color = "#c97b7b";
-    };
-    reader.readAsText(file);
-    return;
-  }
-
-  statusEl.textContent = "Reading PDF...";
-  try {
-    const pdfjsLib = await loadPdfJs();
-    const buf = await file.arrayBuffer();
-    const doc = await pdfjsLib.getDocument({ data: buf }).promise;
-    const pageTexts = [];
-    for (let i = 1; i <= doc.numPages; i++) {
-      statusEl.textContent = `Reading PDF... page ${i}/${doc.numPages}`;
-      const page = await doc.getPage(i);
-      const content = await page.getTextContent();
-      pageTexts.push(content.items.map(item => item.str).join(" ").trim());
-    }
-    appendToGmNotes(file, pageTexts.join("\n\n"));
-    statusEl.textContent = `Imported ${doc.numPages} page${doc.numPages === 1 ? "" : "s"} from ${file.name} - review below, then Save. (Scanned/image-only pages won't have extractable text.)`;
-    statusEl.style.color = "var(--good)";
-  } catch (err) {
-    console.error("DCC sheet: GM notes PDF import failed", err);
-    statusEl.textContent = "Couldn't read that PDF - it may be scanned/image-only, password-protected, or corrupted.";
-    statusEl.style.color = "#c97b7b";
-  }
-});
-
-document.getElementById("gm-notes-save-btn").addEventListener("click", async () => {
-  const statusEl = document.getElementById("gm-notes-save-status");
-  const value = document.getElementById("gm-notes-textarea").value;
-  try {
-    lastGmNotes = value;
-    await OBR.scene.setMetadata({ [GM_NOTES_METADATA_KEY]: value });
-    statusEl.textContent = "Saved.";
-    statusEl.style.color = "var(--good)";
-    clearTimeout(document.getElementById("gm-notes-save-btn")._statusTimeout);
-    document.getElementById("gm-notes-save-btn")._statusTimeout = setTimeout(() => { statusEl.textContent = ""; }, 3000);
-  } catch (err) {
-    console.error("DCC sheet: failed to save GM notes", err);
-    statusEl.textContent = `Save failed: ${err.message}`;
-    statusEl.style.color = "#c97b7b";
-  }
-});
-
-document.getElementById("gm-notes-clear-btn").addEventListener("click", async () => {
-  const statusEl = document.getElementById("gm-notes-save-status");
-  try {
-    lastGmNotes = "";
-    document.getElementById("gm-notes-textarea").value = "";
-    await OBR.scene.setMetadata({ [GM_NOTES_METADATA_KEY]: "" });
-    statusEl.textContent = "Cleared.";
-    statusEl.style.color = "var(--good)";
-  } catch (err) {
-    console.error("DCC sheet: failed to clear GM notes", err);
-    statusEl.textContent = `Clear failed: ${err.message}`;
-    statusEl.style.color = "#c97b7b";
-  }
-});
-
 // luckTargets (attached by rollAttackFor/rollTwoWeaponAttack/
 // rollSpellAttackRow/rollSpellAttackForTracker/rollPcSkill/
 // rollInitiativeFor/rollSaveFromField/rollPcAbilityCheck - see each one's
@@ -21476,10 +21359,6 @@ OBR.onReady(async () => {
       lastRulebookData = metadata[RULEBOOK_DATA_METADATA_KEY];
       refreshRulebookImportStatus();
     }
-    if (typeof metadata[GM_NOTES_METADATA_KEY] === "string") {
-      lastGmNotes = metadata[GM_NOTES_METADATA_KEY];
-      refreshGmNotesTextarea();
-    }
   });
 
   OBR.scene.items.onChange(async (items) => {
@@ -21596,13 +21475,11 @@ OBR.onReady(async () => {
       sceneState = sceneMeta[SCENE_STATE_KEY] || { round: 1, activeId: null };
       lastChatLog = Array.isArray(sceneMeta[CHAT_LOG_METADATA_KEY]) ? sceneMeta[CHAT_LOG_METADATA_KEY] : [];
       lastRulebookData = sceneMeta[RULEBOOK_DATA_METADATA_KEY] || null;
-      lastGmNotes = typeof sceneMeta[GM_NOTES_METADATA_KEY] === "string" ? sceneMeta[GM_NOTES_METADATA_KEY] : "";
     } catch (err) {
       console.error("DCC sheet: scene change scene.getMetadata failed", err);
       sceneState = { round: 1, activeId: null };
     }
     if (viewChatEl.style.display !== "none") renderChatLog();
-    if (viewNotesEl.style.display !== "none") refreshGmNotesTextarea();
 
     try {
       await refreshTokenRoster();
@@ -21699,7 +21576,6 @@ OBR.onReady(async () => {
     sceneState = sceneMeta[SCENE_STATE_KEY] || { round: 1, activeId: null };
     lastChatLog = Array.isArray(sceneMeta[CHAT_LOG_METADATA_KEY]) ? sceneMeta[CHAT_LOG_METADATA_KEY] : [];
     lastRulebookData = sceneMeta[RULEBOOK_DATA_METADATA_KEY] || null;
-    lastGmNotes = typeof sceneMeta[GM_NOTES_METADATA_KEY] === "string" ? sceneMeta[GM_NOTES_METADATA_KEY] : "";
   } catch (err) {
     console.error("DCC sheet: initial scene.getMetadata failed", err);
     sceneState = { round: 1, activeId: null };

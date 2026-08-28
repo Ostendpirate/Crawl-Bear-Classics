@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>GM Notes</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #1e1b18;
+    --panel: #2a2521;
+    --border: #45392e;
+    --text: #ecdfc8;
+    --muted: #a89684;
+    --accent: #c97b3d;
+    --good: #5f8f5b;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+  }
+  #app { display: flex; flex-direction: column; height: 100%; padding: 14px 16px 16px; }
+  h1 { font-size: 16px; margin: 0 0 2px; letter-spacing: 0.3px; }
+  .subtitle { color: var(--muted); font-size: 11px; margin-bottom: 10px; }
+  .row { display: flex; align-items: flex-end; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+  label {
+    display: block;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--muted);
+    margin-bottom: 3px;
+  }
+  textarea {
+    flex: 1;
+    width: 100%;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 13px;
+    font-family: inherit;
+    line-height: 1.5;
+    resize: none;
+  }
+  textarea:focus { outline: none; border-color: var(--accent); }
+  .fumble-die-note { font-size: 10px; color: var(--muted); }
+  .btn-next {
+    background: var(--accent);
+    color: #1e1b18;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn-next:hover { opacity: 0.9; }
+  .hp-btn {
+    background: var(--border);
+    border: none;
+    color: var(--text);
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-size: 11px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .hp-btn:hover { background: #574739; }
+  .footer-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+</style>
+</head>
+<body>
+  <div id="app">
+    <h1>GM Notes</h1>
+    <div class="subtitle">Private scratch space, hidden from players - session prep, secrets, NPC motives, whatever. It's still ordinary scene data underneath (same as the roll log), not encrypted, so treat it as "a player won't casually stumble onto this," not "a player can never access this."</div>
+    <div class="row">
+      <div style="flex:0 0 auto;">
+        <label>Import from PDF or Markdown/Text</label>
+        <input type="file" id="gm-notes-pdf-file" accept="application/pdf,.pdf,.md,.markdown,text/markdown,.txt,text/plain" />
+      </div>
+      <div class="fumble-die-note" id="gm-notes-import-status" style="flex:1 1 auto;"></div>
+    </div>
+    <textarea id="gm-notes-textarea" placeholder="Session prep, secrets, NPC motives..."></textarea>
+    <div class="footer-row">
+      <button type="button" class="btn-next" id="gm-notes-save-btn">💾 Save</button>
+      <button type="button" class="hp-btn" id="gm-notes-clear-btn" title="Wipes these notes from this scene.">Clear</button>
+      <div class="fumble-die-note" id="gm-notes-save-status"></div>
+    </div>
+  </div>
+
+<script type="module">
+import OBR from "https://esm.sh/@owlbear-rodeo/sdk@2";
+
+// Same key index.html used to write when this lived inline in the Notes
+// tab - keeping it identical is what lets this modal read/write the exact
+// same scene data.
+const GM_NOTES_METADATA_KEY = "com.claude.monster-sheet/gm-notes";
+
+let lastGmNotes = "";
+
+function refreshGmNotesTextarea() {
+  const el = document.getElementById("gm-notes-textarea");
+  // Skipped while focused so an incoming metadata echo (this same save,
+  // or another GM client's edit) never clobbers text being typed here.
+  if (el && document.activeElement !== el) el.value = lastGmNotes;
+}
+
+function appendToGmNotes(file, text) {
+  const textarea = document.getElementById("gm-notes-textarea");
+  const heading = `--- Imported from ${file.name} ---\n`;
+  textarea.value = (textarea.value ? `${textarea.value}\n\n` : "") + heading + text;
+}
+
+// pdf.js is only needed once a GM actually picks a PDF, so it's loaded
+// lazily from the same esm.sh CDN this page already pulls the OBR SDK
+// from - no bundler/build step here to vendor it into.
+let pdfjsLibPromise = null;
+function loadPdfJs() {
+  if (!pdfjsLibPromise) {
+    pdfjsLibPromise = import("https://esm.sh/pdfjs-dist@4.6.82/build/pdf.mjs").then((lib) => {
+      lib.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.6.82/build/pdf.worker.mjs";
+      return lib;
+    });
+  }
+  return pdfjsLibPromise;
+}
+
+document.getElementById("gm-notes-pdf-file").addEventListener("change", async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  const statusEl = document.getElementById("gm-notes-import-status");
+  statusEl.style.color = "";
+
+  // Markdown/plain text is already exactly what the notes field holds, so
+  // it skips pdf.js entirely and just reads as text.
+  if (/\.(md|markdown|txt)$/i.test(file.name)) {
+    statusEl.textContent = "Reading file...";
+    const reader = new FileReader();
+    reader.onload = () => {
+      appendToGmNotes(file, String(reader.result || ""));
+      statusEl.textContent = `Imported ${file.name} - review below, then Save.`;
+      statusEl.style.color = "var(--good)";
+    };
+    reader.onerror = () => {
+      console.error("DCC GM notes: text import failed", reader.error);
+      statusEl.textContent = "Couldn't read that file.";
+      statusEl.style.color = "#c97b7b";
+    };
+    reader.readAsText(file);
+    return;
+  }
+
+  statusEl.textContent = "Reading PDF...";
+  try {
+    const pdfjsLib = await loadPdfJs();
+    const buf = await file.arrayBuffer();
+    const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+    const pageTexts = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      statusEl.textContent = `Reading PDF... page ${i}/${doc.numPages}`;
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      pageTexts.push(content.items.map(item => item.str).join(" ").trim());
+    }
+    appendToGmNotes(file, pageTexts.join("\n\n"));
+    statusEl.textContent = `Imported ${doc.numPages} page${doc.numPages === 1 ? "" : "s"} from ${file.name} - review below, then Save. (Scanned/image-only pages won't have extractable text.)`;
+    statusEl.style.color = "var(--good)";
+  } catch (err) {
+    console.error("DCC GM notes: PDF import failed", err);
+    statusEl.textContent = "Couldn't read that PDF - it may be scanned/image-only, password-protected, or corrupted.";
+    statusEl.style.color = "#c97b7b";
+  }
+});
+
+document.getElementById("gm-notes-save-btn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("gm-notes-save-status");
+  const value = document.getElementById("gm-notes-textarea").value;
+  try {
+    lastGmNotes = value;
+    await OBR.scene.setMetadata({ [GM_NOTES_METADATA_KEY]: value });
+    statusEl.textContent = "Saved.";
+    statusEl.style.color = "var(--good)";
+    clearTimeout(document.getElementById("gm-notes-save-btn")._statusTimeout);
+    document.getElementById("gm-notes-save-btn")._statusTimeout = setTimeout(() => { statusEl.textContent = ""; }, 3000);
+  } catch (err) {
+    console.error("DCC GM notes: save failed", err);
+    statusEl.textContent = `Save failed: ${err.message}`;
+    statusEl.style.color = "#c97b7b";
+  }
+});
+
+document.getElementById("gm-notes-clear-btn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("gm-notes-save-status");
+  try {
+    lastGmNotes = "";
+    document.getElementById("gm-notes-textarea").value = "";
+    await OBR.scene.setMetadata({ [GM_NOTES_METADATA_KEY]: "" });
+    statusEl.textContent = "Cleared.";
+    statusEl.style.color = "var(--good)";
+  } catch (err) {
+    console.error("DCC GM notes: clear failed", err);
+    statusEl.textContent = `Clear failed: ${err.message}`;
+    statusEl.style.color = "#c97b7b";
+  }
+});
+
+OBR.onReady(async () => {
+  OBR.scene.onMetadataChange((metadata) => {
+    if (typeof metadata[GM_NOTES_METADATA_KEY] === "string") {
+      lastGmNotes = metadata[GM_NOTES_METADATA_KEY];
+      refreshGmNotesTextarea();
+    }
+  });
+  try {
+    const sceneMeta = await OBR.scene.getMetadata();
+    lastGmNotes = typeof sceneMeta[GM_NOTES_METADATA_KEY] === "string" ? sceneMeta[GM_NOTES_METADATA_KEY] : "";
+    refreshGmNotesTextarea();
+  } catch (err) {
+    console.error("DCC GM notes: initial scene.getMetadata failed", err);
+  }
+});
+</script>
+</body>
+</html>
