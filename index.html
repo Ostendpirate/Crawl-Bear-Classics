@@ -1637,7 +1637,7 @@
       <button class="tab-btn" id="nav-chat">Log</button>
       <button class="tab-btn" id="nav-notes" style="display:none;">Notes</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 14:29</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 14:34</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2317,8 +2317,8 @@
       <div class="subtitle">Private scratch space, hidden from players in this popover - session prep, secrets, NPC motives, whatever. It's still ordinary scene data underneath (same as the roll log), not encrypted, so treat it as "a player won't casually stumble onto this," not "a player can never access this."</div>
       <div class="row" style="margin-top:8px;">
         <div>
-          <label>Import from PDF</label>
-          <input type="file" id="gm-notes-pdf-file" accept="application/pdf,.pdf" />
+          <label>Import from PDF or Markdown/Text</label>
+          <input type="file" id="gm-notes-pdf-file" accept="application/pdf,.pdf,.md,.markdown,text/markdown,.txt,text/plain" />
         </div>
       </div>
       <div class="fumble-die-note" id="gm-notes-import-status" style="margin-top:4px;"></div>
@@ -20603,12 +20603,39 @@ function loadPdfJs() {
   return pdfjsLibPromise;
 }
 
+function appendToGmNotes(file, text) {
+  const textarea = document.getElementById("gm-notes-textarea");
+  const heading = `--- Imported from ${file.name} ---\n`;
+  textarea.value = (textarea.value ? `${textarea.value}\n\n` : "") + heading + text;
+}
+
 document.getElementById("gm-notes-pdf-file").addEventListener("change", async (e) => {
   const file = e.target.files && e.target.files[0];
   e.target.value = "";
   if (!file) return;
   const statusEl = document.getElementById("gm-notes-import-status");
   statusEl.style.color = "";
+
+  // Markdown/plain text is already exactly what the notes field holds, so
+  // it skips pdf.js entirely and just reads as text - same FileReader
+  // approach the Rulebook Data importer uses for its own .json file input.
+  if (/\.(md|markdown|txt)$/i.test(file.name)) {
+    statusEl.textContent = "Reading file...";
+    const reader = new FileReader();
+    reader.onload = () => {
+      appendToGmNotes(file, String(reader.result || ""));
+      statusEl.textContent = `Imported ${file.name} - review below, then Save.`;
+      statusEl.style.color = "var(--good)";
+    };
+    reader.onerror = () => {
+      console.error("DCC sheet: GM notes text import failed", reader.error);
+      statusEl.textContent = "Couldn't read that file.";
+      statusEl.style.color = "#c97b7b";
+    };
+    reader.readAsText(file);
+    return;
+  }
+
   statusEl.textContent = "Reading PDF...";
   try {
     const pdfjsLib = await loadPdfJs();
@@ -20621,10 +20648,7 @@ document.getElementById("gm-notes-pdf-file").addEventListener("change", async (e
       const content = await page.getTextContent();
       pageTexts.push(content.items.map(item => item.str).join(" ").trim());
     }
-    const extracted = pageTexts.join("\n\n");
-    const textarea = document.getElementById("gm-notes-textarea");
-    const heading = `--- Imported from ${file.name} ---\n`;
-    textarea.value = (textarea.value ? `${textarea.value}\n\n` : "") + heading + extracted;
+    appendToGmNotes(file, pageTexts.join("\n\n"));
     statusEl.textContent = `Imported ${doc.numPages} page${doc.numPages === 1 ? "" : "s"} from ${file.name} - review below, then Save. (Scanned/image-only pages won't have extractable text.)`;
     statusEl.style.color = "var(--good)";
   } catch (err) {
