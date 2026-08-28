@@ -1636,7 +1636,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 10:47</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 11:03</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -5379,6 +5379,33 @@ function isFavoriteWeaponMatchLive(atk) {
   return isFavoriteWeaponMatch({ mode: "pc", data: { class: classEl ? classEl.value : "", "trained-weapon": favEl ? favEl.value : "" } }, atk);
 }
 
+// Table 1-2's "startingWeapon" Birth Augur category (Attack and damage
+// rolls for 0-level starting weapon) - reuses the SAME "trained-weapon"
+// data key/matching logic as isFavoriteWeaponMatch above, since that
+// field's value survives being classed for every class (only HIDDEN, not
+// cleared - see updatePcTrainedWeaponVisibility) EXCEPT Warrior/Dwarf, who
+// repurpose it for their own, unrelated Favorite Weapon pick. For those
+// two classes there's no true 0-level record left on file to check
+// against, so this deliberately returns false rather than matching
+// against whatever they later picked as a favorite.
+function isStartingWeaponMatch(stats, atk) {
+  if (stats.mode !== "pc") return false;
+  const cls = (stats.data.class || "").trim();
+  if (FAVORITE_WEAPON_CLASSES.includes(cls)) return false;
+  const entry = dccWeaponEntry(atk.weapon);
+  if (!entry || entry.key === "unarmed" || entry.key === "custom") return false;
+  const trainedRaw = String(stats.data["trained-weapon"] || "").trim();
+  if (!trainedRaw) return false;
+  return occupationTrainedWeaponKey(trainedRaw) === dccWeaponTrainingKey(entry);
+}
+// Live-form equivalent of isStartingWeaponMatch, same pattern as
+// isFavoriteWeaponMatchLive.
+function isStartingWeaponMatchLive(atk) {
+  const classEl = document.getElementById("pc-class");
+  const trainedEl = document.getElementById("pc-trained-weapon");
+  return isStartingWeaponMatch({ mode: "pc", data: { class: classEl ? classEl.value : "", "trained-weapon": trainedEl ? trainedEl.value : "" } }, atk);
+}
+
 // A Favorite Weapon's Luck bonus (DCC RPG core rulebook, Table 1-10/1-14
 // "Luck"): "chosen at first level and the modifier is fixed at its
 // starting value - neither the weapon nor the modifier changes over the
@@ -5462,7 +5489,7 @@ function composedAttackBonusText(abilityFieldId, atk) {
   // again at roll time" treatment as the Favorite Weapon Luck bonus just
   // above, so rollAttackFor/rollTwoWeaponAttack can keep trusting this
   // field for the to-hit side without double-counting.
-  const augurMod = atk ? luckAugurModLive(luckAugurAttackCategories(dccWeaponEntry(atk.weapon))) : 0;
+  const augurMod = atk ? luckAugurModLive(luckAugurAttackCategories(dccWeaponEntry(atk.weapon), isStartingWeaponMatchLive(atk))) : 0;
   return formatSignedNumber(abilityMod + classAttack + luckMod + augurMod);
 }
 
@@ -5494,7 +5521,7 @@ function attackBonusBreakdownTooltip(atk, abilitySourceId, currentBonusText, isA
   const classAttack = entry && typeof entry.attack === "number" ? entry.attack : 0;
   const isFav = isFavoriteWeaponMatchLive(atk);
   const lckMod = isFav ? favoriteWeaponLuckModLive() : 0;
-  const augurMod = luckAugurModLive(luckAugurAttackCategories(dccWeaponEntry(atk.weapon)));
+  const augurMod = luckAugurModLive(luckAugurAttackCategories(dccWeaponEntry(atk.weapon), isStartingWeaponMatchLive(atk)));
 
   const sumParts = [`${abilityLabel} ${formatSignedNumber(abilityMod)}`];
   if (clsLabel && lvlLabel && entry && !isDeedClass) {
@@ -5531,7 +5558,7 @@ function attackBonusBreakdownTooltipForStats(stats, atk) {
   const classAttack = classEntry && typeof classEntry.attack === "number" ? classEntry.attack : 0;
   const isFav = isFavoriteWeaponMatch(stats, atk);
   const lckMod = isFav ? favoriteWeaponLuckModForStats(stats) : 0;
-  const augurMod = luckAugurModForStats(stats, luckAugurAttackCategories(entry));
+  const augurMod = luckAugurModForStats(stats, luckAugurAttackCategories(entry, isStartingWeaponMatch(stats, atk)));
 
   const sumParts = [`${abilityLabel} ${formatSignedNumber(abilityMod)}`];
   if (clsLabel && lvlLabel && classEntry && !isDeedClass) {
@@ -8624,33 +8651,37 @@ const DCC_LUCK_AUGUR_TABLE = [
 // Categories this app actually wires a bonus into somewhere. Everything
 // else in the table above is tracked (rolled, frozen, shown in the note)
 // but has no matching mechanic in this app to attach a number to - see
-// refreshBirthAugurNote's own "not currently wired" wording. Reasons,
-// category by category: mountedAttack (no mounted-combat system at all);
-// startingWeapon (the 0-level Trained Weapon field is overwritten the
-// moment a character classes - see updatePcTrainedWeaponVisibility - so
-// there's no permanent record of "the starting weapon" left to check
-// against); spellDamage (a spell's damage, if any, is free-text effect
-// prose, not a rolled field); escapeTraps/poisonSaves (this app only
-// tracks the three general Fort/Ref/Will saves, no finer per-circumstance
-// categories to single out); critTables (there's no existing "Luck
-// applies to crits" baseline in this app to double - see the Luck rules
-// text's own separate, unconditional "affects other rolls... critical
-// hits, fumbles, corruption" line); corruption (ALREADY gets live Luck
-// unconditionally, per that same separate rule - see openCorruptionModal
-// - so this augur category would be redundant with the baseline even if
-// wired, not a genuine gap). secretDoors WAS on this list too until
-// rollPcSecretDoorCheck existed - now wired below like any other category.
-// fumbles is now ALSO possible in principle (rollAttackFor/
-// rollTwoWeaponAttack's own reverse-Luck fumble modifier is a real
-// baseline as of the Table 4-2 fumble work), just not yet wired here -
-// unlike secretDoors this wasn't part of what was asked for, so it's left
-// alone rather than added unprompted.
+// refreshBirthAugurNote's own "not currently wired" wording. Remaining
+// unwired categories, and why: mountedAttack (no mounted-combat system at
+// all); spellDamage (a spell's damage, if any, is free-text effect prose,
+// not a rolled field); escapeTraps/poisonSaves (this app only tracks the
+// three general Fort/Ref/Will saves, no finer per-circumstance categories
+// to single out - aliasing them to Reflex/Fortitude wholesale would apply
+// the bonus to EVERY such save, not just trap-escapes/poison specifically,
+// which is more generous than RAW intends); critTables (there's no
+// existing "Luck applies to crits" baseline in this app to double - see
+// the Luck rules text's own separate, unconditional "affects other
+// rolls... critical hits, fumbles, corruption" line - fumbles/corruption
+// both have that baseline already, crits don't yet); corruption (ALREADY
+// gets live Luck unconditionally, per that same separate rule - see
+// openCorruptionModal - so this augur category would be redundant with
+// the baseline even if wired, not a genuine gap).
+//
+// secretDoors WAS on this list too until rollPcSecretDoorCheck existed -
+// now wired below like any other category. startingWeapon and fumbles
+// followed the same path: startingWeapon via isStartingWeaponMatch/
+// isStartingWeaponMatchLive (the 0-level Trained Weapon field turns out to
+// survive being classed - only HIDDEN, not cleared, for every class except
+// Warrior/Dwarf, who repurpose it for their own Favorite Weapon instead -
+// see isStartingWeaponMatch's own comment); fumbles by doubling the
+// existing reverse-Luck fumble modifier (rollAttackFor/rollTwoWeaponAttack)
+// whenever this category is the active result.
 const DCC_LUCK_AUGUR_SUPPORTED = new Set([
-  "allAttack", "meleeAttack", "missileAttack", "unarmedAttack",
+  "allAttack", "meleeAttack", "missileAttack", "unarmedAttack", "startingWeapon",
   "allDamage", "meleeDamage", "missileDamage",
   "skillChecks", "findDisableTraps", "secretDoors", "spellChecks", "turnUnholy", "magicalHealing",
   "allSaves", "reflexSaves", "fortitudeSaves", "willpowerSaves",
-  "armorClass", "initiative", "hitPoints", "languages", "speed",
+  "armorClass", "initiative", "hitPoints", "languages", "speed", "fumbles",
 ]);
 function luckAugurEntry() {
   const rollEl = document.getElementById("pc-luck-augur-roll");
@@ -8687,14 +8718,22 @@ function luckAugurModForStats(stats, categories) {
 // "All attack rolls" always applies alongside whichever more specific one
 // fits (melee/missile/unarmed); Table 1-2 has no "unarmed damage" entry,
 // so unarmedDamage deliberately isn't a category anywhere in the table.
-function luckAugurAttackCategories(entry) {
-  if (!entry) return ["allAttack"];
-  if (entry.key === "unarmed") return ["allAttack", "unarmedAttack"];
-  return entry.type === "ranged" ? ["allAttack", "missileAttack"] : ["allAttack", "meleeAttack"];
+// `isStartingWeapon` (see isStartingWeaponMatch/isStartingWeaponMatchLive)
+// adds Table 1-2's own "startingWeapon" category on top when this attack's
+// weapon is this character's frozen 0-level Trained Weapon - a character
+// only ever has ONE Table 1-2 result, so an extra category here never
+// double-counts (luckAugurModLive/ForStats just check "does ANY of these
+// match").
+function luckAugurAttackCategories(entry, isStartingWeapon) {
+  const base = !entry ? ["allAttack"]
+    : entry.key === "unarmed" ? ["allAttack", "unarmedAttack"]
+    : entry.type === "ranged" ? ["allAttack", "missileAttack"] : ["allAttack", "meleeAttack"];
+  return isStartingWeapon ? [...base, "startingWeapon"] : base;
 }
-function luckAugurDamageCategories(entry) {
-  if (!entry || entry.key === "unarmed") return ["allDamage"];
-  return entry.type === "ranged" ? ["allDamage", "missileDamage"] : ["allDamage", "meleeDamage"];
+function luckAugurDamageCategories(entry, isStartingWeapon) {
+  const base = (!entry || entry.key === "unarmed") ? ["allDamage"]
+    : entry.type === "ranged" ? ["allDamage", "missileDamage"] : ["allDamage", "meleeDamage"];
+  return isStartingWeapon ? [...base, "startingWeapon"] : base;
 }
 // Updates the note under the Birth Augur select, and keeps the select's
 // own displayed value in sync with pc-luck-augur-roll (the actual source
@@ -18161,7 +18200,7 @@ async function rollAttackFor(itemId, attackId, slotKey) {
   // separately here, since there's no equivalent pre-baked damage field.
   // PC-only - a monster attack never has one.
   const weaponEntryForAugur = stats.mode === "pc" ? dccWeaponEntry(atk.weapon) : null;
-  const augurDamageMod = stats.mode === "pc" ? luckAugurModForStats(stats, luckAugurDamageCategories(weaponEntryForAugur)) : 0;
+  const augurDamageMod = stats.mode === "pc" ? luckAugurModForStats(stats, luckAugurDamageCategories(weaponEntryForAugur, isStartingWeaponMatch(stats, atk))) : 0;
   // Table 1-9's Backstab bonus (a flat to-hit bonus, no ability modifier -
   // see backstabAttackBonusForStats) applies to THIS roll only when the
   // Tracker's "Declare Backstab" flag is active for this specific line.
@@ -18253,13 +18292,19 @@ async function rollAttackFor(itemId, attackId, slotKey) {
     // Table 4-2 (DCC RPG core rulebook): "Because 'lower is better' on
     // fumble table rolls, the roll is modified by the reverse of the
     // character's Luck" (e.g. a +1 Luck modifier becomes -1 here).
-    // PC-only - a monster fumble has no Luck to reverse.
-    const fumbleLuckMod = stats.mode === "pc" ? -abilityModifierFromRaw(stats.data.lck) : 0;
+    // PC-only - a monster fumble has no Luck to reverse. Doubled if this
+    // character's own Table 1-2 Birth Augur result is "Fumbles" - see
+    // DCC_LUCK_AUGUR_TABLE's own comment; stats-based (not luckAugurEntry's
+    // live DOM read) since a Tracker-triggered roll's stats aren't
+    // necessarily the token currently open on the Sheet.
+    const fumbleAugurEntry = stats.mode === "pc" ? luckAugurEntryForStats(stats) : null;
+    const fumbleAugurDoubled = !!(fumbleAugurEntry && fumbleAugurEntry.category === "fumbles");
+    const fumbleLuckMod = stats.mode === "pc" ? -abilityModifierFromRaw(stats.data.lck) * (fumbleAugurDoubled ? 2 : 1) : 0;
     const fumbleTotal = fumbleRoll !== null ? fumbleRoll.total + fumbleLuckMod : null;
     const fumbleRow = fumbleTotal !== null ? lookupTableRow(FUMBLE_TABLE, fumbleTotal) : null;
     if (fumbleRoll) rollDice.push(...fumbleRoll.dice);
     const rowText = fumbleRow ? fumbleRow.text : "";
-    const fumbleLuckNote = fumbleLuckMod ? ` ${formatSignedNumber(fumbleLuckMod)} Luck` : "";
+    const fumbleLuckNote = fumbleLuckMod ? ` ${formatSignedNumber(fumbleLuckMod)} Luck${fumbleAugurDoubled ? " (Birth Augur doubled)" : ""}` : "";
     // "On a natural 1 on any attack roll with a poisoned blade, the thief
     // automatically poisons themself, in addition to any fumble results" -
     // atk.poisoned is a persistent per-weapon flag (see attackRowHtml's
@@ -18557,13 +18602,16 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
       const fumbleDie = fumbleDieForStats(stats);
       const fumbleRoll = rollDamage(`1d${fumbleDie}`);
       // Table 4-2 (DCC RPG core rulebook) - reverse-Luck modifier, see
-      // rollAttackFor's own identical comment.
-      const fumbleLuckMod = -abilityModifierFromRaw(stats.data.lck);
+      // rollAttackFor's own identical comment (including the Birth Augur
+      // "Fumbles" doubling).
+      const fumbleAugurEntry = luckAugurEntryForStats(stats);
+      const fumbleAugurDoubled = !!(fumbleAugurEntry && fumbleAugurEntry.category === "fumbles");
+      const fumbleLuckMod = -abilityModifierFromRaw(stats.data.lck) * (fumbleAugurDoubled ? 2 : 1);
       const fumbleTotal = fumbleRoll !== null ? fumbleRoll.total + fumbleLuckMod : null;
       const fumbleRow = fumbleTotal !== null ? lookupTableRow(FUMBLE_TABLE, fumbleTotal) : null;
       if (fumbleRoll) rollDice.push(...fumbleRoll.dice);
       const rowText = fumbleRow ? fumbleRow.text : "";
-      const fumbleLuckNote = fumbleLuckMod ? ` ${formatSignedNumber(fumbleLuckMod)} Luck` : "";
+      const fumbleLuckNote = fumbleLuckMod ? ` ${formatSignedNumber(fumbleLuckMod)} Luck${fumbleAugurDoubled ? " (Birth Augur doubled)" : ""}` : "";
       if (twFumbleCancelEligible) fumbleCancelQueue.push({ attackId: atk.id, label: atk.name || label });
       return `${label}: ${markFumbleAlert("💀 FUMBLE!")} Natural 1${forcedNote} — automatic miss (Fumble Die d${fumbleDie}: ${fumbleRoll ? fumbleRoll.total : "?"}${fumbleLuckNote}${fumbleTotal !== null ? ` = ${fumbleTotal}` : ""}).${sitMod.detail ? ` (Table 4-1: ${sitMod.detail})` : ""} ${rowText}${poisonNote}`;
     }
@@ -18583,7 +18631,7 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     // needs adding here, per hand since a two-weapon pair's two weapons
     // can differ.
     const weaponEntryForAugur = dccWeaponEntry(atk.weapon);
-    const augurDamageMod = luckAugurModForStats(stats, luckAugurDamageCategories(weaponEntryForAugur));
+    const augurDamageMod = luckAugurModForStats(stats, luckAugurDamageCategories(weaponEntryForAugur, isStartingWeaponMatch(stats, atk)));
     // Each hand rolls its OWN fresh Deed Die (see rollDeedDieForStats) -
     // per Table 1-10's footnote, it's rolled anew with each attack, and
     // both hands of a two-weapon pair are two separate attacks even
@@ -18686,16 +18734,19 @@ async function rollTwoWeaponAttack(itemId, primaryAttackId, offhandAttackId, slo
     const fumbleDie = fumbleDieForStats(stats);
     const fumbleRoll = rollDamage(`1d${fumbleDie}`);
     // Table 4-2 (DCC RPG core rulebook) - reverse-Luck modifier, see
-    // rollAttackFor's own identical comment. No fumbleCancel queuing on
-    // this branch - it can only ever trigger for a Halfling (the only
-    // class with this double-fumble rule), and Halfling is never Warrior
-    // or Dwarf, so the cancel option never applies here.
-    const fumbleLuckMod = -abilityModifierFromRaw(stats.data.lck);
+    // rollAttackFor's own identical comment (including the Birth Augur
+    // "Fumbles" doubling). No fumbleCancel queuing on this branch - it can
+    // only ever trigger for a Halfling (the only class with this
+    // double-fumble rule), and Halfling is never Warrior or Dwarf, so the
+    // cancel option never applies here.
+    const fumbleAugurEntry = luckAugurEntryForStats(stats);
+    const fumbleAugurDoubled = !!(fumbleAugurEntry && fumbleAugurEntry.category === "fumbles");
+    const fumbleLuckMod = -abilityModifierFromRaw(stats.data.lck) * (fumbleAugurDoubled ? 2 : 1);
     const fumbleTotal = fumbleRoll !== null ? fumbleRoll.total + fumbleLuckMod : null;
     const fumbleRow = fumbleTotal !== null ? lookupTableRow(FUMBLE_TABLE, fumbleTotal) : null;
     if (fumbleRoll) rollDice.push(...fumbleRoll.dice);
     const rowText = fumbleRow ? fumbleRow.text : "";
-    const fumbleLuckNote = fumbleLuckMod ? ` ${formatSignedNumber(fumbleLuckMod)} Luck` : "";
+    const fumbleLuckNote = fumbleLuckMod ? ` ${formatSignedNumber(fumbleLuckMod)} Luck${fumbleAugurDoubled ? " (Birth Augur doubled)" : ""}` : "";
     // Both hands rolled a natural 1 here, so either (or both) weapon's own
     // poison can turn on its wielder - same rule as resolveHand's own
     // poisonNote, just checked for each weapon independently since this
