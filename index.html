@@ -1636,7 +1636,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 13:03</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 13:24</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -3180,17 +3180,7 @@ function fillForm(mode, data) {
   // auto-fill hook (attachSpellRowListeners' own selectEl/customEl
   // listeners) - catch that case here too, once per load.
   if (mode === "pc") {
-    const listEl = spellsListEl();
-    if (listEl) {
-      listEl.querySelectorAll(".attack-row").forEach(row => {
-        const selectEl = row.querySelector(".spell-row-select");
-        const customEl = row.querySelector(".spell-row-custom-name");
-        const plainEl = row.querySelector(".spell-row-name");
-        const name = plainEl ? plainEl.value.trim()
-          : (selectEl && selectEl.value === SPELL_CUSTOM_KEY ? (customEl ? customEl.value.trim() : "") : (selectEl ? selectEl.value : ""));
-        applyRulebookDataToRow(row, name);
-      });
-    }
+    refreshVisibleSpellRowsFromRulebookData();
     // Same catch-up, for Patron/Deity write-ups (see
     // applyRulebookWriteupField's own comment).
     if (lastRulebookData && lastRulebookData.patrons) {
@@ -12355,20 +12345,31 @@ function readSpellItems() {
 // the SAME behavior onto a row it inserts on the fly, not just whichever
 // rows spellRowHtml's initial render already included (same
 // factor-out-for-reuse reasoning as attachMercurialRollHandler).
+// Marks the spell row containing `el` as no longer eligible for
+// applyRulebookDataToRow's "re-sync on a later import" overwrite path
+// (see that function's own comment) - called from every listener that
+// means a human actually touched this row's content, so an import can
+// never clobber something typed on purpose.
+function clearRulebookSynced(el) {
+  const row = el.closest(".attack-row");
+  if (row) row.dataset.rulebookSynced = "0";
+}
 function attachEffectRowListeners(effectRow) {
   const rangeEl = effectRow.querySelector(".spell-effect-range");
-  if (rangeEl) rangeEl.addEventListener("input", scheduleSave);
+  if (rangeEl) rangeEl.addEventListener("input", () => { clearRulebookSynced(rangeEl); scheduleSave(); });
   const textEl = effectRow.querySelector(".spell-effect-text");
   if (textEl) {
     autoResizeTextarea(textEl);
     textEl.addEventListener("input", () => {
       autoResizeTextarea(textEl);
+      clearRulebookSynced(textEl);
       scheduleSave();
     });
   }
   const removeBtn = effectRow.querySelector(".spell-effect-remove-btn");
   if (removeBtn) {
     removeBtn.addEventListener("click", () => {
+      clearRulebookSynced(removeBtn);
       effectRow.remove();
       scheduleSave();
     });
@@ -12376,70 +12377,100 @@ function attachEffectRowListeners(effectRow) {
 }
 
 // Rulebook Data Import's own auto-fill (see appendChatLog's neighboring
-// comment for the storage side) - only ever fills in a row's stat-block
-// (Level/Range/Duration/Casting Time/Save)/Description/Manifestation/
-// Effect Table/Corruption/Misfire when they're CURRENTLY BLANK, so a
+// comment for the storage side) - fills in a row's stat-block (Level/
+// Range/Duration/Casting Time/Save)/Description/Manifestation/Effect
+// Table/Corruption/Misfire whenever they're CURRENTLY BLANK, so a
 // player's own typed-in notes are never silently overwritten by a later
-// import or a name picked, then changed back. Operates directly on this
-// row's own DOM (not a data-level re-render) so it can reuse effectRowHtml/
-// attachEffectRowListeners exactly as the "+ Add Roll Range" button
-// already does, and auto-expands the row if it was collapsed so the
-// newly-filled content is actually visible.
+// import or a name picked, then changed back. On top of that, a row
+// still marked data-rulebook-synced="1" (see below) - meaning every bit
+// of its current non-blank content was itself placed there by a PRIOR
+// import, never hand-typed - is also fair game to overwrite, so a GM
+// correcting their own transcription and re-importing actually sees the
+// fix land instead of it being silently skipped because the field
+// "already has something in it." That flag gets set here whenever this
+// call finds nothing BUT blank/already-synced content on the row (so a
+// freshly imported row starts eligible for a later refresh), and gets
+// cleared to "0" the instant a human types into ANY field on this row or
+// touches its Effect Table (see attachSpellRowListeners/
+// attachEffectRowListeners) - once that happens the whole row is treated
+// as theirs and stops auto-refreshing, even for fields they didn't
+// personally touch, since there's no per-field record of who wrote what.
+// Operates directly on this row's own DOM (not a data-level re-render) so
+// it can reuse effectRowHtml/attachEffectRowListeners exactly as the
+// "+ Add Roll Range" button already does, and auto-expands the row if it
+// was collapsed so the newly-filled content is actually visible.
+// Level is deliberately its OWN, separate map from the rest - it has an
+// authoritative source this app already trusts (Table 5-8/5-9 via
+// dccSpellLevelForName, run unconditionally whenever a known spell's
+// picked from the dropdown), so unlike every other field here it only
+// ever gets filled when blank and is NEVER part of the re-sync/overwrite
+// path below, and doesn't count toward "was this row untouched by a
+// human" either - a table-confirmed Level shouldn't block the REST of
+// the row from becoming re-sync-eligible, and shouldn't ever be second-
+// guessed by a JSON transcription that could simply have a typo in it.
+const RULEBOOK_LEVEL_FIELD_MAP = { level: ".spell-level" };
 const RULEBOOK_STATBLOCK_FIELD_MAP = {
-  level: ".spell-level",
   range: ".spell-range",
   duration: ".spell-duration",
   castingTime: ".spell-casting-time",
   save: ".spell-save",
 };
+const RULEBOOK_TEXTAREA_FIELD_MAP = {
+  description: ".spell-description-note",
+  manifestation: ".manifestation-note",
+  corruption: ".spell-corruption-note",
+  misfire: ".spell-misfire-note",
+};
 function applyRulebookDataToRow(row, spellName) {
   if (!row || !spellName || !lastRulebookData || !lastRulebookData.spells) return false;
   const entry = lastRulebookData.spells[spellName];
   if (!entry) return false;
+  const wasSynced = row.dataset.rulebookSynced === "1";
+  // Whether every field this function can touch (Level excluded - see its
+  // own comment above) was blank BEFORE this call - checked up front (the
+  // fill loops below mutate these same fields) so the row can be marked
+  // fully synced afterward exactly when nothing protected was ever on it
+  // to begin with.
+  const rowsWrapPre = row.querySelector(".spell-effect-rows");
+  const wasFullyBlank = wasSynced || (
+    Object.values(RULEBOOK_STATBLOCK_FIELD_MAP).concat(Object.values(RULEBOOK_TEXTAREA_FIELD_MAP)).every(sel => {
+      const el = row.querySelector(sel);
+      return !el || !el.value.trim();
+    }) && (!rowsWrapPre || rowsWrapPre.children.length === 0)
+  );
+  const canOverwrite = wasSynced;
   let changed = false;
-  // Stat-block fields (see spellStatblockHtml) - plain single-line inputs,
-  // no auto-resize needed. Level already gets its own auto-fill from
-  // Table 5-8/5-9 (dccSpellLevelForName) when a known spell's picked from
-  // the dropdown - this only ever kicks in on top of that for whatever's
-  // STILL blank afterward (a patron/custom spell with no table entry, or
-  // this same free-text row for a non-caster class), never overwriting it.
-  Object.entries(RULEBOOK_STATBLOCK_FIELD_MAP).forEach(([key, selector]) => {
+  Object.entries(RULEBOOK_LEVEL_FIELD_MAP).forEach(([key, selector]) => {
     const el = row.querySelector(selector);
     if (el && !el.value.trim() && entry[key]) {
       el.value = entry[key];
       changed = true;
     }
   });
-  const descriptionEl = row.querySelector(".spell-description-note");
-  if (descriptionEl && !descriptionEl.value.trim() && entry.description) {
-    descriptionEl.value = entry.description;
-    autoResizeTextarea(descriptionEl);
-    changed = true;
-  }
-  const manifestationEl = row.querySelector(".manifestation-note");
-  if (manifestationEl && !manifestationEl.value.trim() && entry.manifestation) {
-    manifestationEl.value = entry.manifestation;
-    autoResizeTextarea(manifestationEl);
-    changed = true;
-  }
+  // Stat-block fields (see spellStatblockHtml) - plain single-line inputs,
+  // no auto-resize needed.
+  Object.entries(RULEBOOK_STATBLOCK_FIELD_MAP).forEach(([key, selector]) => {
+    const el = row.querySelector(selector);
+    if (el && (!el.value.trim() || canOverwrite) && entry[key]) {
+      el.value = entry[key];
+      changed = true;
+    }
+  });
+  Object.entries(RULEBOOK_TEXTAREA_FIELD_MAP).forEach(([key, selector]) => {
+    const el = row.querySelector(selector);
+    if (el && (!el.value.trim() || canOverwrite) && entry[key]) {
+      el.value = entry[key];
+      autoResizeTextarea(el);
+      changed = true;
+    }
+  });
   const rowsWrap = row.querySelector(".spell-effect-rows");
-  if (rowsWrap && rowsWrap.children.length === 0 && Array.isArray(entry.effectRows) && entry.effectRows.length) {
+  if (rowsWrap && (rowsWrap.children.length === 0 || canOverwrite) && Array.isArray(entry.effectRows) && entry.effectRows.length) {
     rowsWrap.innerHTML = entry.effectRows.map(r => effectRowHtml({ id: "g" + Math.random().toString(36).slice(2, 9), range: r.range || "", text: r.text || "" })).join("");
     rowsWrap.querySelectorAll(".spell-effect-row").forEach(effectRow => attachEffectRowListeners(effectRow));
     changed = true;
   }
-  const corruptionEl = row.querySelector(".spell-corruption-note");
-  if (corruptionEl && !corruptionEl.value.trim() && entry.corruption) {
-    corruptionEl.value = entry.corruption;
-    autoResizeTextarea(corruptionEl);
-    changed = true;
-  }
-  const misfireEl = row.querySelector(".spell-misfire-note");
-  if (misfireEl && !misfireEl.value.trim() && entry.misfire) {
-    misfireEl.value = entry.misfire;
-    autoResizeTextarea(misfireEl);
-    changed = true;
-  }
+  if (wasFullyBlank) row.dataset.rulebookSynced = "1";
   if (changed) {
     const collapsibleEl = row.querySelector(".spell-row-collapsible");
     const toggleBtn = row.querySelector(".spell-row-toggle-btn");
@@ -12447,6 +12478,26 @@ function applyRulebookDataToRow(row, spellName) {
     scheduleSave();
   }
   return changed;
+}
+
+// Re-derives each currently-rendered spell row's own name (same three-way
+// select/custom/plain-text read every other spell-name consumer here
+// uses) and re-runs applyRulebookDataToRow against it - shared by
+// fillForm's own "token loaded with spells already named" catch-up pass
+// and the Import button's own "the Sheet already open right now shouldn't
+// need a reload to see what was just imported" pass, so both stay
+// identical rather than drifting apart.
+function refreshVisibleSpellRowsFromRulebookData() {
+  const listEl = spellsListEl();
+  if (!listEl) return;
+  listEl.querySelectorAll(".attack-row").forEach(row => {
+    const selectEl = row.querySelector(".spell-row-select");
+    const customEl = row.querySelector(".spell-row-custom-name");
+    const plainEl = row.querySelector(".spell-row-name");
+    const name = plainEl ? plainEl.value.trim()
+      : (selectEl && selectEl.value === SPELL_CUSTOM_KEY ? (customEl ? customEl.value.trim() : "") : (selectEl ? selectEl.value : ""));
+    applyRulebookDataToRow(row, name);
+  });
 }
 
 // Patron/Deity write-up auto-fill - same "only when currently blank"
@@ -12502,6 +12553,7 @@ function attachSpellRowListeners() {
       autoResizeTextarea(manifestationEl);
       manifestationEl.addEventListener("input", () => {
         autoResizeTextarea(manifestationEl);
+        row.dataset.rulebookSynced = "0";
         scheduleSave();
       });
     }
@@ -12514,6 +12566,7 @@ function attachSpellRowListeners() {
       autoResizeTextarea(el);
       el.addEventListener("input", () => {
         autoResizeTextarea(el);
+        row.dataset.rulebookSynced = "0";
         scheduleSave();
       });
     });
@@ -12523,7 +12576,7 @@ function attachSpellRowListeners() {
     // not textareas.
     [".spell-level", ".spell-range", ".spell-duration", ".spell-casting-time", ".spell-save"].forEach(sel => {
       const el = row.querySelector(sel);
-      if (el) el.addEventListener("input", scheduleSave);
+      if (el) el.addEventListener("input", () => { row.dataset.rulebookSynced = "0"; scheduleSave(); });
     });
     // Effect Table (see spellEffectRowsHtml/effectRowHtml) - wires
     // whatever rows already exist at render time; attachEffectRowListeners
@@ -12535,6 +12588,7 @@ function attachSpellRowListeners() {
       addEffectBtn.addEventListener("click", () => {
         const rowsWrap = row.querySelector(".spell-effect-rows");
         if (!rowsWrap) return;
+        row.dataset.rulebookSynced = "0";
         rowsWrap.insertAdjacentHTML("beforeend", effectRowHtml(emptySpellEffectRow()));
         const newEffectRow = rowsWrap.lastElementChild;
         attachEffectRowListeners(newEffectRow);
@@ -20461,6 +20515,12 @@ document.getElementById("rulebook-import-btn").addEventListener("click", async (
     await OBR.scene.setMetadata({ [RULEBOOK_DATA_METADATA_KEY]: next });
     document.getElementById("rulebook-import-textarea").value = "";
     refreshRulebookImportStatus();
+    // Immediately re-apply to whatever spell rows are already showing on
+    // THIS open Sheet - without this, a spell row picked before the
+    // import completed would only ever pick up the new data the next
+    // time its name gets re-picked or the token reloads, which reads as
+    // "importing doesn't do anything" even though it worked.
+    refreshVisibleSpellRowsFromRulebookData();
   } catch (err) {
     console.error("DCC sheet: failed to import rulebook data", err);
     el.textContent = `Import failed: ${err.message}`;

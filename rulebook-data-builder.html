@@ -115,31 +115,31 @@
   <fieldset>
     <legend>Spell</legend>
     <label for="spell-name">Spell name (exact — must match the character sheet's own spell name)</label>
-    <input type="text" id="spell-name" list="spell-names" placeholder="e.g. Magic missile" />
+    <input type="text" id="spell-name" list="spell-names" placeholder="e.g. Magic missile" autocomplete="off" />
     <datalist id="spell-names"></datalist>
 
     <div class="row">
       <div>
         <label for="spell-level">Level</label>
-        <input type="text" id="spell-level" placeholder="1" />
+        <input type="text" id="spell-level" placeholder="1" autocomplete="off" />
       </div>
       <div>
         <label for="spell-range">Range</label>
-        <input type="text" id="spell-range" placeholder="Touch" />
+        <input type="text" id="spell-range" placeholder="Touch" autocomplete="off" />
       </div>
       <div>
         <label for="spell-duration">Duration</label>
-        <input type="text" id="spell-duration" placeholder="Instant" />
+        <input type="text" id="spell-duration" placeholder="Instant" autocomplete="off" />
       </div>
     </div>
     <div class="row">
       <div>
         <label for="spell-casting-time">Casting Time</label>
-        <input type="text" id="spell-casting-time" placeholder="1 action" />
+        <input type="text" id="spell-casting-time" placeholder="1 action" autocomplete="off" />
       </div>
       <div>
         <label for="spell-save">Save</label>
-        <input type="text" id="spell-save" placeholder="Will" />
+        <input type="text" id="spell-save" placeholder="Will" autocomplete="off" />
       </div>
     </div>
 
@@ -185,7 +185,7 @@
       </div>
       <div>
         <label for="pd-name">Name (exact — must match the character sheet's own Patron/Deity field)</label>
-        <input type="text" id="pd-name" placeholder="e.g. a lord of a hidden fey court" />
+        <input type="text" id="pd-name" placeholder="e.g. a lord of a hidden fey court" autocomplete="off" />
       </div>
     </div>
     <label for="pd-writeup">Write-up</label>
@@ -353,8 +353,8 @@
     const row = document.createElement("div");
     row.className = "effect-row";
     row.innerHTML = `
-      <input type="text" class="effect-range" placeholder="12-13" value="${escapeHtml(range || "")}" />
-      <input type="text" class="effect-text" placeholder="What this roll range does" value="${escapeHtml(text || "")}" />
+      <input type="text" class="effect-range" placeholder="12-13" value="${escapeHtml(range || "")}" autocomplete="off" />
+      <input type="text" class="effect-text" placeholder="What this roll range does" value="${escapeHtml(text || "")}" autocomplete="off" />
       <button type="button" class="btn-remove" title="Remove">×</button>
     `;
     row.querySelector(".btn-remove").addEventListener("click", () => row.remove());
