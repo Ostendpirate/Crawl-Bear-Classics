@@ -1264,6 +1264,27 @@
   }
   .stat-badge b { font-size: 12px; }
   .luck-max-badge { background: linear-gradient(135deg, var(--accent), #8a5a28); }
+  /* True Luck sits in the Lck save-box's own lower-right corner instead of
+     as a full-width line below the whole Abilities grid, so it reads as an
+     annotation on that one field rather than competing with the New Day
+     button right underneath. Shrunk down from .stat-badge's normal size to
+     fit inside a single ability box without overflowing it. pointer-events:
+     none so the badge (purely informational, like .stat-badge's own
+     cursor:default already implies) never steals a click meant for the
+     #pc-lck input it overlaps - the box is too small to fit both without
+     some overlap. */
+  .lck-save-box { position: relative; }
+  .lck-save-box .luck-max-badge {
+    position: absolute;
+    bottom: 3px;
+    right: 3px;
+    margin-bottom: 0;
+    padding: 1px 6px;
+    font-size: 9px;
+    pointer-events: none;
+    gap: 2px;
+  }
+  .lck-save-box .luck-max-badge b { font-size: 9px; }
   .disapproval-range-badge { background: linear-gradient(135deg, #e0665a, #8a2d2d); color: #fff; }
   .tables-btn {
     background: var(--border);
@@ -1614,7 +1635,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 09:44</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 09:49</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -1848,9 +1869,10 @@
             <div class="save-box"><label class="roll-label" data-roll-ability="sta" title="Click to roll a Stamina check: d20 + Stamina modifier.">Sta</label><input type="text" id="pc-sta" placeholder="12 (+0)"/></div>
             <div class="save-box"><label class="roll-label" data-roll-ability="per" title="Click to roll a Personality check: d20 + Personality modifier.">Per</label><input type="text" id="pc-per" placeholder="8 (-1)"/></div>
             <div class="save-box"><label class="roll-label" data-roll-ability="int" title="Click to roll an Intelligence check: d20 + Intelligence modifier.">Int</label><input type="text" id="pc-int" placeholder="9 (+0)"/></div>
-            <div class="save-box"><label class="roll-label" data-roll-ability="lck" title="Click to roll a Luck check: d20 + Luck modifier.">Lck</label><input type="text" id="pc-lck" placeholder="11 (+0)"/></div>
+            <div class="save-box lck-save-box"><label class="roll-label" data-roll-ability="lck" title="Click to roll a Luck check: d20 + Luck modifier.">Lck</label><input type="text" id="pc-lck" placeholder="11 (+0)"/>
+              <div class="stat-badge luck-max-badge" id="pc-luck-max-note" style="display:none;"></div>
+            </div>
           </div>
-          <div class="stat-badge luck-max-badge" id="pc-luck-max-note" style="display:none;"></div>
           <div class="fumble-die-note" id="pc-luck-augur-note" style="display:none; margin-bottom:6px;"></div>
           <button type="button" class="hp-btn" id="pc-luck-augur-btn" title="Table 1-2: Luck Score (DCC RPG core rulebook) - roll once, typically at 0-level character creation, to determine which single roll type this character's Luck modifier applies to for their whole career. That bonus is fixed at whatever Luck was AT THE MOMENT OF THIS ROLL - it never changes later even if Luck does.">🎲 Roll Birth Augur</button>
           <input type="hidden" id="pc-luck-augur-roll" value="" />
