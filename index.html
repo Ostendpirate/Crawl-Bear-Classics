@@ -1636,7 +1636,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 12:49</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 13:03</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2796,15 +2796,15 @@
       <div class="tables-modal-header">
         <div>
           <div class="tables-modal-title">Import Rulebook Data</div>
-          <div class="tables-modal-subtitle">Paste JSON you've personally transcribed from your own copy of the rulebook - spell Description/Manifestation/Effect Table/Corruption/Misfire text keyed by exact spell name, and/or Patron/Deity write-ups keyed by exact patron/deity name (matching whatever's typed in that character's own Patron/Deity field). This is stored in THIS SCENE's own data (shared with everyone at this table, same as the roll log), never saved to this app's own source code or public repo.</div>
+          <div class="tables-modal-subtitle">Paste JSON you've personally transcribed from your own copy of the rulebook - a spell's Level/Range/Duration/Casting Time/Save, Description/Manifestation/Effect Table/Corruption/Misfire text, keyed by exact spell name, and/or Patron/Deity write-ups keyed by exact patron/deity name (matching whatever's typed in that character's own Patron/Deity field). This is stored in THIS SCENE's own data (shared with everyone at this table, same as the roll log), never saved to this app's own source code or public repo.</div>
         </div>
         <button type="button" class="tables-modal-close" id="rulebook-import-modal-close" title="Close">×</button>
       </div>
       <div class="tables-modal-body">
         <div class="fumble-die-note" style="margin-bottom:6px;">
-          Format: <code>{"spells":{"Magic missile":{"description":"...","manifestation":"...","effectRows":[{"range":"12-13","text":"..."}],"corruption":"...","misfire":"..."}},"patrons":{"a lord of a hidden fey court":"..."},"deities":{"a Lawful war-god":"..."}}</code> - any subset of "spells"/"patrons"/"deities" is fine. Every field above only auto-fills when its own name is picked/typed and it's currently blank - it never overwrites something already typed in.
+          Format: <code>{"spells":{"Magic missile":{"level":"1","range":"Touch","duration":"Instant","castingTime":"1 action","save":"Will","description":"...","manifestation":"...","effectRows":[{"range":"12-13","text":"..."}],"corruption":"...","misfire":"..."}},"patrons":{"a lord of a hidden fey court":"..."},"deities":{"a Lawful war-god":"..."}}</code> - any subset of "spells"/"patrons"/"deities" is fine, and every spell field above is optional too. Every field only auto-fills when its own name is picked/typed and it's currently blank - it never overwrites something already typed in.
         </div>
-        <textarea id="rulebook-import-textarea" rows="6" placeholder='{"spells": {"Magic missile": {"description": "...", "manifestation": "...", "effectRows": [{"range": "12-13", "text": "..."}], "corruption": "...", "misfire": "..."}}, "patrons": {"a lord of a hidden fey court": "..."}, "deities": {"a Lawful war-god": "..."}}' style="width:100%; box-sizing:border-box; font-family:monospace; font-size:11px;"></textarea>
+        <textarea id="rulebook-import-textarea" rows="6" placeholder='{"spells": {"Magic missile": {"level": "1", "range": "Touch", "duration": "Instant", "castingTime": "1 action", "save": "Will", "description": "...", "manifestation": "...", "effectRows": [{"range": "12-13", "text": "..."}], "corruption": "...", "misfire": "..."}}, "patrons": {"a lord of a hidden fey court": "..."}, "deities": {"a Lawful war-god": "..."}}' style="width:100%; box-sizing:border-box; font-family:monospace; font-size:11px;"></textarea>
         <div class="row" style="margin-top:6px;">
           <div>
             <label>Or load a .json file</label>
@@ -2943,9 +2943,10 @@ const CHAT_LOG_METADATA_KEY = "com.claude.monster-sheet/chat-log";
 const CHAT_LOG_MAX_ENTRIES = 60;
 // Rulebook Data Import (see rulebook-import-row on the Dice tab) - a
 // GM-supplied, personally-transcribed JSON blob of paid-rulebook content
-// (spell Description/Manifestation/Effect Table text, so far), stored in
-// THIS SCENE's own metadata - shared with everyone at this table exactly like
-// the chat log above, never written into this app's own source/repo.
+// (a spell's stat-block/Description/Manifestation/Effect Table text, so
+// far), stored in THIS SCENE's own metadata - shared with everyone at
+// this table exactly like the chat log above, never written into this
+// app's own source/repo.
 const RULEBOOK_DATA_METADATA_KEY = "com.claude.monster-sheet/rulebook-data";
 
 const EMPTY_STATE_DEFAULT_HTML = `Select a token on the map to view or edit its DCC character sheet.<br/><br/>Changes save automatically to the token so anyone in the room sees the same sheet.`;
@@ -12375,19 +12376,40 @@ function attachEffectRowListeners(effectRow) {
 }
 
 // Rulebook Data Import's own auto-fill (see appendChatLog's neighboring
-// comment for the storage side) - only ever fills in a row's Description/
-// Manifestation/Effect Table/Corruption/Misfire when they're CURRENTLY
-// BLANK, so a player's own typed-in notes are never silently overwritten
-// by a later import or a name picked, then changed back. Operates
-// directly on this row's own DOM (not a data-level re-render) so it can
-// reuse effectRowHtml/attachEffectRowListeners exactly as the "+ Add Roll
-// Range" button already does, and auto-expands the row if it was
-// collapsed so the newly-filled content is actually visible.
+// comment for the storage side) - only ever fills in a row's stat-block
+// (Level/Range/Duration/Casting Time/Save)/Description/Manifestation/
+// Effect Table/Corruption/Misfire when they're CURRENTLY BLANK, so a
+// player's own typed-in notes are never silently overwritten by a later
+// import or a name picked, then changed back. Operates directly on this
+// row's own DOM (not a data-level re-render) so it can reuse effectRowHtml/
+// attachEffectRowListeners exactly as the "+ Add Roll Range" button
+// already does, and auto-expands the row if it was collapsed so the
+// newly-filled content is actually visible.
+const RULEBOOK_STATBLOCK_FIELD_MAP = {
+  level: ".spell-level",
+  range: ".spell-range",
+  duration: ".spell-duration",
+  castingTime: ".spell-casting-time",
+  save: ".spell-save",
+};
 function applyRulebookDataToRow(row, spellName) {
   if (!row || !spellName || !lastRulebookData || !lastRulebookData.spells) return false;
   const entry = lastRulebookData.spells[spellName];
   if (!entry) return false;
   let changed = false;
+  // Stat-block fields (see spellStatblockHtml) - plain single-line inputs,
+  // no auto-resize needed. Level already gets its own auto-fill from
+  // Table 5-8/5-9 (dccSpellLevelForName) when a known spell's picked from
+  // the dropdown - this only ever kicks in on top of that for whatever's
+  // STILL blank afterward (a patron/custom spell with no table entry, or
+  // this same free-text row for a non-caster class), never overwriting it.
+  Object.entries(RULEBOOK_STATBLOCK_FIELD_MAP).forEach(([key, selector]) => {
+    const el = row.querySelector(selector);
+    if (el && !el.value.trim() && entry[key]) {
+      el.value = entry[key];
+      changed = true;
+    }
+  });
   const descriptionEl = row.querySelector(".spell-description-note");
   if (descriptionEl && !descriptionEl.value.trim() && entry.description) {
     descriptionEl.value = entry.description;
@@ -20361,7 +20383,8 @@ async function appendChatLog(entry) {
 // uses) - never written into this app's own source/repo, since the DATA
 // lives entirely in OBR's own scene storage, not in index.html. Three
 // independent top-level categories - spells (keyed by spell name, feeds
-// applyRulebookDataToRow: description/manifestation/effectRows/corruption/misfire),
+// applyRulebookDataToRow: level/range/duration/castingTime/save/
+// description/manifestation/effectRows/corruption/misfire),
 // patrons and deities (each keyed by name, feeds applyRulebookWriteupField)
 // - a GM can import any subset of the three. Each category merges with
 // (rather than replaces) whatever's already there, so importing a second
@@ -20423,7 +20446,7 @@ document.getElementById("rulebook-import-btn").addEventListener("click", async (
   const hasPatrons = parsed && typeof parsed === "object" && parsed.patrons && typeof parsed.patrons === "object";
   const hasDeities = parsed && typeof parsed === "object" && parsed.deities && typeof parsed.deities === "object";
   if (!hasSpells && !hasPatrons && !hasDeities) {
-    el.textContent = `Expected a top-level "spells", "patrons", and/or "deities" object, e.g. {"spells":{"Magic missile":{"description":"...","manifestation":"...","effectRows":[...],"corruption":"...","misfire":"..."}},"patrons":{"a lord of a hidden fey court":"..."},"deities":{"a Lawful war-god":"..."}}.`;
+    el.textContent = `Expected a top-level "spells", "patrons", and/or "deities" object, e.g. {"spells":{"Magic missile":{"level":"1","range":"Touch","duration":"Instant","castingTime":"1 action","save":"Will","description":"...","manifestation":"...","effectRows":[...],"corruption":"...","misfire":"..."}},"patrons":{"a lord of a hidden fey court":"..."},"deities":{"a Lawful war-god":"..."}}.`;
     return;
   }
   try {

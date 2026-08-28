@@ -118,6 +118,31 @@
     <input type="text" id="spell-name" list="spell-names" placeholder="e.g. Magic missile" />
     <datalist id="spell-names"></datalist>
 
+    <div class="row">
+      <div>
+        <label for="spell-level">Level</label>
+        <input type="text" id="spell-level" placeholder="1" />
+      </div>
+      <div>
+        <label for="spell-range">Range</label>
+        <input type="text" id="spell-range" placeholder="Touch" />
+      </div>
+      <div>
+        <label for="spell-duration">Duration</label>
+        <input type="text" id="spell-duration" placeholder="Instant" />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label for="spell-casting-time">Casting Time</label>
+        <input type="text" id="spell-casting-time" placeholder="1 action" />
+      </div>
+      <div>
+        <label for="spell-save">Save</label>
+        <input type="text" id="spell-save" placeholder="Will" />
+      </div>
+    </div>
+
     <label for="spell-description">Description</label>
     <textarea id="spell-description" placeholder="This spell's own general write-up, per your own book's entry"></textarea>
 
@@ -227,7 +252,7 @@
     // everything" and means it) - reload the page afterward to get the
     // name list back, since storage will be empty again at that point.
     SPELL_NAMES.forEach(name => {
-      state.spells[name] = { description: "", manifestation: "", effectRows: [], corruption: "", misfire: "" };
+      state.spells[name] = { level: "", range: "", duration: "", castingTime: "", save: "", description: "", manifestation: "", effectRows: [], corruption: "", misfire: "" };
     });
     saveState();
   }
@@ -253,6 +278,11 @@
     if (hasSpells) {
       Object.entries(parsed.spells).forEach(([name, entry]) => {
         state.spells[name] = {
+          level: (entry && entry.level) || "",
+          range: (entry && entry.range) || "",
+          duration: (entry && entry.duration) || "",
+          castingTime: (entry && entry.castingTime) || "",
+          save: (entry && entry.save) || "",
           description: (entry && entry.description) || "",
           manifestation: (entry && entry.manifestation) || "",
           effectRows: (entry && Array.isArray(entry.effectRows)) ? entry.effectRows.map(r => ({ range: (r && r.range) || "", text: (r && r.text) || "" })) : [],
@@ -341,6 +371,11 @@
 
   // ---- Spell form ----
   const spellNameEl = document.getElementById("spell-name");
+  const spellLevelEl = document.getElementById("spell-level");
+  const spellRangeEl = document.getElementById("spell-range");
+  const spellDurationEl = document.getElementById("spell-duration");
+  const spellCastingTimeEl = document.getElementById("spell-casting-time");
+  const spellSaveEl = document.getElementById("spell-save");
   const spellDescriptionEl = document.getElementById("spell-description");
   const spellManifestationEl = document.getElementById("spell-manifestation");
   const spellCorruptionEl = document.getElementById("spell-corruption");
@@ -349,6 +384,11 @@
 
   function clearSpellForm() {
     spellNameEl.value = "";
+    spellLevelEl.value = "";
+    spellRangeEl.value = "";
+    spellDurationEl.value = "";
+    spellCastingTimeEl.value = "";
+    spellSaveEl.value = "";
     spellDescriptionEl.value = "";
     spellManifestationEl.value = "";
     spellCorruptionEl.value = "";
@@ -368,6 +408,11 @@
       return;
     }
     const entry = {
+      level: spellLevelEl.value.trim(),
+      range: spellRangeEl.value.trim(),
+      duration: spellDurationEl.value.trim(),
+      castingTime: spellCastingTimeEl.value.trim(),
+      save: spellSaveEl.value.trim(),
       description: spellDescriptionEl.value.trim(),
       manifestation: spellManifestationEl.value.trim(),
       effectRows: readEffectRows(),
@@ -391,6 +436,11 @@
     if (!entry) return;
     editingSpellName = name;
     spellNameEl.value = name;
+    spellLevelEl.value = entry.level || "";
+    spellRangeEl.value = entry.range || "";
+    spellDurationEl.value = entry.duration || "";
+    spellCastingTimeEl.value = entry.castingTime || "";
+    spellSaveEl.value = entry.save || "";
     spellDescriptionEl.value = entry.description || "";
     spellManifestationEl.value = entry.manifestation || "";
     spellCorruptionEl.value = entry.corruption || "";
@@ -411,7 +461,7 @@
     }
     listEl.innerHTML = names.map(name => {
       const entry = state.spells[name];
-      const filledCount = ["description", "manifestation", "corruption", "misfire"].filter(k => entry[k]).length + (entry.effectRows && entry.effectRows.length ? 1 : 0);
+      const filledCount = ["level", "range", "duration", "castingTime", "save", "description", "manifestation", "corruption", "misfire"].filter(k => entry[k]).length + (entry.effectRows && entry.effectRows.length ? 1 : 0);
       return `<li data-name="${escapeHtml(name)}" class="${name === editingSpellName ? "editing" : ""}">
         <span class="entry-name">${escapeHtml(name)}</span>
         <span class="entry-meta">${filledCount} field${filledCount === 1 ? "" : "s"} filled</span>
