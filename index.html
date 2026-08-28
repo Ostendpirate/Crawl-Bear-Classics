@@ -1636,7 +1636,7 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 10:22</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-08-28 10:47</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -8759,10 +8759,17 @@ function applyLuckAugurRoll(roll, verb) {
   scheduleSave();
   // Full render pass - a new augur result can change a huge number of
   // derived fields at once (attack/damage bonuses, skill totals, Spell
-  // Check, Turn Unholy, Lay on Hands, saves, Init, AC, Speed, Languages,
-  // HP) - see renderPcStatline's own refreshBirthAugurNote/
-  // applyLuckAugurHpBonus calls, run as part of this same pass.
+  // Check, Turn Unholy, Lay on Hands, AC, Speed, Languages, HP) - see
+  // renderPcStatline's own refreshBirthAugurNote/applyLuckAugurHpBonus
+  // calls, run as part of this same pass.
   cfgRenderFromCurrentForm("pc");
+  // Saves/Init are NOT part of that passive pass (see
+  // refreshDerivedPcFields' own comment - it only fires off specific
+  // triggers like an ability-score edit, not every render), so a still-
+  // auto-synced Fort/Ref/Will/Init needs this called explicitly here too,
+  // or it'd keep showing its pre-augur value until something else
+  // happened to touch it.
+  refreshDerivedPcFields();
   const entry = DCC_LUCK_AUGUR_TABLE[roll - 1];
   const supported = DCC_LUCK_AUGUR_SUPPORTED.has(entry.category);
   showStatus(`Birth Augur: ${verb} ${roll} - Lucky Roll: ${entry.label} (${formatSignedNumber(mod)}).${supported ? "" : " Not currently wired to a mechanic in this app."}`, false, 8000);
