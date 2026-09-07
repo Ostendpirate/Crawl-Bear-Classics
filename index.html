@@ -1637,7 +1637,7 @@
       <button class="tab-btn" id="nav-chat">Log</button>
       <button class="tab-btn" id="nav-notes" style="display:none;">Notes</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-09-07 13:20</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-09-07 13:41</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2797,15 +2797,15 @@
       <div class="tables-modal-header">
         <div>
           <div class="tables-modal-title">Import Rulebook Data</div>
-          <div class="tables-modal-subtitle">Paste JSON you've personally transcribed from your own copy of the rulebook - a spell's Level/Range/Duration/Casting Time/Save, Description/Manifestation/Effect Table/Corruption/Misfire text, keyed by exact spell name, and/or Patron/Deity write-ups keyed by exact patron/deity name (matching whatever's typed in that character's own Patron/Deity field). This is stored in THIS SCENE's own data (shared with everyone at this table, same as the roll log), never saved to this app's own source code or public repo.</div>
+          <div class="tables-modal-subtitle">Paste JSON you've personally transcribed from your own copy of the rulebook - a spell's Level/Range/Duration/Casting Time/Save, Description/Manifestation/Effect Table/Corruption/Misfire text, keyed by exact spell name, and/or Patron/Deity write-ups keyed by exact patron/deity name (matching whatever's typed in that character's own Patron/Deity field). Monsters are homebrew rather than rulebook content - keyed by exact monster name (matching that token's own Name field), and normally populated from GM Notes' "## Monster:" import instead of pasted here by hand. This is stored in THIS SCENE's own data (shared with everyone at this table, same as the roll log), never saved to this app's own source code or public repo.</div>
         </div>
         <button type="button" class="tables-modal-close" id="rulebook-import-modal-close" title="Close">×</button>
       </div>
       <div class="tables-modal-body">
         <div class="fumble-die-note" style="margin-bottom:6px;">
-          Format: <code>{"spells":{"Magic missile":{"level":"1","range":"Touch","duration":"Instant","castingTime":"1 action","save":"Will","description":"...","manifestation":"...","effectRows":[{"range":"12-13","text":"..."}],"corruption":"...","misfire":"..."}},"patrons":{"a lord of a hidden fey court":"..."},"deities":{"a Lawful war-god":"..."}}</code> - any subset of "spells"/"patrons"/"deities" is fine, and every spell field above is optional too. Every field only auto-fills when its own name is picked/typed and it's currently blank - it never overwrites something already typed in.
+          Format: <code>{"spells":{"Magic missile":{"level":"1","range":"Touch","duration":"Instant","castingTime":"1 action","save":"Will","description":"...","manifestation":"...","effectRows":[{"range":"12-13","text":"..."}],"corruption":"...","misfire":"..."}},"patrons":{"a lord of a hidden fey court":"..."},"deities":{"a Lawful war-god":"..."},"monsters":{"Goblin Scout":{"init":"+2","ac":"13","hd":"1d8","mv":"30'","act":"1d20","sp":"infravision 60'","fort":"+0","ref":"+2","will":"+0","al":"C","notes":"...","attacks":[{"name":"shortsword","bonus":"+2","damage":"1d6+1"}]}}}</code> - any subset of "spells"/"patrons"/"deities"/"monsters" is fine, and every field above is optional too. Every field only auto-fills when its own name is picked/typed and it's currently blank - it never overwrites something already typed in. A monster's Actions list only fills when completely empty.
         </div>
-        <textarea id="rulebook-import-textarea" rows="6" placeholder='{"spells": {"Magic missile": {"level": "1", "range": "Touch", "duration": "Instant", "castingTime": "1 action", "save": "Will", "description": "...", "manifestation": "...", "effectRows": [{"range": "12-13", "text": "..."}], "corruption": "...", "misfire": "..."}}, "patrons": {"a lord of a hidden fey court": "..."}, "deities": {"a Lawful war-god": "..."}}' style="width:100%; box-sizing:border-box; font-family:monospace; font-size:11px;"></textarea>
+        <textarea id="rulebook-import-textarea" rows="6" placeholder='{"spells": {"Magic missile": {"level": "1", "range": "Touch", "duration": "Instant", "castingTime": "1 action", "save": "Will", "description": "...", "manifestation": "...", "effectRows": [{"range": "12-13", "text": "..."}], "corruption": "...", "misfire": "..."}}, "patrons": {"a lord of a hidden fey court": "..."}, "deities": {"a Lawful war-god": "..."}, "monsters": {"Goblin Scout": {"init": "+2", "ac": "13", "hd": "1d8", "mv": "30", "act": "1d20", "sp": "infravision 60", "fort": "+0", "ref": "+2", "will": "+0", "al": "C", "attacks": [{"name": "shortsword", "bonus": "+2", "damage": "1d6+1"}]}}}' style="width:100%; box-sizing:border-box; font-family:monospace; font-size:11px;"></textarea>
         <div class="row" style="margin-top:6px;">
           <div>
             <label>Or load a .json file</label>
@@ -2943,11 +2943,15 @@ const DIM_OVERLAY_METADATA_KEY = "com.claude.monster-sheet/dim-overlay";
 const CHAT_LOG_METADATA_KEY = "com.claude.monster-sheet/chat-log";
 const CHAT_LOG_MAX_ENTRIES = 60;
 // Rulebook Data Import (see rulebook-import-row on the Dice tab) - a
-// GM-supplied, personally-transcribed JSON blob of paid-rulebook content
-// (a spell's stat-block/Description/Manifestation/Effect Table text, so
-// far), stored in THIS SCENE's own metadata - shared with everyone at
-// this table exactly like the chat log above, never written into this
-// app's own source/repo.
+// GM-supplied JSON blob of spell/patron/deity stat-block text (personally
+// transcribed from a paid rulebook - see the copyright note on that import
+// modal) plus a "monsters" category, which is homebrew rather than
+// rulebook content: populated either by hand-pasting JSON here, or from
+// the GM Notes markdown "## Monster:" block parser (see
+// gm-notes-modal.html), which only ever reads a GM's own authored notes.
+// Stored in THIS SCENE's own metadata - shared with everyone at this
+// table exactly like the chat log above, never written into this app's
+// own source/repo.
 const RULEBOOK_DATA_METADATA_KEY = "com.claude.monster-sheet/rulebook-data";
 // GM Notes (Notes button) - opens as a real OBR.modal (gm-notes-modal.html)
 // rather than a tab in this narrow popover, so it gets a fixed, larger
@@ -7170,7 +7174,10 @@ document.getElementById("pc-deity").addEventListener("input", () => {
     applyRulebookWriteupField(document.getElementById("pc-deity").value.trim(), lastRulebookData.deities, document.getElementById("pc-deity-writeup"));
   }
 });
-nameEl.addEventListener("input", scheduleSave);
+nameEl.addEventListener("input", () => {
+  if (currentMode === "monster") applyRulebookDataToMonsterSheet(nameEl.value.trim());
+  scheduleSave();
+});
 
 // A single persistent element (unlike the Spells list's own per-row
 // notes, which get this same treatment in attachSpellRowListeners on
@@ -12510,6 +12517,52 @@ function refreshVisibleSpellRowsFromRulebookData() {
       : (selectEl && selectEl.value === SPELL_CUSTOM_KEY ? (customEl ? customEl.value.trim() : "") : (selectEl ? selectEl.value : ""));
     applyRulebookDataToRow(row, name);
   });
+}
+
+// Rulebook Data Import's "monsters" category (populated from the GM Notes
+// markdown import - see gm-notes-modal.html's "## Monster:" block parser -
+// or hand-pasted here like spells/patrons/deities). Unlike a spell row,
+// which gets its name picked from a dropdown and can be re-picked, a
+// Monster sheet's fields are plain top-level inputs tied to a single OBR
+// token - so there's no per-row synced/resync bookkeeping to mirror from
+// applyRulebookDataToRow here, just "fill it if it's currently blank,
+// never touch it again once it isn't." The Actions list is filled only
+// when completely empty, since it's a whole list rather than a single
+// value - partially merging into hand-typed attacks would be more
+// confusing than useful.
+const RULEBOOK_MONSTER_TEXT_FIELDS = ["init", "crit", "hd", "mv", "act", "fort", "ref", "will", "sp", "notes"];
+function applyRulebookDataToMonsterSheet(monsterName) {
+  if (!monsterName || !lastRulebookData || !lastRulebookData.monsters) return false;
+  const entry = lastRulebookData.monsters[monsterName];
+  if (!entry) return false;
+  let changed = false;
+  RULEBOOK_MONSTER_TEXT_FIELDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && !el.value.trim() && entry[id]) {
+      el.value = entry[id];
+      changed = true;
+    }
+  });
+  const acEl = document.getElementById("ac");
+  if (acEl && !acEl.value.trim() && entry.ac) {
+    acEl.value = entry.ac;
+    changed = true;
+  }
+  const alEl = document.getElementById("al");
+  if (alEl && !alEl.value && entry.al) {
+    alEl.value = entry.al;
+    changed = true;
+  }
+  const listEl = attackListEl("monster");
+  if (listEl && listEl.children.length === 0 && Array.isArray(entry.attacks) && entry.attacks.length) {
+    renderAttacks("monster", entry.attacks.map(a => ({
+      id: "a" + Math.random().toString(36).slice(2, 9),
+      name: a.name || "", bonus: a.bonus || "", damage: a.damage || "",
+    })));
+    changed = true;
+  }
+  if (changed) scheduleSave();
+  return changed;
 }
 
 // Patron/Deity write-up auto-fill - same "only when currently blank"
@@ -20483,10 +20536,12 @@ function refreshRulebookImportStatus() {
   const spellCount = lastRulebookData && lastRulebookData.spells ? Object.keys(lastRulebookData.spells).length : 0;
   const patronCount = lastRulebookData && lastRulebookData.patrons ? Object.keys(lastRulebookData.patrons).length : 0;
   const deityCount = lastRulebookData && lastRulebookData.deities ? Object.keys(lastRulebookData.deities).length : 0;
+  const monsterCount = lastRulebookData && lastRulebookData.monsters ? Object.keys(lastRulebookData.monsters).length : 0;
   const parts = [];
   if (spellCount > 0) parts.push(`${spellCount} spell${spellCount === 1 ? "" : "s"}`);
   if (patronCount > 0) parts.push(`${patronCount} patron${patronCount === 1 ? "" : "s"}`);
   if (deityCount > 0) parts.push(`${deityCount} deit${deityCount === 1 ? "y" : "ies"}`);
+  if (monsterCount > 0) parts.push(`${monsterCount} monster${monsterCount === 1 ? "" : "s"}`);
   const el = document.getElementById("rulebook-import-status");
   if (el) el.textContent = parts.length ? `${parts.join(", ")} currently loaded for this scene.` : "Nothing imported yet.";
   // Small count badge on the collapsed trigger button (same
@@ -20534,8 +20589,9 @@ document.getElementById("rulebook-import-btn").addEventListener("click", async (
   const hasSpells = parsed && typeof parsed === "object" && parsed.spells && typeof parsed.spells === "object";
   const hasPatrons = parsed && typeof parsed === "object" && parsed.patrons && typeof parsed.patrons === "object";
   const hasDeities = parsed && typeof parsed === "object" && parsed.deities && typeof parsed.deities === "object";
-  if (!hasSpells && !hasPatrons && !hasDeities) {
-    el.textContent = `Expected a top-level "spells", "patrons", and/or "deities" object, e.g. {"spells":{"Magic missile":{"level":"1","range":"Touch","duration":"Instant","castingTime":"1 action","save":"Will","description":"...","manifestation":"...","effectRows":[...],"corruption":"...","misfire":"..."}},"patrons":{"a lord of a hidden fey court":"..."},"deities":{"a Lawful war-god":"..."}}.`;
+  const hasMonsters = parsed && typeof parsed === "object" && parsed.monsters && typeof parsed.monsters === "object";
+  if (!hasSpells && !hasPatrons && !hasDeities && !hasMonsters) {
+    el.textContent = `Expected a top-level "spells", "patrons", "deities", and/or "monsters" object, e.g. {"spells":{"Magic missile":{"level":"1","range":"Touch","duration":"Instant","castingTime":"1 action","save":"Will","description":"...","manifestation":"...","effectRows":[...],"corruption":"...","misfire":"..."}},"patrons":{"a lord of a hidden fey court":"..."},"deities":{"a Lawful war-god":"..."},"monsters":{"Goblin Scout":{"init":"+2","ac":"13","hd":"1d8","mv":"30'","act":"1d20","sp":"infravision 60'","fort":"+0","ref":"+2","will":"+0","al":"C","attacks":[{"name":"shortsword","bonus":"+2","damage":"1d6+1"}]}}}.`;
     return;
   }
   try {
@@ -20545,17 +20601,21 @@ document.getElementById("rulebook-import-btn").addEventListener("click", async (
       spells: { ...(existingData.spells || {}), ...(parsed.spells || {}) },
       patrons: { ...(existingData.patrons || {}), ...(parsed.patrons || {}) },
       deities: { ...(existingData.deities || {}), ...(parsed.deities || {}) },
+      monsters: { ...(existingData.monsters || {}), ...(parsed.monsters || {}) },
     };
     lastRulebookData = next;
     await OBR.scene.setMetadata({ [RULEBOOK_DATA_METADATA_KEY]: next });
     document.getElementById("rulebook-import-textarea").value = "";
     refreshRulebookImportStatus();
-    // Immediately re-apply to whatever spell rows are already showing on
-    // THIS open Sheet - without this, a spell row picked before the
-    // import completed would only ever pick up the new data the next
-    // time its name gets re-picked or the token reloads, which reads as
-    // "importing doesn't do anything" even though it worked.
+    // Immediately re-apply to whatever spell rows (or, for a Monster
+    // sheet, the top-level fields/Actions list) are already showing on
+    // THIS open Sheet - without this, a spell row picked (or a monster
+    // named) before the import completed would only ever pick up the new
+    // data the next time its name gets re-picked or the token reloads,
+    // which reads as "importing doesn't do anything" even though it
+    // worked.
     refreshVisibleSpellRowsFromRulebookData();
+    if (currentMode === "monster") applyRulebookDataToMonsterSheet(nameEl.value.trim());
   } catch (err) {
     console.error("DCC sheet: failed to import rulebook data", err);
     el.textContent = `Import failed: ${err.message}`;
@@ -21270,6 +21330,7 @@ async function loadSelection(selection) {
     suppressChange = true;
     nameEl.value = item.name || "";
     suppressChange = false;
+    if (mode === "monster") applyRulebookDataToMonsterSheet(item.name || "");
     lastAppliedSheetSignature = signature;
     lastKnownMonsterData = monsterData;
     lastKnownPcData = pcData;
@@ -21418,6 +21479,7 @@ OBR.onReady(async () => {
             fillForm("pc", pcData);
             setMode(mode, false);
             nameEl.value = item.name || "";
+            if (mode === "monster") applyRulebookDataToMonsterSheet(item.name || "");
             lastAppliedSheetSignature = signature;
             lastKnownMonsterData = monsterData;
             lastKnownPcData = pcData;

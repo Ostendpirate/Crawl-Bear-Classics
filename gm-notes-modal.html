@@ -240,8 +240,11 @@
           <div id="gm-notes-pdf-pages" style="display:none"></div>
           <div class="footer-row">
             <button type="button" class="btn-next" id="gm-notes-save-btn">💾 Save</button>
+            <button type="button" class="hp-btn" id="gm-notes-extract-btn" title="Scans this note's text for &quot;## Monster: Name&quot; blocks and stages them for auto-fill on any Monster sheet with a matching Name.">🐉 Extract Monsters</button>
             <div class="fumble-die-note" id="gm-notes-save-status"></div>
           </div>
+          <div class="fumble-die-note" id="gm-notes-extract-status" style="margin-top:4px;"></div>
+          <div class="fumble-die-note" style="margin-top:2px;">Template: <code>## Monster: Name</code> followed by <code>- Field: value</code> bullets (Init, AC, HD, MV, Act, Atk, SP, Fort/Ref/Will, AL) - stops at the next heading.</div>
         </div>
       </div>
     </div>
@@ -267,6 +270,12 @@ const CAMPAIGN_NOTE_ID = "campaign-overview";
 // this same modal - OBR.modal.close needs it to know which modal to close,
 // and there's no way to ask OBR "what's my own id" from inside the page.
 const GM_NOTES_MODAL_ID = "com.claude.monster-sheet/gm-notes-modal";
+// Same key index.html's Rulebook Data Import uses for spells/patrons/
+// deities - "Extract Monsters" below adds a "monsters" category to that
+// same scene-metadata object, so a Monster sheet's own name-match auto-
+// fill (applyRulebookDataToMonsterSheet in index.html) picks it up with
+// no separate plumbing on that side.
+const RULEBOOK_DATA_METADATA_KEY = "com.claude.monster-sheet/rulebook-data";
 
 // Which note was last open, and how far scrolled into each note's Preview
 // - both are "where I was looking," per-device viewing state rather than
@@ -770,6 +779,125 @@ document.getElementById("gm-notes-pages-btn").addEventListener("click", () => se
 document.getElementById("gm-notes-new-btn").addEventListener("click", createNote);
 document.getElementById("gm-notes-close-btn").addEventListener("click", () => {
   OBR.modal.close(GM_NOTES_MODAL_ID).catch(err => console.error("DCC GM notes: failed to close modal", err));
+});
+
+// "## Monster: Name" import - splits this note's raw markdown into blocks
+// on that exact heading (case-insensitive, any heading level), each
+// running until the next heading of any kind or the end of the note, so a
+// GM's ordinary prose elsewhere in the same note is left alone. Deliberately
+// only looks at THIS note's own text (never a whole PDF's worth of scraped
+// prose) - it's meant for a GM's own authored encounter write-ups, not for
+// parsing someone else's published module.
+function extractMonsterBlocks(markdown) {
+  const blocks = [];
+  let current = null;
+  (markdown || "").split("\n").forEach(line => {
+    const heading = line.match(/^#+\s*(.*)$/);
+    if (heading) {
+      if (current) blocks.push(current);
+      const monsterHeading = heading[1].match(/^Monster:\s*(.+)$/i);
+      current = monsterHeading ? { name: monsterHeading[1].trim(), lines: [] } : null;
+      return;
+    }
+    if (current) current.lines.push(line);
+  });
+  if (current) blocks.push(current);
+  return blocks;
+}
+
+// L/N/C only (this app's own #al <select> only offers those three) -
+// takes the first letter of whatever was typed ("Chaotic", "chaotic",
+// "C") rather than requiring an exact match, since a GM writing prose
+// naturally reaches for the full word.
+function normalizeAlignment(value) {
+  const first = (value || "").trim().charAt(0).toUpperCase();
+  return (first === "L" || first === "N" || first === "C") ? first : "";
+}
+
+// Best-effort split of one "Atk:" line into the same {name, bonus, damage}
+// shape the Sheet's own Actions rows use - e.g. "shortsword +2 melee
+// (1d6+1)" or "bite +4 (1d6)". A line that doesn't match either shape
+// isn't discarded - it becomes the attack's name with blank bonus/damage,
+// so nothing typed is ever silently lost, just left for the GM to split
+// by hand on the sheet.
+function parseAttackLine(value) {
+  const withDamage = value.match(/^(.*?)\s*([+-]\s*\d+)\s*(?:melee|ranged)?\s*\(([^)]+)\)\s*$/i);
+  if (withDamage) return { name: withDamage[1].trim(), bonus: withDamage[2].replace(/\s+/g, ""), damage: withDamage[3].trim() };
+  const bonusOnly = value.match(/^(.*?)\s*([+-]\s*\d+)\s*(?:melee|ranged)?\s*$/i);
+  if (bonusOnly) return { name: bonusOnly[1].trim(), bonus: bonusOnly[2].replace(/\s+/g, ""), damage: "" };
+  return { name: value.trim(), bonus: "", damage: "" };
+}
+
+function assignMonsterField(entry, key, value) {
+  switch (key) {
+    case "init": entry.init = value; break;
+    case "ac": entry.ac = value; break;
+    case "hd": entry.hd = value; break;
+    case "mv": case "move": entry.mv = value; break;
+    case "act": entry.act = value; break;
+    case "crit": entry.crit = value; break;
+    case "sp": case "special": entry.sp = value; break;
+    case "notes": entry.notes = value; break;
+    case "fort": case "fortitude": entry.fort = value; break;
+    case "ref": case "reflex": entry.ref = value; break;
+    case "will": entry.will = value; break;
+    case "al": case "alignment": entry.al = normalizeAlignment(value); break;
+    case "atk": case "attack": entry.attacks.push(parseAttackLine(value)); break;
+    default:
+      // An unrecognized field name still lands somewhere (folded into
+      // Notes) rather than being silently dropped - a typo'd field label
+      // shouldn't just erase whatever the GM wrote next to it.
+      entry.notes = entry.notes ? `${entry.notes}\n${key}: ${value}` : `${key}: ${value}`;
+  }
+}
+
+// Reads a block's "- Field: value" bullet lines. A single line can hold
+// several fields at once (e.g. "Fort: +0, Ref: +2, Will: +0"), split on a
+// comma/semicolon only where a plausible "Label:" actually follows - so a
+// value that itself contains a comma (most Atk lines, once damage dice are
+// involved) doesn't get mangled into pieces.
+function parseMonsterBlock(block) {
+  const entry = { attacks: [] };
+  block.lines.forEach(rawLine => {
+    const bullet = rawLine.match(/^\s*[-*]\s*(.+)$/);
+    if (!bullet) return;
+    bullet[1].split(/[,;]\s*(?=[A-Za-z][A-Za-z .]{0,20}:)/).forEach(pair => {
+      const kv = pair.match(/^([A-Za-z][A-Za-z .]{0,20}):\s*(.+)$/);
+      if (!kv) return;
+      assignMonsterField(entry, kv[1].trim().toLowerCase(), kv[2].trim());
+    });
+  });
+  return entry;
+}
+
+document.getElementById("gm-notes-extract-btn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("gm-notes-extract-status");
+  const blocks = extractMonsterBlocks(document.getElementById("gm-notes-textarea").value);
+  if (!blocks.length) {
+    statusEl.textContent = 'No "## Monster: Name" blocks found in this note.';
+    statusEl.style.color = "#c97b7b";
+    return;
+  }
+  const monsters = {};
+  blocks.forEach(b => { monsters[b.name] = parseMonsterBlock(b); });
+  try {
+    const sceneMeta = await OBR.scene.getMetadata();
+    const existing = sceneMeta[RULEBOOK_DATA_METADATA_KEY] || {};
+    const next = {
+      spells: existing.spells || {},
+      patrons: existing.patrons || {},
+      deities: existing.deities || {},
+      monsters: { ...(existing.monsters || {}), ...monsters },
+    };
+    await OBR.scene.setMetadata({ [RULEBOOK_DATA_METADATA_KEY]: next });
+    const names = Object.keys(monsters).join(", ");
+    statusEl.textContent = `Imported ${blocks.length} monster${blocks.length === 1 ? "" : "s"}: ${names}. Type a matching Name on a Monster sheet to auto-fill it.`;
+    statusEl.style.color = "var(--good)";
+  } catch (err) {
+    console.error("DCC GM notes: monster extraction failed", err);
+    statusEl.textContent = `Couldn't save extracted monsters: ${err.message}`;
+    statusEl.style.color = "#c97b7b";
+  }
 });
 
 // pdf.js is only needed once a GM actually picks a PDF, so it's loaded
