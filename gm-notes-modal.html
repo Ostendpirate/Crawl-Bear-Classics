@@ -244,7 +244,7 @@
             <div class="fumble-die-note" id="gm-notes-save-status"></div>
           </div>
           <div class="fumble-die-note" id="gm-notes-extract-status" style="margin-top:4px;"></div>
-          <div class="fumble-die-note" style="margin-top:2px;">Template: <code>## Monster: Name</code> followed by <code>- Field: value</code> bullets (Init, AC, HD, MV, Act, Atk, SP, Fort/Ref/Will, AL) - stops at the next heading.</div>
+          <div class="fumble-die-note" style="margin-top:2px;">Template: <code>## Monster: Name</code> followed by <code>- Field: value</code> bullets (Init, AC, HD, HP, MV, Act, Atk, SP, Fort/Ref/Will, AL) - stops at the next heading.</div>
         </div>
       </div>
     </div>
@@ -833,6 +833,7 @@ function assignMonsterField(entry, key, value) {
     case "init": entry.init = value; break;
     case "ac": entry.ac = value; break;
     case "hd": entry.hd = value; break;
+    case "hp": entry.hp = value; break;
     case "mv": case "move": entry.mv = value; break;
     case "act": entry.act = value; break;
     case "crit": entry.crit = value; break;
@@ -842,7 +843,13 @@ function assignMonsterField(entry, key, value) {
     case "ref": case "reflex": entry.ref = value; break;
     case "will": entry.will = value; break;
     case "al": case "alignment": entry.al = normalizeAlignment(value); break;
-    case "atk": case "attack": entry.attacks.push(parseAttackLine(value)); break;
+    // "Atk: club +6 melee (1d10+4) or thrown crate +4 ranged (1d8+2)" is a
+    // common DCC shorthand for "pick one of these" - split into separate
+    // attack rows on " or " rather than letting the single-attack regex
+    // below swallow both options into one mangled name.
+    case "atk": case "attack":
+      value.split(/\s+or\s+/i).forEach(option => entry.attacks.push(parseAttackLine(option.trim())));
+      break;
     default:
       // An unrecognized field name still lands somewhere (folded into
       // Notes) rather than being silently dropped - a typo'd field label

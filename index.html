@@ -1637,7 +1637,7 @@
       <button class="tab-btn" id="nav-chat">Log</button>
       <button class="tab-btn" id="nav-notes" style="display:none;">Notes</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-09-07 13:41</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-09-07 13:44</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2803,9 +2803,9 @@
       </div>
       <div class="tables-modal-body">
         <div class="fumble-die-note" style="margin-bottom:6px;">
-          Format: <code>{"spells":{"Magic missile":{"level":"1","range":"Touch","duration":"Instant","castingTime":"1 action","save":"Will","description":"...","manifestation":"...","effectRows":[{"range":"12-13","text":"..."}],"corruption":"...","misfire":"..."}},"patrons":{"a lord of a hidden fey court":"..."},"deities":{"a Lawful war-god":"..."},"monsters":{"Goblin Scout":{"init":"+2","ac":"13","hd":"1d8","mv":"30'","act":"1d20","sp":"infravision 60'","fort":"+0","ref":"+2","will":"+0","al":"C","notes":"...","attacks":[{"name":"shortsword","bonus":"+2","damage":"1d6+1"}]}}}</code> - any subset of "spells"/"patrons"/"deities"/"monsters" is fine, and every field above is optional too. Every field only auto-fills when its own name is picked/typed and it's currently blank - it never overwrites something already typed in. A monster's Actions list only fills when completely empty.
+          Format: <code>{"spells":{"Magic missile":{"level":"1","range":"Touch","duration":"Instant","castingTime":"1 action","save":"Will","description":"...","manifestation":"...","effectRows":[{"range":"12-13","text":"..."}],"corruption":"...","misfire":"..."}},"patrons":{"a lord of a hidden fey court":"..."},"deities":{"a Lawful war-god":"..."},"monsters":{"Goblin Scout":{"init":"+2","ac":"13","hd":"1d8","hp":"4","mv":"30'","act":"1d20","sp":"infravision 60'","fort":"+0","ref":"+2","will":"+0","al":"C","notes":"...","attacks":[{"name":"shortsword","bonus":"+2","damage":"1d6+1"}]}}}</code> - any subset of "spells"/"patrons"/"deities"/"monsters" is fine, and every field above is optional too. Every field only auto-fills when its own name is picked/typed and it's currently blank - it never overwrites something already typed in. A monster's Actions list only fills when completely empty, and HP only fills Current+Max together when both are blank.
         </div>
-        <textarea id="rulebook-import-textarea" rows="6" placeholder='{"spells": {"Magic missile": {"level": "1", "range": "Touch", "duration": "Instant", "castingTime": "1 action", "save": "Will", "description": "...", "manifestation": "...", "effectRows": [{"range": "12-13", "text": "..."}], "corruption": "...", "misfire": "..."}}, "patrons": {"a lord of a hidden fey court": "..."}, "deities": {"a Lawful war-god": "..."}, "monsters": {"Goblin Scout": {"init": "+2", "ac": "13", "hd": "1d8", "mv": "30", "act": "1d20", "sp": "infravision 60", "fort": "+0", "ref": "+2", "will": "+0", "al": "C", "attacks": [{"name": "shortsword", "bonus": "+2", "damage": "1d6+1"}]}}}' style="width:100%; box-sizing:border-box; font-family:monospace; font-size:11px;"></textarea>
+        <textarea id="rulebook-import-textarea" rows="6" placeholder='{"spells": {"Magic missile": {"level": "1", "range": "Touch", "duration": "Instant", "castingTime": "1 action", "save": "Will", "description": "...", "manifestation": "...", "effectRows": [{"range": "12-13", "text": "..."}], "corruption": "...", "misfire": "..."}}, "patrons": {"a lord of a hidden fey court": "..."}, "deities": {"a Lawful war-god": "..."}, "monsters": {"Goblin Scout": {"init": "+2", "ac": "13", "hd": "1d8", "hp": "4", "mv": "30", "act": "1d20", "sp": "infravision 60", "fort": "+0", "ref": "+2", "will": "+0", "al": "C", "attacks": [{"name": "shortsword", "bonus": "+2", "damage": "1d6+1"}]}}}' style="width:100%; box-sizing:border-box; font-family:monospace; font-size:11px;"></textarea>
         <div class="row" style="margin-top:6px;">
           <div>
             <label>Or load a .json file</label>
@@ -12546,6 +12546,16 @@ function applyRulebookDataToMonsterSheet(monsterName) {
   const acEl = document.getElementById("ac");
   if (acEl && !acEl.value.trim() && entry.ac) {
     acEl.value = entry.ac;
+    changed = true;
+  }
+  // HP isn't part of MONSTER_ALL_FIELD_IDS - it's the shared hp-current/
+  // hp-max pair every mode has (see MODES.monster.hpCurrentId/hpMaxId) -
+  // fills both with the same starting value, only when both are blank.
+  const hpMaxEl = document.getElementById("hp-max");
+  const hpCurrentEl = document.getElementById("hp-current");
+  if (entry.hp && hpMaxEl && hpCurrentEl && !hpMaxEl.value.trim() && !hpCurrentEl.value.trim()) {
+    hpMaxEl.value = entry.hp;
+    hpCurrentEl.value = entry.hp;
     changed = true;
   }
   const alEl = document.getElementById("al");
