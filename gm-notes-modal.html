@@ -576,7 +576,7 @@ function deleteNote(id) {
   }
   renderNotesSidebar();
   setNotesMode(notesMode);
-  persistNotes("Deleted.");
+  persistAllNotes("Deleted.");
 
   if (pdfMetaByNoteId.has(id)) {
     pdfMetaByNoteId.delete(id);
@@ -584,34 +584,32 @@ function deleteNote(id) {
   }
 }
 
-async function persistNotes(successMessage) {
+// Always writes BOTH the scene notes and the campaign note, regardless of
+// which one happens to be active right now. commitActiveNoteEdits keeps
+// whichever note you just switched away from current in memory (scene
+// note or campaign note alike), but nothing else ever flushes that to its
+// actual metadata store on its own - saving only the active one meant
+// editing the campaign note, switching to a scene note, and hitting Save
+// there would silently persist the scene note while dropping the
+// campaign note's still-unsaved edit. Run together, not sequentially, so
+// one failing doesn't skip the other.
+async function persistAllNotes(successMessage) {
   const statusEl = document.getElementById("gm-notes-save-status");
-  try {
-    await OBR.scene.setMetadata({ [GM_NOTES_METADATA_KEY]: { notes: notesList } });
-    statusEl.textContent = successMessage;
-    statusEl.style.color = "var(--good)";
-    clearTimeout(persistNotes._t);
-    persistNotes._t = setTimeout(() => { statusEl.textContent = ""; }, 3000);
-  } catch (err) {
-    console.error("DCC GM notes: save failed", err);
-    statusEl.textContent = `Save failed: ${err.message}`;
+  const results = await Promise.allSettled([
+    OBR.scene.setMetadata({ [GM_NOTES_METADATA_KEY]: { notes: notesList } }),
+    OBR.room.setMetadata({ [GM_CAMPAIGN_NOTE_METADATA_KEY]: { title: campaignNote.title, content: campaignNote.content } }),
+  ]);
+  const failure = results.find(r => r.status === "rejected");
+  if (failure) {
+    console.error("DCC GM notes: save failed", failure.reason);
+    statusEl.textContent = `Save failed: ${failure.reason.message}`;
     statusEl.style.color = "#c97b7b";
+    return;
   }
-}
-
-async function persistCampaignNote(successMessage) {
-  const statusEl = document.getElementById("gm-notes-save-status");
-  try {
-    await OBR.room.setMetadata({ [GM_CAMPAIGN_NOTE_METADATA_KEY]: { title: campaignNote.title, content: campaignNote.content } });
-    statusEl.textContent = successMessage;
-    statusEl.style.color = "var(--good)";
-    clearTimeout(persistCampaignNote._t);
-    persistCampaignNote._t = setTimeout(() => { statusEl.textContent = ""; }, 3000);
-  } catch (err) {
-    console.error("DCC GM notes: campaign note save failed", err);
-    statusEl.textContent = `Save failed: ${err.message}`;
-    statusEl.style.color = "#c97b7b";
-  }
+  statusEl.textContent = successMessage;
+  statusEl.style.color = "var(--good)";
+  clearTimeout(persistAllNotes._t);
+  persistAllNotes._t = setTimeout(() => { statusEl.textContent = ""; }, 3000);
 }
 
 // marked + DOMPurify are only needed to render Preview, so they're loaded
@@ -858,11 +856,7 @@ document.getElementById("gm-notes-pdf-file").addEventListener("change", async (e
 document.getElementById("gm-notes-save-btn").addEventListener("click", async () => {
   commitActiveNoteEdits();
   renderNotesSidebar();
-  if (activeNoteId === CAMPAIGN_NOTE_ID) {
-    await persistCampaignNote("Saved.");
-  } else {
-    await persistNotes("Saved.");
-  }
+  await persistAllNotes("Saved.");
   setNotesMode("preview");
 });
 
