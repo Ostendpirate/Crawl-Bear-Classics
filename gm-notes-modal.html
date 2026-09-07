@@ -593,8 +593,15 @@ function deleteNote(id) {
 // there would silently persist the scene note while dropping the
 // campaign note's still-unsaved edit. Run together, not sequentially, so
 // one failing doesn't skip the other.
-async function persistAllNotes(successMessage) {
-  const statusEl = document.getElementById("gm-notes-save-status");
+//
+// statusElId defaults to the footer Save status line, but the import flow
+// passes its own status line instead - otherwise "Reading PDF..." would
+// sit there forever while the real save result silently landed in a
+// different part of the screen. Timeouts are tracked per element so one
+// caller's message doesn't get cut short by the other's.
+const persistAllNotesTimeouts = {};
+async function persistAllNotes(successMessage, statusElId = "gm-notes-save-status") {
+  const statusEl = document.getElementById(statusElId);
   const results = await Promise.allSettled([
     OBR.scene.setMetadata({ [GM_NOTES_METADATA_KEY]: { notes: notesList } }),
     OBR.room.setMetadata({ [GM_CAMPAIGN_NOTE_METADATA_KEY]: { title: campaignNote.title, content: campaignNote.content } }),
@@ -608,8 +615,8 @@ async function persistAllNotes(successMessage) {
   }
   statusEl.textContent = successMessage;
   statusEl.style.color = "var(--good)";
-  clearTimeout(persistAllNotes._t);
-  persistAllNotes._t = setTimeout(() => { statusEl.textContent = ""; }, 3000);
+  clearTimeout(persistAllNotesTimeouts[statusElId]);
+  persistAllNotesTimeouts[statusElId] = setTimeout(() => { statusEl.textContent = ""; }, 3000);
 }
 
 // marked + DOMPurify are only needed to render Preview, so they're loaded
@@ -771,15 +778,20 @@ document.getElementById("gm-notes-pdf-file").addEventListener("change", async (e
   if (/\.(md|markdown|txt)$/i.test(file.name)) {
     statusEl.textContent = "Reading file...";
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const text = String(reader.result || "");
       if (targetIsCampaignNote) appendToCampaignNote(file, text);
       else createNoteFromImport(file, text);
       setNotesMode("edit");
-      statusEl.textContent = targetIsCampaignNote
-        ? `Imported "${file.name}" into the Campaign Overview - review below, then Save.`
-        : `Imported "${file.name}" as a new note - review below, then Save.`;
-      statusEl.style.color = "var(--good)";
+      // Saved immediately rather than left sitting only in memory until a
+      // separate manual Save click - an import is the kind of thing that
+      // reads as "done" the moment it lands on screen, so leaving the
+      // modal right after (without noticing the "then Save" hint) used to
+      // silently lose it. Still fully editable afterward; a later Save
+      // just persists whatever's been tweaked since.
+      await persistAllNotes(targetIsCampaignNote
+        ? `Imported "${file.name}" into the Campaign Overview and saved.`
+        : `Imported "${file.name}" as a new note and saved.`, "gm-notes-import-status");
     };
     reader.onerror = () => {
       console.error("DCC GM notes: text import failed", reader.error);
@@ -843,9 +855,13 @@ document.getElementById("gm-notes-pdf-file").addEventListener("change", async (e
         pagesNote = " (Couldn't cache page images locally - text import still worked.)";
       }
     }
+    // Saved immediately (see the matching comment in the markdown/text
+    // branch above) rather than left only in memory until a separate
+    // manual Save click - the extracted text is what actually gets
+    // persisted to scene/room metadata; the cached page images above are
+    // already durable in IndexedDB regardless.
     const destination = targetIsCampaignNote ? "into the Campaign Overview" : "as a new note";
-    statusEl.textContent = `Imported ${doc.numPages} page${doc.numPages === 1 ? "" : "s"} from "${file.name}" ${destination} - review below, then Save.${pagesNote} (Scanned/image-only pages won't have extractable text.)`;
-    statusEl.style.color = "var(--good)";
+    await persistAllNotes(`Imported ${doc.numPages} page${doc.numPages === 1 ? "" : "s"} from "${file.name}" ${destination} and saved.${pagesNote} (Scanned/image-only pages won't have extractable text.)`, "gm-notes-import-status");
   } catch (err) {
     console.error("DCC GM notes: PDF import failed", err);
     statusEl.textContent = "Couldn't read that PDF - it may be scanned/image-only, password-protected, or corrupted.";
