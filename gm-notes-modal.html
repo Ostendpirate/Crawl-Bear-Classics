@@ -76,6 +76,54 @@
   }
   .hp-btn:hover { background: #574739; }
   .footer-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .mode-tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+  .mode-tab-btn {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .mode-tab-btn:hover { border-color: var(--accent); }
+  .mode-tab-btn.active { background: var(--accent); color: #1e1b18; border-color: var(--accent); }
+  .notes-preview {
+    flex: 1;
+    width: 100%;
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 16px;
+    line-height: 1.55;
+  }
+  .notes-preview > :first-child { margin-top: 0; }
+  .notes-preview > :last-child { margin-bottom: 0; }
+  .notes-preview h1, .notes-preview h2, .notes-preview h3 {
+    color: var(--accent);
+    margin: 0.7em 0 0.3em;
+    line-height: 1.3;
+  }
+  .notes-preview h1 { font-size: 1.4em; }
+  .notes-preview h2 { font-size: 1.2em; }
+  .notes-preview h3 { font-size: 1.05em; }
+  .notes-preview p { margin: 0.5em 0; }
+  .notes-preview ul, .notes-preview ol { margin: 0.5em 0; padding-left: 1.4em; }
+  .notes-preview li { margin: 0.2em 0; }
+  .notes-preview code { background: var(--border); border-radius: 3px; padding: 1px 4px; font-size: 0.9em; }
+  .notes-preview pre { background: var(--border); border-radius: 6px; padding: 8px 10px; overflow-x: auto; }
+  .notes-preview pre code { background: none; padding: 0; }
+  .notes-preview blockquote { border-left: 3px solid var(--accent); margin: 0.5em 0; padding: 2px 12px; color: var(--muted); }
+  .notes-preview hr { border: none; border-top: 1px solid var(--border); margin: 1em 0; }
+  .notes-preview a { color: var(--accent); }
+  .notes-preview table { border-collapse: collapse; margin: 0.5em 0; }
+  .notes-preview th, .notes-preview td { border: 1px solid var(--border); padding: 4px 8px; }
+  .notes-preview strong { color: var(--text); }
 </style>
 </head>
 <body>
@@ -89,7 +137,12 @@
       </div>
       <div class="fumble-die-note" id="gm-notes-import-status" style="flex:1 1 auto;"></div>
     </div>
-    <textarea id="gm-notes-textarea" placeholder="Session prep, secrets, NPC motives..."></textarea>
+    <div class="mode-tabs">
+      <button type="button" class="mode-tab-btn" id="gm-notes-preview-btn">👁 Preview</button>
+      <button type="button" class="mode-tab-btn" id="gm-notes-edit-btn">✏️ Edit</button>
+    </div>
+    <textarea id="gm-notes-textarea" placeholder="Session prep, secrets, NPC motives... (Markdown - headings, **bold**, lists, etc)"></textarea>
+    <div class="notes-preview" id="gm-notes-preview" style="display:none"></div>
     <div class="footer-row">
       <button type="button" class="btn-next" id="gm-notes-save-btn">💾 Save</button>
       <button type="button" class="hp-btn" id="gm-notes-clear-btn" title="Wipes these notes from this scene.">Clear</button>
@@ -106,13 +159,69 @@ import OBR from "https://esm.sh/@owlbear-rodeo/sdk@2";
 const GM_NOTES_METADATA_KEY = "com.claude.monster-sheet/gm-notes";
 
 let lastGmNotes = "";
+// "preview" is the default since this modal's whole point is reviewing
+// notes during play - Edit is where typing/importing happens, and saving
+// or switching back to Preview re-renders from the textarea's raw text.
+let notesMode = "preview";
 
 function refreshGmNotesTextarea() {
   const el = document.getElementById("gm-notes-textarea");
   // Skipped while focused so an incoming metadata echo (this same save,
   // or another GM client's edit) never clobbers text being typed here.
   if (el && document.activeElement !== el) el.value = lastGmNotes;
+  if (notesMode === "preview") renderNotesPreview();
 }
+
+// marked + DOMPurify are only needed to render Preview, so they're loaded
+// lazily from the same esm.sh CDN this page already pulls the OBR SDK and
+// pdf.js from - no bundler/build step here to vendor them into.
+let markdownLibsPromise = null;
+function loadMarkdownLibs() {
+  if (!markdownLibsPromise) {
+    markdownLibsPromise = Promise.all([
+      import("https://esm.sh/marked@13.0.3"),
+      import("https://esm.sh/dompurify@3.1.6"),
+    ]).then(([markedMod, dompurifyMod]) => ({
+      marked: markedMod.marked,
+      DOMPurify: dompurifyMod.default,
+    }));
+  }
+  return markdownLibsPromise;
+}
+
+async function renderNotesPreview() {
+  const previewEl = document.getElementById("gm-notes-preview");
+  const raw = document.getElementById("gm-notes-textarea").value;
+  if (!raw.trim()) {
+    previewEl.innerHTML = `<div class="fumble-die-note">Nothing written yet - switch to Edit to start typing or import a file.</div>`;
+    return;
+  }
+  try {
+    const { marked, DOMPurify } = await loadMarkdownLibs();
+    // Sanitized even though this is the GM's own content, not untrusted
+    // input - it's still rendered via innerHTML, and a PDF/markdown file
+    // dropped in from someone else (a downloaded module, a player's
+    // shared handout) is exactly the kind of "content from outside this
+    // session" this guards against.
+    previewEl.innerHTML = DOMPurify.sanitize(marked.parse(raw));
+  } catch (err) {
+    console.error("DCC GM notes: markdown render failed", err);
+    previewEl.textContent = raw;
+  }
+}
+
+function setNotesMode(mode) {
+  notesMode = mode;
+  document.getElementById("gm-notes-preview-btn").classList.toggle("active", mode === "preview");
+  document.getElementById("gm-notes-edit-btn").classList.toggle("active", mode === "edit");
+  document.getElementById("gm-notes-textarea").style.display = mode === "edit" ? "block" : "none";
+  document.getElementById("gm-notes-preview").style.display = mode === "preview" ? "block" : "none";
+  if (mode === "preview") renderNotesPreview();
+  else document.getElementById("gm-notes-textarea").focus();
+}
+document.getElementById("gm-notes-preview-btn").addEventListener("click", () => setNotesMode("preview"));
+document.getElementById("gm-notes-edit-btn").addEventListener("click", () => setNotesMode("edit"));
+setNotesMode("preview");
 
 function appendToGmNotes(file, text) {
   const textarea = document.getElementById("gm-notes-textarea");
@@ -140,6 +249,10 @@ document.getElementById("gm-notes-pdf-file").addEventListener("change", async (e
   if (!file) return;
   const statusEl = document.getElementById("gm-notes-import-status");
   statusEl.style.color = "";
+  // Switch to Edit right away so the appended raw text lands somewhere
+  // visible - importing while sitting in Preview would silently write into
+  // a hidden textarea with nothing on screen changing.
+  setNotesMode("edit");
 
   // Markdown/plain text is already exactly what the notes field holds, so
   // it skips pdf.js entirely and just reads as text.
@@ -190,6 +303,7 @@ document.getElementById("gm-notes-save-btn").addEventListener("click", async () 
     await OBR.scene.setMetadata({ [GM_NOTES_METADATA_KEY]: value });
     statusEl.textContent = "Saved.";
     statusEl.style.color = "var(--good)";
+    setNotesMode("preview");
     clearTimeout(document.getElementById("gm-notes-save-btn")._statusTimeout);
     document.getElementById("gm-notes-save-btn")._statusTimeout = setTimeout(() => { statusEl.textContent = ""; }, 3000);
   } catch (err) {
@@ -207,6 +321,7 @@ document.getElementById("gm-notes-clear-btn").addEventListener("click", async ()
     await OBR.scene.setMetadata({ [GM_NOTES_METADATA_KEY]: "" });
     statusEl.textContent = "Cleared.";
     statusEl.style.color = "var(--good)";
+    setNotesMode("preview");
   } catch (err) {
     console.error("DCC GM notes: clear failed", err);
     statusEl.textContent = `Clear failed: ${err.message}`;
