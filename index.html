@@ -1637,7 +1637,7 @@
       <button class="tab-btn" id="nav-chat">Log</button>
       <button class="tab-btn" id="nav-notes" style="display:none;">Notes</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-09-07 13:44</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-09-07 16:22</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -16599,7 +16599,13 @@ async function toggleTokenSavedImpl(itemId) {
   }
 
   // Merges into the current in-memory maps, not a fresh network re-fetch -
-  // see withRoomMetadataLock's own comment on why.
+  // see withRoomMetadataLock's own comment on why. Both PRE-toggle values
+  // are kept so a failed write below can roll the optimistic update back
+  // instead of leaving the ★ showing "saved" locally while the room's own
+  // copy silently never got it - which used to mean the star only told the
+  // truth again after the next reload (see the catch block).
+  const previousMap = roomOwnerMap;
+  const previousTemplates = roomTokenTemplates;
   const nextMap = { ...roomOwnerMap };
   const nextTemplates = { ...roomTokenTemplates };
   if (!existingRosterId) {
@@ -16629,7 +16635,21 @@ async function toggleTokenSavedImpl(itemId) {
       : `${item.name || "Token"} saved - will follow the party into new scenes.`, false, 4000);
   } catch (err) {
     console.error("DCC sheet: failed to persist save toggle", err);
-    showStatus("Saved locally, but sync failed - try again", true);
+    // Roll back the optimistic update - the ★ needs to go back to
+    // reflecting reality right now, not just whenever this popover next
+    // happens to reload. OBR.room.setMetadata caps each room-metadata
+    // value at 16 kB total; roomTokenTemplates holds a full item clone
+    // (the whole character sheet) per saved token, so this is the
+    // realistic way to actually hit that ceiling - worth a specific,
+    // actionable message rather than a generic "sync failed".
+    roomOwnerMap = previousMap;
+    roomTokenTemplates = previousTemplates;
+    if (rosterIdx !== -1) lastRosterItems[rosterIdx] = item;
+    renderTokenRoster();
+    const isSizeLimit = /size limit/i.test(err.message || "");
+    showStatus(isSizeLimit
+      ? "Couldn't save - too many saved tokens for Owlbear's room storage (16 kB total). Un-save one to free up room, then try again."
+      : `Couldn't save - sync failed (${err.message}). Try again.`, true, 8000);
   }
 }
 
@@ -17099,7 +17119,18 @@ async function handleOwnerSelectChange(id, itemId, sel) {
     nextMap[rosterId] = { id: null, name: null };
   }
   roomOwnerMap = nextMap;
-  roomTokenTemplates = id
+  // Only REFRESHES an already-saved token's snapshot (so its clone picks
+  // up the new owner) - never CREATES one. Saving and owning are meant to
+  // be independent (see the ★ toggle's own comment), but this used to
+  // unconditionally clone the item in here whenever id was truthy, which
+  // silently started "saving" every token the moment it got assigned to a
+  // player, whether the GM ever clicked ★ or not. Each saved snapshot is a
+  // full item clone (the whole character sheet) living in ROOM_TOKEN_
+  // TEMPLATE_KEY, a single shared room-metadata value OBR caps at 16 kB
+  // total - every token silently added here ate into that budget, making
+  // "the very next save fails with a mysterious size-limit error" far more
+  // likely to hit a GM who never even knew this was happening.
+  roomTokenTemplates = (id && nextTemplates[rosterId])
     ? { ...nextTemplates, [rosterId]: cloneItemForTemplate(item) }
     : nextTemplates;
 
