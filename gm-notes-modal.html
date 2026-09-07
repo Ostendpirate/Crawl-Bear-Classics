@@ -758,6 +758,7 @@ document.getElementById("gm-notes-save-btn").addEventListener("click", async () 
 // (another GM client editing, or this same save echoing back). Skipped
 // while the title/textarea is focused so an echo never clobbers text being
 // typed here right now.
+let hasAppliedInitialMode = false;
 function applyIncomingNotes(rawValue) {
   const active = document.activeElement;
   if (active && (active.id === "gm-notes-title" || active.id === "gm-notes-textarea")) return;
@@ -770,7 +771,20 @@ function applyIncomingNotes(rawValue) {
   saveLastActiveNoteId(activeNoteId);
   loadNoteIntoEditor(getActiveNote());
   renderNotesSidebar();
-  if (notesMode === "preview") renderNotesPreview();
+
+  if (!hasAppliedInitialMode) {
+    hasAppliedInitialMode = true;
+    // Opens straight into Preview - this modal's whole point is reviewing
+    // notes during play - but only once there's actually a note to show;
+    // with none yet, the empty state takes over regardless of mode, and
+    // "+ New Note" already opens its fresh blank note into Edit.
+    if (activeNoteId) setNotesMode("preview");
+  } else if (notesMode === "preview") {
+    // A later sync (another GM client's edit, or this save echoing back)
+    // - only refresh the content, don't yank whatever mode the GM is
+    // currently looking at back to Preview.
+    renderNotesPreview();
+  }
 }
 
 OBR.onReady(async () => {
