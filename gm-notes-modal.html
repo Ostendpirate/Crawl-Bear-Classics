@@ -25,6 +25,21 @@
   }
   #app { display: flex; flex-direction: column; height: 100%; padding: 14px 16px 16px; }
   h1 { font-size: 16px; margin: 0 0 2px; letter-spacing: 0.3px; }
+  .header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  #gm-notes-close-btn {
+    flex: 0 0 auto;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    width: 26px;
+    height: 26px;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  #gm-notes-close-btn:hover { background: var(--accent); color: #1e1b18; border-color: var(--accent); }
   .subtitle { color: var(--muted); font-size: 11px; margin-bottom: 10px; }
   .row { display: flex; align-items: flex-end; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
   label {
@@ -193,7 +208,10 @@
 </head>
 <body>
   <div id="app">
-    <h1>GM Notes</h1>
+    <div class="header-row">
+      <h1>GM Notes</h1>
+      <button type="button" id="gm-notes-close-btn" title="Close">✕</button>
+    </div>
     <div class="subtitle">Private scratch space, hidden from players - session prep, secrets, NPC motives, whatever. It's still ordinary scene data underneath (same as the roll log), not encrypted, so treat it as "a player won't casually stumble onto this," not "a player can never access this."</div>
     <div class="row">
       <div style="flex:0 0 auto;">
@@ -245,6 +263,10 @@ const GM_NOTES_METADATA_KEY = "com.claude.monster-sheet/gm-notes";
 // there's meant to be exactly one of these.
 const GM_CAMPAIGN_NOTE_METADATA_KEY = "com.claude.monster-sheet/gm-campaign-note";
 const CAMPAIGN_NOTE_ID = "campaign-overview";
+// Must exactly match the id index.html's openGmNotesModal() uses to open
+// this same modal - OBR.modal.close needs it to know which modal to close,
+// and there's no way to ask OBR "what's my own id" from inside the page.
+const GM_NOTES_MODAL_ID = "com.claude.monster-sheet/gm-notes-modal";
 
 // Which note was last open, and how far scrolled into each note's Preview
 // - both are "where I was looking," per-device viewing state rather than
@@ -746,6 +768,9 @@ document.getElementById("gm-notes-preview-btn").addEventListener("click", () => 
 document.getElementById("gm-notes-edit-btn").addEventListener("click", () => setNotesMode("edit"));
 document.getElementById("gm-notes-pages-btn").addEventListener("click", () => setNotesMode("pages"));
 document.getElementById("gm-notes-new-btn").addEventListener("click", createNote);
+document.getElementById("gm-notes-close-btn").addEventListener("click", () => {
+  OBR.modal.close(GM_NOTES_MODAL_ID).catch(err => console.error("DCC GM notes: failed to close modal", err));
+});
 
 // pdf.js is only needed once a GM actually picks a PDF, so it's loaded
 // lazily from the same esm.sh CDN this page already pulls the OBR SDK
