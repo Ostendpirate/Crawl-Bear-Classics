@@ -35,8 +35,7 @@
     color: var(--muted);
     margin-bottom: 3px;
   }
-  textarea {
-    flex: 1;
+  textarea, input[type=text] {
     width: 100%;
     background: var(--panel);
     border: 1px solid var(--border);
@@ -45,10 +44,10 @@
     padding: 10px 12px;
     font-size: 13px;
     font-family: inherit;
-    line-height: 1.5;
-    resize: none;
   }
-  textarea:focus { outline: none; border-color: var(--accent); }
+  textarea { flex: 1; line-height: 1.5; resize: none; }
+  input[type=text] { font-weight: 600; padding: 7px 10px; }
+  textarea:focus, input[type=text]:focus { outline: none; border-color: var(--accent); }
   .fumble-die-note { font-size: 10px; color: var(--muted); }
   .btn-next {
     background: var(--accent);
@@ -124,6 +123,45 @@
   .notes-preview table { border-collapse: collapse; margin: 0.5em 0; }
   .notes-preview th, .notes-preview td { border: 1px solid var(--border); padding: 4px 8px; }
   .notes-preview strong { color: var(--text); }
+
+  #notes-layout { display: flex; gap: 14px; flex: 1; min-height: 0; }
+  #notes-sidebar {
+    flex: 0 0 190px;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    border-right: 1px solid var(--border);
+    padding-right: 12px;
+  }
+  #notes-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .notes-editor { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .note-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 7px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 3px;
+  }
+  .note-item:hover { background: var(--panel); }
+  .note-item.active { background: var(--accent); color: #1e1b18; font-weight: 600; }
+  .note-item-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .note-item-delete {
+    background: none;
+    border: none;
+    color: inherit;
+    opacity: 0.55;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 2px 4px;
+    line-height: 1;
+    font-family: inherit;
+  }
+  .note-item-delete:hover { opacity: 1; }
+  .notes-empty { color: var(--muted); font-size: 11px; padding: 8px 4px; }
 </style>
 </head>
 <body>
@@ -137,39 +175,209 @@
       </div>
       <div class="fumble-die-note" id="gm-notes-import-status" style="flex:1 1 auto;"></div>
     </div>
-    <div class="mode-tabs">
-      <button type="button" class="mode-tab-btn" id="gm-notes-preview-btn">👁 Preview</button>
-      <button type="button" class="mode-tab-btn" id="gm-notes-edit-btn">✏️ Edit</button>
-    </div>
-    <textarea id="gm-notes-textarea" placeholder="Session prep, secrets, NPC motives... (Markdown - headings, **bold**, lists, etc)"></textarea>
-    <div class="notes-preview" id="gm-notes-preview" style="display:none"></div>
-    <div class="footer-row">
-      <button type="button" class="btn-next" id="gm-notes-save-btn">💾 Save</button>
-      <button type="button" class="hp-btn" id="gm-notes-clear-btn" title="Wipes these notes from this scene.">Clear</button>
-      <div class="fumble-die-note" id="gm-notes-save-status"></div>
+
+    <div id="notes-layout">
+      <div id="notes-sidebar">
+        <button type="button" class="hp-btn" id="gm-notes-new-btn" style="width:100%; margin-bottom:8px;">+ New Note</button>
+        <div id="gm-notes-list"></div>
+      </div>
+      <div id="notes-main">
+        <div id="gm-notes-empty" class="notes-empty" style="display:none;">No notes yet - click "+ New Note" on the left, or import a file above.</div>
+        <div id="gm-notes-editor" class="notes-editor" style="display:none;">
+          <input type="text" id="gm-notes-title" placeholder="Untitled" style="margin-bottom:8px;" />
+          <div class="mode-tabs">
+            <button type="button" class="mode-tab-btn" id="gm-notes-preview-btn">👁 Preview</button>
+            <button type="button" class="mode-tab-btn" id="gm-notes-edit-btn">✏️ Edit</button>
+          </div>
+          <textarea id="gm-notes-textarea" placeholder="Session prep, secrets, NPC motives... (Markdown - headings, **bold**, lists, etc)"></textarea>
+          <div class="notes-preview" id="gm-notes-preview" style="display:none"></div>
+          <div class="footer-row">
+            <button type="button" class="btn-next" id="gm-notes-save-btn">💾 Save</button>
+            <div class="fumble-die-note" id="gm-notes-save-status"></div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
 <script type="module">
 import OBR from "https://esm.sh/@owlbear-rodeo/sdk@2";
 
-// Same key index.html used to write when this lived inline in the Notes
-// tab - keeping it identical is what lets this modal read/write the exact
-// same scene data.
+// Same key index.html used to write when this held a single plain-text
+// blob - keeping it identical is what lets this modal read/write the same
+// scene data. Its VALUE shape has changed though (see parseNotesMetadata).
 const GM_NOTES_METADATA_KEY = "com.claude.monster-sheet/gm-notes";
 
-let lastGmNotes = "";
-// "preview" is the default since this modal's whole point is reviewing
-// notes during play - Edit is where typing/importing happens, and saving
-// or switching back to Preview re-renders from the textarea's raw text.
+// Which note was last open, and how far scrolled into each note's Preview
+// - both are "where I was looking," per-device viewing state rather than
+// campaign data, so they live in localStorage (never synced to the room)
+// instead of scene metadata. Every access is wrapped in try/catch since
+// some browser contexts (private windows, blocked site data) throw on
+// localStorage access entirely - falling back to "no memory" rather than
+// breaking the page.
+const ACTIVE_NOTE_STORAGE_KEY = "dcc-gm-notes-active-id";
+const SCROLL_STORAGE_KEY = "dcc-gm-notes-scroll-positions";
+// Fixed (not random) so the migration below produces the same id on every
+// reload until a GM actually hits Save - a random id here would silently
+// break the active-note/scroll-position memory above on every reopen.
+const LEGACY_NOTE_ID = "legacy-note";
+
+let notesList = [];
+let activeNoteId = null;
 let notesMode = "preview";
 
-function refreshGmNotesTextarea() {
-  const el = document.getElementById("gm-notes-textarea");
-  // Skipped while focused so an incoming metadata echo (this same save,
-  // or another GM client's edit) never clobbers text being typed here.
-  if (el && document.activeElement !== el) el.value = lastGmNotes;
-  if (notesMode === "preview") renderNotesPreview();
+function genNoteId() {
+  return (crypto.randomUUID ? crypto.randomUUID() : `note-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+}
+
+function loadScrollPositions() {
+  try { return JSON.parse(localStorage.getItem(SCROLL_STORAGE_KEY) || "{}"); }
+  catch (err) { return {}; }
+}
+function saveScrollPosition(noteId, scrollTop) {
+  if (!noteId) return;
+  try {
+    const all = loadScrollPositions();
+    all[noteId] = scrollTop;
+    localStorage.setItem(SCROLL_STORAGE_KEY, JSON.stringify(all));
+  } catch (err) { /* best effort */ }
+}
+function loadLastActiveNoteId() {
+  try { return localStorage.getItem(ACTIVE_NOTE_STORAGE_KEY) || null; }
+  catch (err) { return null; }
+}
+function saveLastActiveNoteId(id) {
+  try {
+    if (id) localStorage.setItem(ACTIVE_NOTE_STORAGE_KEY, id);
+    else localStorage.removeItem(ACTIVE_NOTE_STORAGE_KEY);
+  } catch (err) { /* best effort */ }
+}
+
+// This key used to hold a single plain-text string (see git history)
+// rather than a list of notes. Wrapped into a one-item list in memory
+// under a stable id - nothing is written back until a GM actually hits
+// Save, at which point it persists in the new { notes: [...] } shape for
+// good and every client reading it afterward takes the array branch.
+function parseNotesMetadata(raw) {
+  if (typeof raw === "string") {
+    return raw ? [{ id: LEGACY_NOTE_ID, title: "Notes", content: raw }] : [];
+  }
+  if (raw && Array.isArray(raw.notes)) return raw.notes;
+  return [];
+}
+
+function getActiveNote() {
+  return notesList.find(n => n.id === activeNoteId) || null;
+}
+
+// Pulls whatever's currently on screen back into the in-memory note object
+// before switching away from it (selecting another note, creating a new
+// one, deleting a different one, or saving) - otherwise typing in a note
+// and clicking a different one in the sidebar would silently discard it.
+function commitActiveNoteEdits() {
+  const note = getActiveNote();
+  if (!note) return;
+  const titleEl = document.getElementById("gm-notes-title");
+  const textareaEl = document.getElementById("gm-notes-textarea");
+  note.title = (titleEl.value || "").trim() || "Untitled";
+  note.content = textareaEl.value;
+}
+
+function loadNoteIntoEditor(note) {
+  document.getElementById("gm-notes-title").value = note ? note.title : "";
+  document.getElementById("gm-notes-textarea").value = note ? note.content : "";
+}
+
+function renderNotesSidebar() {
+  const hasNotes = notesList.length > 0;
+  document.getElementById("gm-notes-empty").style.display = hasNotes ? "none" : "block";
+  document.getElementById("gm-notes-editor").style.display = hasNotes ? "flex" : "none";
+
+  const listEl = document.getElementById("gm-notes-list");
+  listEl.innerHTML = "";
+  notesList.forEach(note => {
+    const item = document.createElement("div");
+    item.className = "note-item" + (note.id === activeNoteId ? " active" : "");
+    const titleSpan = document.createElement("span");
+    titleSpan.className = "note-item-title";
+    titleSpan.textContent = note.title || "Untitled";
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "note-item-delete";
+    delBtn.textContent = "×";
+    delBtn.title = `Delete "${note.title || "Untitled"}"`;
+    delBtn.addEventListener("click", (e) => { e.stopPropagation(); deleteNote(note.id); });
+    item.appendChild(titleSpan);
+    item.appendChild(delBtn);
+    item.addEventListener("click", () => selectNote(note.id));
+    listEl.appendChild(item);
+  });
+}
+
+function selectNote(id) {
+  if (id === activeNoteId) return;
+  commitActiveNoteEdits();
+  activeNoteId = id;
+  saveLastActiveNoteId(id);
+  loadNoteIntoEditor(getActiveNote());
+  renderNotesSidebar();
+  setNotesMode(notesMode);
+}
+
+function createNote() {
+  commitActiveNoteEdits();
+  const note = { id: genNoteId(), title: "Untitled", content: "" };
+  notesList.push(note);
+  activeNoteId = note.id;
+  saveLastActiveNoteId(note.id);
+  loadNoteIntoEditor(note);
+  renderNotesSidebar();
+  setNotesMode("edit");
+  const titleEl = document.getElementById("gm-notes-title");
+  titleEl.focus();
+  titleEl.select();
+}
+
+function createNoteFromImport(file, text) {
+  commitActiveNoteEdits();
+  const title = file.name.replace(/\.[^.]+$/, "") || file.name;
+  const note = { id: genNoteId(), title, content: text.trim() };
+  notesList.push(note);
+  activeNoteId = note.id;
+  saveLastActiveNoteId(note.id);
+  loadNoteIntoEditor(note);
+  renderNotesSidebar();
+}
+
+function deleteNote(id) {
+  commitActiveNoteEdits();
+  const idx = notesList.findIndex(n => n.id === id);
+  if (idx === -1) return;
+  const wasActive = activeNoteId === id;
+  notesList.splice(idx, 1);
+  if (wasActive) {
+    activeNoteId = notesList.length ? notesList[0].id : null;
+    saveLastActiveNoteId(activeNoteId);
+    loadNoteIntoEditor(getActiveNote());
+  }
+  renderNotesSidebar();
+  setNotesMode(notesMode);
+  persistNotes("Deleted.");
+}
+
+async function persistNotes(successMessage) {
+  const statusEl = document.getElementById("gm-notes-save-status");
+  try {
+    await OBR.scene.setMetadata({ [GM_NOTES_METADATA_KEY]: { notes: notesList } });
+    statusEl.textContent = successMessage;
+    statusEl.style.color = "var(--good)";
+    clearTimeout(persistNotes._t);
+    persistNotes._t = setTimeout(() => { statusEl.textContent = ""; }, 3000);
+  } catch (err) {
+    console.error("DCC GM notes: save failed", err);
+    statusEl.textContent = `Save failed: ${err.message}`;
+    statusEl.style.color = "#c97b7b";
+  }
 }
 
 // marked + DOMPurify are only needed to render Preview, so they're loaded
@@ -207,8 +415,21 @@ async function renderNotesPreview() {
   } catch (err) {
     console.error("DCC GM notes: markdown render failed", err);
     previewEl.textContent = raw;
+    return;
   }
+  // Restored only now that this note's content is actually in the DOM -
+  // setting scrollTop any earlier (or on the empty placeholder above)
+  // would just get clamped back to 0.
+  const positions = loadScrollPositions();
+  previewEl.scrollTop = (activeNoteId && positions[activeNoteId]) || 0;
 }
+
+let scrollSaveTimeout = null;
+document.getElementById("gm-notes-preview").addEventListener("scroll", (e) => {
+  clearTimeout(scrollSaveTimeout);
+  const scrollTop = e.target.scrollTop;
+  scrollSaveTimeout = setTimeout(() => saveScrollPosition(activeNoteId, scrollTop), 250);
+});
 
 function setNotesMode(mode) {
   notesMode = mode;
@@ -221,13 +442,7 @@ function setNotesMode(mode) {
 }
 document.getElementById("gm-notes-preview-btn").addEventListener("click", () => setNotesMode("preview"));
 document.getElementById("gm-notes-edit-btn").addEventListener("click", () => setNotesMode("edit"));
-setNotesMode("preview");
-
-function appendToGmNotes(file, text) {
-  const textarea = document.getElementById("gm-notes-textarea");
-  const heading = `--- Imported from ${file.name} ---\n`;
-  textarea.value = (textarea.value ? `${textarea.value}\n\n` : "") + heading + text;
-}
+document.getElementById("gm-notes-new-btn").addEventListener("click", createNote);
 
 // pdf.js is only needed once a GM actually picks a PDF, so it's loaded
 // lazily from the same esm.sh CDN this page already pulls the OBR SDK
@@ -249,19 +464,19 @@ document.getElementById("gm-notes-pdf-file").addEventListener("change", async (e
   if (!file) return;
   const statusEl = document.getElementById("gm-notes-import-status");
   statusEl.style.color = "";
-  // Switch to Edit right away so the appended raw text lands somewhere
-  // visible - importing while sitting in Preview would silently write into
-  // a hidden textarea with nothing on screen changing.
-  setNotesMode("edit");
 
-  // Markdown/plain text is already exactly what the notes field holds, so
-  // it skips pdf.js entirely and just reads as text.
+  // Markdown/plain text is already exactly what a note's content holds, so
+  // it skips pdf.js entirely and just reads as text. Each import becomes
+  // its own new note (named after the file) rather than getting appended
+  // onto whatever note happened to be open - simpler mental model once
+  // there's more than one note to accidentally merge into.
   if (/\.(md|markdown|txt)$/i.test(file.name)) {
     statusEl.textContent = "Reading file...";
     const reader = new FileReader();
     reader.onload = () => {
-      appendToGmNotes(file, String(reader.result || ""));
-      statusEl.textContent = `Imported ${file.name} - review below, then Save.`;
+      createNoteFromImport(file, String(reader.result || ""));
+      setNotesMode("edit");
+      statusEl.textContent = `Imported "${file.name}" as a new note - review below, then Save.`;
       statusEl.style.color = "var(--good)";
     };
     reader.onerror = () => {
@@ -285,8 +500,9 @@ document.getElementById("gm-notes-pdf-file").addEventListener("change", async (e
       const content = await page.getTextContent();
       pageTexts.push(content.items.map(item => item.str).join(" ").trim());
     }
-    appendToGmNotes(file, pageTexts.join("\n\n"));
-    statusEl.textContent = `Imported ${doc.numPages} page${doc.numPages === 1 ? "" : "s"} from ${file.name} - review below, then Save. (Scanned/image-only pages won't have extractable text.)`;
+    createNoteFromImport(file, pageTexts.join("\n\n"));
+    setNotesMode("edit");
+    statusEl.textContent = `Imported ${doc.numPages} page${doc.numPages === 1 ? "" : "s"} from "${file.name}" as a new note - review below, then Save. (Scanned/image-only pages won't have extractable text.)`;
     statusEl.style.color = "var(--good)";
   } catch (err) {
     console.error("DCC GM notes: PDF import failed", err);
@@ -296,52 +512,41 @@ document.getElementById("gm-notes-pdf-file").addEventListener("change", async (e
 });
 
 document.getElementById("gm-notes-save-btn").addEventListener("click", async () => {
-  const statusEl = document.getElementById("gm-notes-save-status");
-  const value = document.getElementById("gm-notes-textarea").value;
-  try {
-    lastGmNotes = value;
-    await OBR.scene.setMetadata({ [GM_NOTES_METADATA_KEY]: value });
-    statusEl.textContent = "Saved.";
-    statusEl.style.color = "var(--good)";
-    setNotesMode("preview");
-    clearTimeout(document.getElementById("gm-notes-save-btn")._statusTimeout);
-    document.getElementById("gm-notes-save-btn")._statusTimeout = setTimeout(() => { statusEl.textContent = ""; }, 3000);
-  } catch (err) {
-    console.error("DCC GM notes: save failed", err);
-    statusEl.textContent = `Save failed: ${err.message}`;
-    statusEl.style.color = "#c97b7b";
-  }
+  commitActiveNoteEdits();
+  renderNotesSidebar();
+  await persistNotes("Saved.");
+  setNotesMode("preview");
 });
 
-document.getElementById("gm-notes-clear-btn").addEventListener("click", async () => {
-  const statusEl = document.getElementById("gm-notes-save-status");
-  try {
-    lastGmNotes = "";
-    document.getElementById("gm-notes-textarea").value = "";
-    await OBR.scene.setMetadata({ [GM_NOTES_METADATA_KEY]: "" });
-    statusEl.textContent = "Cleared.";
-    statusEl.style.color = "var(--good)";
-    setNotesMode("preview");
-  } catch (err) {
-    console.error("DCC GM notes: clear failed", err);
-    statusEl.textContent = `Clear failed: ${err.message}`;
-    statusEl.style.color = "#c97b7b";
+// Applied both on initial load and on every incoming scene metadata change
+// (another GM client editing, or this same save echoing back). Skipped
+// while the title/textarea is focused so an echo never clobbers text being
+// typed here right now.
+function applyIncomingNotes(rawValue) {
+  const active = document.activeElement;
+  if (active && (active.id === "gm-notes-title" || active.id === "gm-notes-textarea")) return;
+
+  notesList = parseNotesMetadata(rawValue);
+  if (!notesList.find(n => n.id === activeNoteId)) {
+    const remembered = loadLastActiveNoteId();
+    activeNoteId = notesList.find(n => n.id === remembered) ? remembered : (notesList[0] ? notesList[0].id : null);
   }
-});
+  saveLastActiveNoteId(activeNoteId);
+  loadNoteIntoEditor(getActiveNote());
+  renderNotesSidebar();
+  if (notesMode === "preview") renderNotesPreview();
+}
 
 OBR.onReady(async () => {
   OBR.scene.onMetadataChange((metadata) => {
-    if (typeof metadata[GM_NOTES_METADATA_KEY] === "string") {
-      lastGmNotes = metadata[GM_NOTES_METADATA_KEY];
-      refreshGmNotesTextarea();
-    }
+    if (GM_NOTES_METADATA_KEY in metadata) applyIncomingNotes(metadata[GM_NOTES_METADATA_KEY]);
   });
   try {
     const sceneMeta = await OBR.scene.getMetadata();
-    lastGmNotes = typeof sceneMeta[GM_NOTES_METADATA_KEY] === "string" ? sceneMeta[GM_NOTES_METADATA_KEY] : "";
-    refreshGmNotesTextarea();
+    applyIncomingNotes(sceneMeta[GM_NOTES_METADATA_KEY]);
   } catch (err) {
     console.error("DCC GM notes: initial scene.getMetadata failed", err);
+    renderNotesSidebar();
   }
 });
 </script>
