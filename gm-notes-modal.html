@@ -198,7 +198,7 @@
     <div class="row">
       <div style="flex:0 0 auto;">
         <label>Import from PDF or Markdown/Text</label>
-        <input type="file" id="gm-notes-pdf-file" accept="application/pdf,.pdf,.md,.markdown,text/markdown,.txt,text/plain" />
+        <input type="file" id="gm-notes-pdf-file" accept="application/pdf,.pdf,.md,.markdown,text/markdown,.txt,text/plain" title="Creates a new note for this scene - or, if Campaign Overview is selected on the left, appends into it instead." />
       </div>
       <div class="fumble-die-note" id="gm-notes-import-status" style="flex:1 1 auto;"></div>
     </div>
@@ -549,6 +549,19 @@ function createNoteFromImport(file, text, id) {
   renderNotesSidebar();
 }
 
+// Unlike createNoteFromImport, this appends into the EXISTING campaign
+// note instead of creating a new one - there's only ever meant to be one,
+// so "import while it's already selected" reads as "add this to it," not
+// "replace it." commitActiveNoteEdits first so anything already typed but
+// not yet saved is folded in rather than silently overwritten.
+function appendToCampaignNote(file, text) {
+  commitActiveNoteEdits();
+  const heading = `--- Imported from ${file.name} ---\n`;
+  campaignNote.content = (campaignNote.content ? `${campaignNote.content}\n\n` : "") + heading + text.trim();
+  loadNoteIntoEditor(campaignNote);
+  renderNotesSidebar();
+}
+
 function deleteNote(id) {
   if (id === CAMPAIGN_NOTE_ID) return; // pinned - no delete button renders for it, but stay defensive
   commitActiveNoteEdits();
@@ -749,19 +762,25 @@ document.getElementById("gm-notes-pdf-file").addEventListener("change", async (e
   if (!file) return;
   const statusEl = document.getElementById("gm-notes-import-status");
   statusEl.style.color = "";
+  // Whichever note is selected when Import is clicked decides where it
+  // goes: the (singular, pinned) campaign note gets appended into, since
+  // there's no "new one" to create for it - anything else creates a new
+  // scene note, same as before.
+  const targetIsCampaignNote = activeNoteId === CAMPAIGN_NOTE_ID;
 
   // Markdown/plain text is already exactly what a note's content holds, so
-  // it skips pdf.js entirely and just reads as text. Each import becomes
-  // its own new note (named after the file) rather than getting appended
-  // onto whatever note happened to be open - simpler mental model once
-  // there's more than one note to accidentally merge into.
+  // it skips pdf.js entirely and just reads as text.
   if (/\.(md|markdown|txt)$/i.test(file.name)) {
     statusEl.textContent = "Reading file...";
     const reader = new FileReader();
     reader.onload = () => {
-      createNoteFromImport(file, String(reader.result || ""));
+      const text = String(reader.result || "");
+      if (targetIsCampaignNote) appendToCampaignNote(file, text);
+      else createNoteFromImport(file, text);
       setNotesMode("edit");
-      statusEl.textContent = `Imported "${file.name}" as a new note - review below, then Save.`;
+      statusEl.textContent = targetIsCampaignNote
+        ? `Imported "${file.name}" into the Campaign Overview - review below, then Save.`
+        : `Imported "${file.name}" as a new note - review below, then Save.`;
       statusEl.style.color = "var(--good)";
     };
     reader.onerror = () => {
@@ -803,13 +822,20 @@ document.getElementById("gm-notes-pdf-file").addEventListener("change", async (e
       }
     }
 
-    const noteId = genNoteId();
-    createNoteFromImport(file, pageTexts.join("\n\n"), noteId);
+    // The campaign note keeps a fixed id across re-imports (there's only
+    // ever one), unlike a fresh scene note - so its Pages cache from a
+    // PREVIOUS import needs clearing first, or leftover higher-numbered
+    // pages from a longer old PDF would linger alongside the new one.
+    const noteId = targetIsCampaignNote ? CAMPAIGN_NOTE_ID : genNoteId();
+    const combinedText = pageTexts.join("\n\n");
+    if (targetIsCampaignNote) appendToCampaignNote(file, combinedText);
+    else createNoteFromImport(file, combinedText, noteId);
     setNotesMode("edit");
 
     let pagesNote = "";
     if (pageRenders.length) {
       try {
+        if (targetIsCampaignNote) await deletePdfPagesForNote(noteId);
         await storePdfPages(noteId, file.name, pageRenders);
         pdfMetaByNoteId.set(noteId, { noteId, fileName: file.name, numPages: pageRenders.length });
         refreshPagesTabVisibility();
@@ -819,7 +845,8 @@ document.getElementById("gm-notes-pdf-file").addEventListener("change", async (e
         pagesNote = " (Couldn't cache page images locally - text import still worked.)";
       }
     }
-    statusEl.textContent = `Imported ${doc.numPages} page${doc.numPages === 1 ? "" : "s"} from "${file.name}" as a new note - review below, then Save.${pagesNote} (Scanned/image-only pages won't have extractable text.)`;
+    const destination = targetIsCampaignNote ? "into the Campaign Overview" : "as a new note";
+    statusEl.textContent = `Imported ${doc.numPages} page${doc.numPages === 1 ? "" : "s"} from "${file.name}" ${destination} - review below, then Save.${pagesNote} (Scanned/image-only pages won't have extractable text.)`;
     statusEl.style.color = "var(--good)";
   } catch (err) {
     console.error("DCC GM notes: PDF import failed", err);
