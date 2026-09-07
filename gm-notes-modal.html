@@ -266,6 +266,39 @@ const GM_NOTES_METADATA_KEY = "com.claude.monster-sheet/gm-notes";
 // there's meant to be exactly one of these.
 const GM_CAMPAIGN_NOTE_METADATA_KEY = "com.claude.monster-sheet/gm-campaign-note";
 const CAMPAIGN_NOTE_ID = "campaign-overview";
+
+// A single room/scene-metadata VALUE is capped by OBR at 16 kB (see
+// index.html's ROOM_TOKEN_TEMPLATE_PREFIX comment for the full story on
+// that limit, found the hard way via the same "saved" feature there). The
+// campaign note hits the exact same wall once its own content - especially
+// content pulled in via PDF import - grows past 16 kB by itself, so its
+// content is split into as many small chunks as needed, well under that
+// cap, rather than stored as one potentially-oversized value.
+const METADATA_CHUNK_BYTES = 12000; // headroom under the 16 kB cap for JSON/key overhead
+function chunkTextByBytes(text, maxBytes) {
+  const bytes = new TextEncoder().encode(text || "");
+  if (bytes.length <= maxBytes) return [text || ""];
+  const chunks = [];
+  let start = 0;
+  while (start < bytes.length) {
+    let end = Math.min(start + maxBytes, bytes.length);
+    // Don't split a multi-byte UTF-8 sequence in half - back off to the
+    // start of whatever character straddles the boundary.
+    while (end < bytes.length && (bytes[end] & 0xC0) === 0x80) end--;
+    chunks.push(new TextDecoder().decode(bytes.slice(start, end)));
+    start = end;
+  }
+  return chunks;
+}
+function campaignNoteChunkKey(index) {
+  return `${GM_CAMPAIGN_NOTE_METADATA_KEY}:chunk:${index}`;
+}
+// How many chunks the LAST successfully loaded/saved campaign note used -
+// needed so a save that SHRINKS the note (fewer chunks than before)
+// explicitly clears the now-unused trailing chunk keys, instead of
+// leaving stale content sitting there that a future load would otherwise
+// have no reason to know is orphaned.
+let lastKnownCampaignChunkCount = 0;
 // Must exactly match the id index.html's openGmNotesModal() uses to open
 // this same modal - OBR.modal.close needs it to know which modal to close,
 // and there's no way to ask OBR "what's my own id" from inside the page.
@@ -436,10 +469,32 @@ function parseNotesMetadata(raw) {
   return [];
 }
 
-function parseCampaignNote(raw) {
-  return (raw && typeof raw === "object")
-    ? { id: CAMPAIGN_NOTE_ID, title: raw.title || "Campaign Overview", content: raw.content || "" }
-    : { id: CAMPAIGN_NOTE_ID, title: "Campaign Overview", content: "" };
+// Reads the manifest key (title + chunkCount) plus however many chunk
+// keys it names, and reassembles them into the note's real content - see
+// METADATA_CHUNK_BYTES for why the content isn't just one value. Also
+// updates lastKnownCampaignChunkCount so the next save knows how many
+// trailing chunks to clear if the note has since shrunk. Falls back to
+// the OLD, pre-chunking { title, content } shape for a manifest saved
+// before this existed (chunkCount absent) - still ordinary old data, not
+// something to silently drop.
+function parseCampaignNoteFromRoomMeta(roomMeta) {
+  const manifest = (roomMeta || {})[GM_CAMPAIGN_NOTE_METADATA_KEY];
+  if (!manifest || typeof manifest !== "object") {
+    lastKnownCampaignChunkCount = 0;
+    return { id: CAMPAIGN_NOTE_ID, title: "Campaign Overview", content: "" };
+  }
+  const title = manifest.title || "Campaign Overview";
+  if (typeof manifest.chunkCount === "number") {
+    const parts = [];
+    for (let i = 0; i < manifest.chunkCount; i++) {
+      const chunk = roomMeta[campaignNoteChunkKey(i)];
+      parts.push(typeof chunk === "string" ? chunk : "");
+    }
+    lastKnownCampaignChunkCount = manifest.chunkCount;
+    return { id: CAMPAIGN_NOTE_ID, title, content: parts.join("") };
+  }
+  lastKnownCampaignChunkCount = 0;
+  return { id: CAMPAIGN_NOTE_ID, title, content: manifest.content || "" };
 }
 
 function getActiveNote() {
@@ -633,14 +688,41 @@ function deleteNote(id) {
 const persistAllNotesTimeouts = {};
 async function persistAllNotes(successMessage, statusElId = "gm-notes-save-status") {
   const statusEl = document.getElementById(statusElId);
-  const results = await Promise.allSettled([
+
+  // Split into chunks (see METADATA_CHUNK_BYTES) rather than writing the
+  // note as one value - a campaign note built up from a couple of PDF
+  // imports can easily be well past OBR's 16 kB per-value cap on its own,
+  // which is exactly why "the Campaign Overview note never actually saves"
+  // turned out to be the same root cause as the saved-token bug in
+  // index.html, just hitting a single note's own content instead of a
+  // collection of many tokens.
+  const chunks = chunkTextByBytes(campaignNote.content, METADATA_CHUNK_BYTES);
+  const campaignWrites = {
+    [GM_CAMPAIGN_NOTE_METADATA_KEY]: { title: campaignNote.title, chunkCount: chunks.length },
+  };
+  chunks.forEach((chunk, i) => { campaignWrites[campaignNoteChunkKey(i)] = chunk; });
+  // Clear any chunk keys the PREVIOUS save used that this one no longer
+  // needs (the note got shorter) - otherwise stale trailing content would
+  // sit there forever, orphaned and invisible to anything reading the new,
+  // smaller chunkCount.
+  for (let i = chunks.length; i < lastKnownCampaignChunkCount; i++) {
+    campaignWrites[campaignNoteChunkKey(i)] = null;
+  }
+
+  const [sceneResult, campaignResult] = await Promise.allSettled([
     OBR.scene.setMetadata({ [GM_NOTES_METADATA_KEY]: { notes: notesList } }),
-    OBR.room.setMetadata({ [GM_CAMPAIGN_NOTE_METADATA_KEY]: { title: campaignNote.title, content: campaignNote.content } }),
+    OBR.room.setMetadata(campaignWrites),
   ]);
-  const failure = results.find(r => r.status === "rejected");
+  if (campaignResult.status === "fulfilled") lastKnownCampaignChunkCount = chunks.length;
+
+  const failure = [sceneResult, campaignResult].find(r => r.status === "rejected");
   if (failure) {
     console.error("DCC GM notes: save failed", failure.reason);
-    statusEl.textContent = `Save failed: ${failure.reason.message}`;
+    const isSizeLimit = /size limit/i.test(failure.reason.message || "");
+    const which = campaignResult.status === "rejected" ? "the Campaign Overview note" : "this scene's notes";
+    statusEl.textContent = isSizeLimit
+      ? `Couldn't save - ${which} is too large for Owlbear's storage even split into chunks. Trim it down and try again.`
+      : `Save failed: ${failure.reason.message}`;
     statusEl.style.color = "#c97b7b";
     return;
   }
@@ -1076,13 +1158,19 @@ function applyIncomingNotes(rawValue) {
 // Same idea as applyIncomingNotes, but for the campaign-wide note in ROOM
 // metadata - fires independently, since a room metadata change and a scene
 // metadata change are two different OBR events that don't imply each other.
-function applyIncomingCampaignNote(rawValue) {
+// Takes the FULL room metadata (not just one key's value) since the note's
+// content is spread across a manifest key plus however many chunk keys it
+// names (see METADATA_CHUNK_BYTES) - onMetadataChange always delivers the
+// complete current metadata (confirmed against the SDK's own types:
+// Metadata, not Partial<Metadata>), so every chunk is always there to read
+// regardless of which key's write actually triggered this call.
+function applyIncomingCampaignNote(roomMeta) {
   const active = document.activeElement;
   const editingCampaignNote = activeNoteId === CAMPAIGN_NOTE_ID &&
     active && (active.id === "gm-notes-title" || active.id === "gm-notes-textarea");
   if (editingCampaignNote) return;
 
-  campaignNote = parseCampaignNote(rawValue);
+  campaignNote = parseCampaignNoteFromRoomMeta(roomMeta);
   syncActiveNoteAndRender();
 }
 
@@ -1093,7 +1181,7 @@ OBR.onReady(async () => {
     if (GM_NOTES_METADATA_KEY in metadata) applyIncomingNotes(metadata[GM_NOTES_METADATA_KEY]);
   });
   OBR.room.onMetadataChange((metadata) => {
-    if (GM_CAMPAIGN_NOTE_METADATA_KEY in metadata) applyIncomingCampaignNote(metadata[GM_CAMPAIGN_NOTE_METADATA_KEY]);
+    applyIncomingCampaignNote(metadata);
   });
   // OBR.scene.onMetadataChange only fires for edits within whatever scene
   // this extension is currently subscribed to - switching to a DIFFERENT
@@ -1121,7 +1209,7 @@ OBR.onReady(async () => {
     OBR.scene.getMetadata(),
   ]);
   if (roomResult.status === "fulfilled") {
-    campaignNote = parseCampaignNote(roomResult.value[GM_CAMPAIGN_NOTE_METADATA_KEY]);
+    campaignNote = parseCampaignNoteFromRoomMeta(roomResult.value);
   } else {
     console.error("DCC GM notes: initial room.getMetadata failed", roomResult.reason);
   }
