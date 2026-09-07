@@ -178,6 +178,16 @@
     font-family: inherit;
   }
   .note-item-delete:hover { opacity: 1; }
+  .note-item.pinned-note { margin-bottom: 8px; }
+  .notes-divider {
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+    margin-bottom: 5px;
+  }
   .notes-empty { color: var(--muted); font-size: 11px; padding: 8px 4px; }
 </style>
 </head>
@@ -199,7 +209,7 @@
         <div id="gm-notes-list"></div>
       </div>
       <div id="notes-main">
-        <div id="gm-notes-empty" class="notes-empty" style="display:none;">No notes yet - click "+ New Note" on the left, or import a file above.</div>
+        <div id="gm-notes-empty" class="notes-empty" style="display:none;">Select a note on the left.</div>
         <div id="gm-notes-editor" class="notes-editor" style="display:none;">
           <input type="text" id="gm-notes-title" placeholder="Untitled" style="margin-bottom:8px;" />
           <div class="mode-tabs">
@@ -225,7 +235,16 @@ import OBR from "https://esm.sh/@owlbear-rodeo/sdk@2";
 // Same key index.html used to write when this held a single plain-text
 // blob - keeping it identical is what lets this modal read/write the same
 // scene data. Its VALUE shape has changed though (see parseNotesMetadata).
+// This key holds the per-SCENE notes list - each OBR scene has its own
+// metadata, so switching maps naturally swaps out which notes show here.
 const GM_NOTES_METADATA_KEY = "com.claude.monster-sheet/gm-notes";
+// The campaign-wide overview note, by contrast, lives in ROOM metadata
+// (not scene metadata) - a room's metadata is shared across every scene
+// in it, exactly what "one note that overviews all scenes" needs. It's a
+// single pinned note rather than a list: unlike the per-scene notes,
+// there's meant to be exactly one of these.
+const GM_CAMPAIGN_NOTE_METADATA_KEY = "com.claude.monster-sheet/gm-campaign-note";
+const CAMPAIGN_NOTE_ID = "campaign-overview";
 
 // Which note was last open, and how far scrolled into each note's Preview
 // - both are "where I was looking," per-device viewing state rather than
@@ -242,6 +261,7 @@ const SCROLL_STORAGE_KEY = "dcc-gm-notes-scroll-positions";
 const LEGACY_NOTE_ID = "legacy-note";
 
 let notesList = [];
+let campaignNote = { id: CAMPAIGN_NOTE_ID, title: "Campaign Overview", content: "" };
 let activeNoteId = null;
 let notesMode = "preview";
 
@@ -385,8 +405,26 @@ function parseNotesMetadata(raw) {
   return [];
 }
 
+function parseCampaignNote(raw) {
+  return (raw && typeof raw === "object")
+    ? { id: CAMPAIGN_NOTE_ID, title: raw.title || "Campaign Overview", content: raw.content || "" }
+    : { id: CAMPAIGN_NOTE_ID, title: "Campaign Overview", content: "" };
+}
+
 function getActiveNote() {
+  if (activeNoteId === CAMPAIGN_NOTE_ID) return campaignNote;
   return notesList.find(n => n.id === activeNoteId) || null;
+}
+
+// The campaign note always exists (even before its real content has
+// loaded), so it's the guaranteed fallback once nothing else matches -
+// unlike before, there's no longer a genuinely "empty, nothing to show"
+// state to land on.
+function pickActiveNoteId() {
+  if (activeNoteId === CAMPAIGN_NOTE_ID || notesList.find(n => n.id === activeNoteId)) return activeNoteId;
+  const remembered = loadLastActiveNoteId();
+  if (remembered === CAMPAIGN_NOTE_ID || notesList.find(n => n.id === remembered)) return remembered;
+  return CAMPAIGN_NOTE_ID;
 }
 
 // Pulls whatever's currently on screen back into the in-memory note object
@@ -408,12 +446,39 @@ function loadNoteIntoEditor(note) {
 }
 
 function renderNotesSidebar() {
-  const hasNotes = notesList.length > 0;
-  document.getElementById("gm-notes-empty").style.display = hasNotes ? "none" : "block";
-  document.getElementById("gm-notes-editor").style.display = hasNotes ? "flex" : "none";
+  // The campaign note always exists, so there's always something to show
+  // once activeNoteId has been resolved at least once - this only stays
+  // hidden before that first resolution finishes.
+  const hasActiveNote = !!getActiveNote();
+  document.getElementById("gm-notes-empty").style.display = hasActiveNote ? "none" : "block";
+  document.getElementById("gm-notes-editor").style.display = hasActiveNote ? "flex" : "none";
 
   const listEl = document.getElementById("gm-notes-list");
   listEl.innerHTML = "";
+
+  // Pinned campaign-wide note (room metadata - see GM_CAMPAIGN_NOTE_METADATA_KEY)
+  // always sits above the per-scene list below it, and has no delete button -
+  // there's meant to be exactly one of these.
+  const pinnedItem = document.createElement("div");
+  pinnedItem.className = "note-item pinned-note" + (activeNoteId === CAMPAIGN_NOTE_ID ? " active" : "");
+  const pinnedTitle = document.createElement("span");
+  pinnedTitle.className = "note-item-title";
+  pinnedTitle.textContent = "🌐 " + (campaignNote.title || "Campaign Overview");
+  pinnedItem.appendChild(pinnedTitle);
+  pinnedItem.addEventListener("click", () => selectNote(CAMPAIGN_NOTE_ID));
+  listEl.appendChild(pinnedItem);
+
+  const divider = document.createElement("div");
+  divider.className = "notes-divider";
+  divider.textContent = "This scene";
+  listEl.appendChild(divider);
+
+  if (!notesList.length) {
+    const hint = document.createElement("div");
+    hint.className = "notes-empty";
+    hint.textContent = 'No notes for this scene yet - click "+ New Note" or import a file.';
+    listEl.appendChild(hint);
+  }
   notesList.forEach(note => {
     const item = document.createElement("div");
     item.className = "note-item" + (note.id === activeNoteId ? " active" : "");
@@ -485,13 +550,14 @@ function createNoteFromImport(file, text, id) {
 }
 
 function deleteNote(id) {
+  if (id === CAMPAIGN_NOTE_ID) return; // pinned - no delete button renders for it, but stay defensive
   commitActiveNoteEdits();
   const idx = notesList.findIndex(n => n.id === id);
   if (idx === -1) return;
   const wasActive = activeNoteId === id;
   notesList.splice(idx, 1);
   if (wasActive) {
-    activeNoteId = notesList.length ? notesList[0].id : null;
+    activeNoteId = notesList.length ? notesList[0].id : CAMPAIGN_NOTE_ID;
     saveLastActiveNoteId(activeNoteId);
     loadNoteIntoEditor(getActiveNote());
   }
@@ -515,6 +581,21 @@ async function persistNotes(successMessage) {
     persistNotes._t = setTimeout(() => { statusEl.textContent = ""; }, 3000);
   } catch (err) {
     console.error("DCC GM notes: save failed", err);
+    statusEl.textContent = `Save failed: ${err.message}`;
+    statusEl.style.color = "#c97b7b";
+  }
+}
+
+async function persistCampaignNote(successMessage) {
+  const statusEl = document.getElementById("gm-notes-save-status");
+  try {
+    await OBR.room.setMetadata({ [GM_CAMPAIGN_NOTE_METADATA_KEY]: { title: campaignNote.title, content: campaignNote.content } });
+    statusEl.textContent = successMessage;
+    statusEl.style.color = "var(--good)";
+    clearTimeout(persistCampaignNote._t);
+    persistCampaignNote._t = setTimeout(() => { statusEl.textContent = ""; }, 3000);
+  } catch (err) {
+    console.error("DCC GM notes: campaign note save failed", err);
     statusEl.textContent = `Save failed: ${err.message}`;
     statusEl.style.color = "#c97b7b";
   }
@@ -750,35 +831,28 @@ document.getElementById("gm-notes-pdf-file").addEventListener("change", async (e
 document.getElementById("gm-notes-save-btn").addEventListener("click", async () => {
   commitActiveNoteEdits();
   renderNotesSidebar();
-  await persistNotes("Saved.");
+  if (activeNoteId === CAMPAIGN_NOTE_ID) {
+    await persistCampaignNote("Saved.");
+  } else {
+    await persistNotes("Saved.");
+  }
   setNotesMode("preview");
 });
 
-// Applied both on initial load and on every incoming scene metadata change
-// (another GM client editing, or this same save echoing back). Skipped
-// while the title/textarea is focused so an echo never clobbers text being
-// typed here right now.
+// Re-resolves the active note, refreshes the UI, and (only the very first
+// time) opens straight into Preview - shared by both the per-scene and
+// campaign-note update paths below, since either one might be what
+// determines the active note on a given call.
 let hasAppliedInitialMode = false;
-function applyIncomingNotes(rawValue) {
-  const active = document.activeElement;
-  if (active && (active.id === "gm-notes-title" || active.id === "gm-notes-textarea")) return;
-
-  notesList = parseNotesMetadata(rawValue);
-  if (!notesList.find(n => n.id === activeNoteId)) {
-    const remembered = loadLastActiveNoteId();
-    activeNoteId = notesList.find(n => n.id === remembered) ? remembered : (notesList[0] ? notesList[0].id : null);
-  }
+function syncActiveNoteAndRender() {
+  activeNoteId = pickActiveNoteId();
   saveLastActiveNoteId(activeNoteId);
   loadNoteIntoEditor(getActiveNote());
   renderNotesSidebar();
 
   if (!hasAppliedInitialMode) {
     hasAppliedInitialMode = true;
-    // Opens straight into Preview - this modal's whole point is reviewing
-    // notes during play - but only once there's actually a note to show;
-    // with none yet, the empty state takes over regardless of mode, and
-    // "+ New Note" already opens its fresh blank note into Edit.
-    if (activeNoteId) setNotesMode("preview");
+    setNotesMode("preview");
   } else if (notesMode === "preview") {
     // A later sync (another GM client's edit, or this save echoing back)
     // - only refresh the content, don't yank whatever mode the GM is
@@ -787,17 +861,79 @@ function applyIncomingNotes(rawValue) {
   }
 }
 
+// Applied both on initial load and on every incoming SCENE metadata change
+// (another GM client editing this scene's notes, or this same save echoing
+// back). Skipped while a SCENE note is what's actually being typed right
+// now, so an echo never clobbers it - editing the campaign note doesn't
+// block this, since incoming scene notes don't touch what's on screen then.
+function applyIncomingNotes(rawValue) {
+  const active = document.activeElement;
+  const editingSceneNote = activeNoteId !== CAMPAIGN_NOTE_ID &&
+    active && (active.id === "gm-notes-title" || active.id === "gm-notes-textarea");
+  if (editingSceneNote) return;
+
+  notesList = parseNotesMetadata(rawValue);
+  syncActiveNoteAndRender();
+}
+
+// Same idea as applyIncomingNotes, but for the campaign-wide note in ROOM
+// metadata - fires independently, since a room metadata change and a scene
+// metadata change are two different OBR events that don't imply each other.
+function applyIncomingCampaignNote(rawValue) {
+  const active = document.activeElement;
+  const editingCampaignNote = activeNoteId === CAMPAIGN_NOTE_ID &&
+    active && (active.id === "gm-notes-title" || active.id === "gm-notes-textarea");
+  if (editingCampaignNote) return;
+
+  campaignNote = parseCampaignNote(rawValue);
+  syncActiveNoteAndRender();
+}
+
 OBR.onReady(async () => {
+  // Registered before any awaited call below, so a rejection further down
+  // can never leave these unattached.
   OBR.scene.onMetadataChange((metadata) => {
     if (GM_NOTES_METADATA_KEY in metadata) applyIncomingNotes(metadata[GM_NOTES_METADATA_KEY]);
   });
-  try {
-    const sceneMeta = await OBR.scene.getMetadata();
-    applyIncomingNotes(sceneMeta[GM_NOTES_METADATA_KEY]);
-  } catch (err) {
-    console.error("DCC GM notes: initial scene.getMetadata failed", err);
-    renderNotesSidebar();
+  OBR.room.onMetadataChange((metadata) => {
+    if (GM_CAMPAIGN_NOTE_METADATA_KEY in metadata) applyIncomingCampaignNote(metadata[GM_CAMPAIGN_NOTE_METADATA_KEY]);
+  });
+  // OBR.scene.onMetadataChange only fires for edits within whatever scene
+  // this extension is currently subscribed to - switching to a DIFFERENT
+  // scene isn't a "change" on that subscription, so without this the
+  // per-scene notes list would keep showing the previous scene's notes
+  // after the GM switches maps. The room-level campaign note doesn't need
+  // this, since room metadata isn't scene-specific to begin with.
+  OBR.scene.onReadyChange(async (ready) => {
+    if (!ready) return;
+    try {
+      const sceneMeta = await OBR.scene.getMetadata();
+      applyIncomingNotes(sceneMeta[GM_NOTES_METADATA_KEY]);
+    } catch (err) {
+      console.error("DCC GM notes: scene change scene.getMetadata failed", err);
+    }
+  });
+
+  // Fetched in parallel and applied together so the initial active-note
+  // pick (which needs both the campaign note's id and the scene notes
+  // list to know what's valid) only resolves once, instead of picking the
+  // campaign note first and then immediately flipping to a remembered
+  // scene note a moment later.
+  const [roomResult, sceneResult] = await Promise.allSettled([
+    OBR.room.getMetadata(),
+    OBR.scene.getMetadata(),
+  ]);
+  if (roomResult.status === "fulfilled") {
+    campaignNote = parseCampaignNote(roomResult.value[GM_CAMPAIGN_NOTE_METADATA_KEY]);
+  } else {
+    console.error("DCC GM notes: initial room.getMetadata failed", roomResult.reason);
   }
+  if (sceneResult.status === "fulfilled") {
+    notesList = parseNotesMetadata(sceneResult.value[GM_NOTES_METADATA_KEY]);
+  } else {
+    console.error("DCC GM notes: initial scene.getMetadata failed", sceneResult.reason);
+  }
+  syncActiveNoteAndRender();
 });
 </script>
 </body>
