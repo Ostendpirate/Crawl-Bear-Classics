@@ -255,7 +255,7 @@ import OBR from "https://esm.sh/@owlbear-rodeo/sdk@2";
 
 // Same key index.html used to write when this held a single plain-text
 // blob - keeping it identical is what lets this modal read/write the same
-// scene data. Its VALUE shape has changed though (see parseNotesMetadata).
+// scene data. Its VALUE shape has changed though (see parseNotesFromSceneMeta).
 // This key holds the per-SCENE notes list - each OBR scene has its own
 // metadata, so switching maps naturally swaps out which notes show here.
 const GM_NOTES_METADATA_KEY = "com.claude.monster-sheet/gm-notes";
@@ -299,6 +299,28 @@ function campaignNoteChunkKey(index) {
 // leaving stale content sitting there that a future load would otherwise
 // have no reason to know is orphaned.
 let lastKnownCampaignChunkCount = 0;
+
+// Per-scene notes get the SAME two problems the campaign note had: many
+// notes together can exceed 16 kB combined (same fix as the saved-token
+// bug - one scene-metadata key per note instead of one shared list), and
+// any single note's own content (e.g. one big PDF import) can exceed it
+// on its own (same chunking as the campaign note, just per-note instead
+// of the one pinned note). GM_NOTES_METADATA_KEY itself becomes a small
+// manifest ({ noteIds: [...] }) rather than holding every note's content
+// directly.
+function noteManifestKeyFor(noteId) {
+  return `${GM_NOTES_METADATA_KEY}:note:${noteId}`;
+}
+function noteChunkKeyFor(noteId, index) {
+  return `${GM_NOTES_METADATA_KEY}:note:${noteId}:chunk:${index}`;
+}
+// Mirrors lastKnownCampaignChunkCount, per note id, plus which note ids
+// existed as of the last successful load/save - both needed so a save can
+// tell "this note got shorter, clear its trailing chunks" and "this note
+// is gone entirely, clear its manifest and every chunk it had" apart from
+// "this note never existed here at all, nothing to clear."
+let lastKnownSceneNoteIds = [];
+let lastKnownNoteChunkCounts = {};
 // Must exactly match the id index.html's openGmNotesModal() uses to open
 // this same modal - OBR.modal.close needs it to know which modal to close,
 // and there's no way to ask OBR "what's my own id" from inside the page.
@@ -461,11 +483,60 @@ loadPdfMetaCache();
 // under a stable id - nothing is written back until a GM actually hits
 // Save, at which point it persists in the new { notes: [...] } shape for
 // good and every client reading it afterward takes the array branch.
-function parseNotesMetadata(raw) {
-  if (typeof raw === "string") {
-    return raw ? [{ id: LEGACY_NOTE_ID, title: "Notes", content: raw }] : [];
+// Three formats to handle, oldest first:
+//  1. A bare string (pre-multi-note) - wrapped into a single note under a
+//     stable id, exactly as before.
+//  2. { notes: [{id, title, content}, ...] } as ONE combined scene-
+//     metadata value - the format used before per-note chunking existed.
+//  3. { noteIds: [...] } - the current manifest, with each note's own
+//     title/content spread across its own key(s) (see noteManifestKeyFor/
+//     noteChunkKeyFor). Also updates lastKnownSceneNoteIds/
+//     lastKnownNoteChunkCounts so the next save knows what to clear.
+// Takes the FULL scene metadata (not just GM_NOTES_METADATA_KEY's own
+// value) since format 3's actual content lives across several keys -
+// onMetadataChange/getMetadata always deliver the complete current scene
+// metadata (confirmed against the SDK's own types: Metadata, not
+// Partial<Metadata>), so every note's keys are always there to read.
+function parseNotesFromSceneMeta(sceneMeta) {
+  const meta = sceneMeta || {};
+  const topLevel = meta[GM_NOTES_METADATA_KEY];
+
+  if (typeof topLevel === "string") {
+    lastKnownSceneNoteIds = [];
+    lastKnownNoteChunkCounts = {};
+    return topLevel ? [{ id: LEGACY_NOTE_ID, title: "Notes", content: topLevel }] : [];
   }
-  if (raw && Array.isArray(raw.notes)) return raw.notes;
+
+  if (topLevel && Array.isArray(topLevel.noteIds)) {
+    const chunkCounts = {};
+    const notes = topLevel.noteIds.map(id => {
+      const noteManifest = meta[noteManifestKeyFor(id)];
+      if (!noteManifest || typeof noteManifest !== "object") return { id, title: "Untitled", content: "" };
+      const title = noteManifest.title || "Untitled";
+      if (typeof noteManifest.chunkCount === "number") {
+        const parts = [];
+        for (let i = 0; i < noteManifest.chunkCount; i++) {
+          const chunk = meta[noteChunkKeyFor(id, i)];
+          parts.push(typeof chunk === "string" ? chunk : "");
+        }
+        chunkCounts[id] = noteManifest.chunkCount;
+        return { id, title, content: parts.join("") };
+      }
+      return { id, title, content: noteManifest.content || "" };
+    });
+    lastKnownSceneNoteIds = topLevel.noteIds.slice();
+    lastKnownNoteChunkCounts = chunkCounts;
+    return notes;
+  }
+
+  if (topLevel && Array.isArray(topLevel.notes)) {
+    lastKnownSceneNoteIds = [];
+    lastKnownNoteChunkCounts = {};
+    return topLevel.notes;
+  }
+
+  lastKnownSceneNoteIds = [];
+  lastKnownNoteChunkCounts = {};
   return [];
 }
 
@@ -686,8 +757,45 @@ function deleteNote(id) {
 // different part of the screen. Timeouts are tracked per element so one
 // caller's message doesn't get cut short by the other's.
 const persistAllNotesTimeouts = {};
+// Builds the { [GM_NOTES_METADATA_KEY]: {noteIds} , ...per-note manifest/
+// chunk keys } write payload for the CURRENT notesList, same chunking
+// principle as the campaign note (see persistAllNotes' own comment) but
+// also splitting the notes themselves across individual keys - both "many
+// notes together exceed 16 kB" and "one note's own content exceeds it"
+// are real risks once a GM's been importing PDFs into scene notes too.
+// Also clears whatever a note that's since been deleted, or shrunk, no
+// longer needs - returns the new {noteIds, chunkCounts} so the caller can
+// update lastKnownSceneNoteIds/lastKnownNoteChunkCounts only once the
+// write actually succeeds.
+function buildSceneNotesWrites() {
+  const writes = {};
+  const currentIds = notesList.map(n => n.id);
+  writes[GM_NOTES_METADATA_KEY] = { noteIds: currentIds };
+
+  lastKnownSceneNoteIds.forEach(id => {
+    if (currentIds.includes(id)) return;
+    writes[noteManifestKeyFor(id)] = null;
+    const oldCount = lastKnownNoteChunkCounts[id] || 0;
+    for (let i = 0; i < oldCount; i++) writes[noteChunkKeyFor(id, i)] = null;
+  });
+
+  const nextChunkCounts = {};
+  notesList.forEach(note => {
+    const chunks = chunkTextByBytes(note.content, METADATA_CHUNK_BYTES);
+    writes[noteManifestKeyFor(note.id)] = { title: note.title, chunkCount: chunks.length };
+    chunks.forEach((chunk, i) => { writes[noteChunkKeyFor(note.id, i)] = chunk; });
+    const oldCount = lastKnownNoteChunkCounts[note.id] || 0;
+    for (let i = chunks.length; i < oldCount; i++) writes[noteChunkKeyFor(note.id, i)] = null;
+    nextChunkCounts[note.id] = chunks.length;
+  });
+
+  return { writes, currentIds, nextChunkCounts };
+}
+
 async function persistAllNotes(successMessage, statusElId = "gm-notes-save-status") {
   const statusEl = document.getElementById(statusElId);
+
+  const { writes: sceneWrites, currentIds, nextChunkCounts } = buildSceneNotesWrites();
 
   // Split into chunks (see METADATA_CHUNK_BYTES) rather than writing the
   // note as one value - a campaign note built up from a couple of PDF
@@ -710,9 +818,13 @@ async function persistAllNotes(successMessage, statusElId = "gm-notes-save-statu
   }
 
   const [sceneResult, campaignResult] = await Promise.allSettled([
-    OBR.scene.setMetadata({ [GM_NOTES_METADATA_KEY]: { notes: notesList } }),
+    OBR.scene.setMetadata(sceneWrites),
     OBR.room.setMetadata(campaignWrites),
   ]);
+  if (sceneResult.status === "fulfilled") {
+    lastKnownSceneNoteIds = currentIds;
+    lastKnownNoteChunkCounts = nextChunkCounts;
+  }
   if (campaignResult.status === "fulfilled") lastKnownCampaignChunkCount = chunks.length;
 
   const failure = [sceneResult, campaignResult].find(r => r.status === "rejected");
@@ -1145,13 +1257,13 @@ function syncActiveNoteAndRender() {
 // back). Skipped while a SCENE note is what's actually being typed right
 // now, so an echo never clobbers it - editing the campaign note doesn't
 // block this, since incoming scene notes don't touch what's on screen then.
-function applyIncomingNotes(rawValue) {
+function applyIncomingNotes(sceneMeta) {
   const active = document.activeElement;
   const editingSceneNote = activeNoteId !== CAMPAIGN_NOTE_ID &&
     active && (active.id === "gm-notes-title" || active.id === "gm-notes-textarea");
   if (editingSceneNote) return;
 
-  notesList = parseNotesMetadata(rawValue);
+  notesList = parseNotesFromSceneMeta(sceneMeta);
   syncActiveNoteAndRender();
 }
 
@@ -1178,7 +1290,7 @@ OBR.onReady(async () => {
   // Registered before any awaited call below, so a rejection further down
   // can never leave these unattached.
   OBR.scene.onMetadataChange((metadata) => {
-    if (GM_NOTES_METADATA_KEY in metadata) applyIncomingNotes(metadata[GM_NOTES_METADATA_KEY]);
+    applyIncomingNotes(metadata);
   });
   OBR.room.onMetadataChange((metadata) => {
     applyIncomingCampaignNote(metadata);
@@ -1193,7 +1305,7 @@ OBR.onReady(async () => {
     if (!ready) return;
     try {
       const sceneMeta = await OBR.scene.getMetadata();
-      applyIncomingNotes(sceneMeta[GM_NOTES_METADATA_KEY]);
+      applyIncomingNotes(sceneMeta);
     } catch (err) {
       console.error("DCC GM notes: scene change scene.getMetadata failed", err);
     }
@@ -1214,7 +1326,7 @@ OBR.onReady(async () => {
     console.error("DCC GM notes: initial room.getMetadata failed", roomResult.reason);
   }
   if (sceneResult.status === "fulfilled") {
-    notesList = parseNotesMetadata(sceneResult.value[GM_NOTES_METADATA_KEY]);
+    notesList = parseNotesFromSceneMeta(sceneResult.value);
   } else {
     console.error("DCC GM notes: initial scene.getMetadata failed", sceneResult.reason);
   }
