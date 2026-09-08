@@ -20,6 +20,17 @@ const DICE_ROLL_CHANNEL = "com.claude.monster-sheet/dice-roll";
 const DICE_MODAL_ID = "com.claude.monster-sheet/dice-modal";
 const DICE_MODAL_URL = "https://ostendpirate.github.io/Crawl-Bear-Classics/dice-modal.html";
 
+// Matches map-pins-modal.html's own copy of this key - room-pin labels
+// created there carry it, this background page reads it back to offer a
+// right-click "Open Room Notes" jump on them.
+const ROOM_PIN_METADATA_KEY = "com.claude.monster-sheet/room-pin";
+const GM_NOTES_MODAL_ID = "com.claude.monster-sheet/gm-notes-modal";
+const GM_NOTES_MODAL_URL = "https://ostendpirate.github.io/Crawl-Bear-Classics/gm-notes-modal.html";
+// gm-notes-modal.html listens on this so an ALREADY-OPEN copy of that
+// modal can jump straight there - see that file's own comment on this
+// same constant for why a plain OBR.modal.open re-call can't reach it.
+const JUMP_TO_ROOM_CHANNEL = "com.claude.monster-sheet/jump-to-room";
+
 function openDiceModal(payload) {
   const dice = Array.isArray(payload.dice) ? payload.dice : [];
   if (!dice.length) return;
@@ -60,6 +71,45 @@ OBR.onReady(() => {
     } catch (err) {
       console.error("DCC dice background: failed to handle roll broadcast", err);
     }
+  });
+
+  // GM Notes is GM-only (see index.html's refreshNotesTabVisibility) -
+  // there's no server-side privacy in OBR's model to actually stop a
+  // player right-clicking a pin, so this checks the role itself before
+  // ever opening someone else's private notes, rather than relying on
+  // the context menu icon's own filter (which only matches item
+  // metadata, not player role).
+  OBR.contextMenu.create({
+    id: "com.claude.monster-sheet/open-room-pin",
+    icons: [
+      {
+        icon: "https://ostendpirate.github.io/Crawl-Bear-Classics/icon.svg",
+        label: "Open Room Notes",
+        filter: {
+          every: [{ key: ["metadata", ROOM_PIN_METADATA_KEY], value: undefined, operator: "!=" }],
+        },
+      },
+    ],
+    async onClick(context) {
+      try {
+        const role = await OBR.player.getRole();
+        if (role !== "GM") return;
+        const room = context.items[0]?.metadata?.[ROOM_PIN_METADATA_KEY];
+        if (!room || room.isTest) return;
+        const params = new URLSearchParams({ jumpId: room.id });
+        OBR.modal.open({
+          id: GM_NOTES_MODAL_ID,
+          url: `${GM_NOTES_MODAL_URL}?${params.toString()}`,
+          width: 1300,
+          height: 760,
+        }).catch(() => {});
+        // Handles the modal-already-open case, where the open() call
+        // above is a no-op and its query params never reach the page.
+        OBR.broadcast.sendMessage(JUMP_TO_ROOM_CHANNEL, { id: room.id }).catch(() => {});
+      } catch (err) {
+        console.error("DCC overlay: failed to open room notes", err);
+      }
+    },
   });
 });
 </script>

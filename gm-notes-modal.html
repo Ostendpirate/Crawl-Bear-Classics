@@ -221,7 +221,7 @@
          reasoning: no other way to tell "GitHub Pages hasn't redeployed
          this file yet" from "OBR is still showing an old copy of the
          modal" from "it deployed but didn't fix anything." -->
-    <div class="build-stamp" id="gm-notes-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">GM Notes build 2026-09-08 14:50</div>
+    <div class="build-stamp" id="gm-notes-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">GM Notes build 2026-09-08 15:00</div>
     <div class="row">
       <div style="flex:0 0 auto;">
         <label>Import from PDF or Markdown/Text</label>
@@ -301,6 +301,11 @@ let lastKnownSceneNoteIds = [];
 // this same modal - OBR.modal.close needs it to know which modal to close,
 // and there's no way to ask OBR "what's my own id" from inside the page.
 const GM_NOTES_MODAL_ID = "com.claude.monster-sheet/gm-notes-modal";
+// overlay.html's room-pin context menu ("Open Room Notes") sends this so
+// an ALREADY-OPEN copy of this modal can jump without a reload - opening
+// this same modal id again via OBR.modal.open is a no-op when it's
+// already open, so a fresh URL's query params alone wouldn't reach it.
+const JUMP_TO_ROOM_CHANNEL = "com.claude.monster-sheet/jump-to-room";
 // Same key index.html's Rulebook Data Import uses for spells/patrons/
 // deities - "Extract Monsters" below adds a "monsters" category to that
 // same scene-metadata object, so a Monster sheet's own name-match auto-
@@ -1304,6 +1309,38 @@ async function applyIncomingNotes(sceneMeta) {
   syncActiveNoteAndRender();
 }
 
+// Matches this repo's adventure-transcription heading convention (see
+// adventures/*/README.md and DCC69_The_Emerald_Enchanter.md) - a room's
+// notes live under a "### Area <id> – Title" heading. doc isn't used to
+// disambiguate: GM Notes indexes by heading text only, not by the pin's
+// doc field, so two different docs reusing the same room id (DCC #69's
+// "main" vs "strikes-back" both have a "1-4") would collide. An
+// acceptable rare edge case rather than plumbing doc through every note.
+function findNoteForRoomId(id) {
+  const heading = new RegExp(`Area\\s+${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*[–-]`, "i");
+  const match = notesList.find(n => heading.test(n.content));
+  if (match) return match;
+  return heading.test(campaignNote.content) ? campaignNote : null;
+}
+
+// Called both from a fresh page load (jumpId in the URL - see OBR.onReady)
+// and from JUMP_TO_ROOM_CHANNEL (an already-open copy of this modal, which
+// a plain OBR.modal.open re-call can't reach - see that constant's
+// comment). Switches to Preview and scrolls the matching heading into
+// view; does nothing if no note mentions this room yet.
+async function jumpToRoom(id) {
+  if (!id) return;
+  const note = findNoteForRoomId(id);
+  if (!note) return;
+  if (note.id !== activeNoteId) selectNote(note.id);
+  setNotesMode("preview");
+  await renderNotesPreview();
+  const previewEl = document.getElementById("gm-notes-preview");
+  const headingPattern = new RegExp(`Area\\s+${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*[–-]`, "i");
+  const target = Array.from(previewEl.querySelectorAll("h1, h2, h3, h4")).find(h => headingPattern.test(h.textContent));
+  if (target) target.scrollIntoView({ block: "start" });
+}
+
 // See the call site's comment (OBR.onReady, initial getMetadata block) for
 // why this exists. Logs the total serialized size of a full metadata
 // object plus its 8 largest keys, so a bloated total (vs. a bloated single
@@ -1358,6 +1395,11 @@ OBR.onReady(async () => {
       console.error("DCC GM notes: scene change scene.getMetadata failed", err);
     }
   });
+  // See JUMP_TO_ROOM_CHANNEL's own comment - this is what lets a room
+  // pin's context menu reach an ALREADY-OPEN copy of this modal.
+  OBR.broadcast.onMessage(JUMP_TO_ROOM_CHANNEL, (event) => {
+    jumpToRoom(event.data?.id).catch(err => console.error("DCC GM notes: jump-to-room failed", err));
+  });
 
   // Diagnostic left in from tracking down the 16 kB error this session -
   // still worth keeping: it's how the Rulebook Data Import feature's own
@@ -1380,6 +1422,13 @@ OBR.onReady(async () => {
     console.error("DCC GM notes: initial scene.getMetadata failed", sceneResult.reason);
   }
   syncActiveNoteAndRender();
+
+  // A fresh OBR.modal.open() from a room pin's context menu (see
+  // JUMP_TO_ROOM_CHANNEL's comment) carries the target room id as a query
+  // param instead - the broadcast above only reaches a copy that was
+  // ALREADY open when the click happened.
+  const jumpId = new URLSearchParams(location.search).get("jumpId");
+  if (jumpId) jumpToRoom(jumpId).catch(err => console.error("DCC GM notes: initial jump-to-room failed", err));
 });
 </script>
 </body>
