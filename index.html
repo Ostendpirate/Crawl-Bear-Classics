@@ -1637,7 +1637,7 @@
       <button class="tab-btn" id="nav-chat">Log</button>
       <button class="tab-btn" id="nav-notes" style="display:none;">Notes</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-09-08 10:41</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-09-08 14:50</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2953,6 +2953,31 @@ const CHAT_LOG_MAX_ENTRIES = 60;
 // table exactly like the chat log above, never written into this app's
 // own source/repo.
 const RULEBOOK_DATA_METADATA_KEY = "com.claude.monster-sheet/rulebook-data";
+// OBR enforces a hard ~16 kB cap on a scene's ENTIRE metadata object,
+// TOTAL, across every key sharing it - not a per-value cap (found the hard
+// way, via GM Notes hitting the exact same wall; see gm-notes-modal.html's
+// git history for the full story, including confirming it against the
+// real backend, not just a mock). Rulebook Data Import is by far the
+// biggest consumer of that shared budget, and unlike GM Notes' own note
+// text, this data has to stay in scene metadata - it fills PC sheet
+// fields (patron/deity write-ups, spell descriptions) for PLAYER clients
+// too, not just the GM's own, so it can't move to this page's local
+// storage the way GM Notes did. The only honest fix available without a
+// backend is enforcing the limit at import time instead of silently
+// letting OBR swallow an oversized write that looks successful locally
+// but never reaches other clients - see checkRulebookDataFitsSceneBudget.
+function estimateMetadataBytes(value) {
+  try { return new TextEncoder().encode(JSON.stringify(value)).length; }
+  catch (err) { return 0; }
+}
+const SAFE_SCENE_METADATA_BUDGET_BYTES = 15000; // headroom under OBR's ~16 kB hard cap, for this key + everything else already in scene metadata
+function checkRulebookDataFitsSceneBudget(sceneMeta, nextRulebookData) {
+  const otherBytes = Object.entries(sceneMeta || {})
+    .filter(([key]) => key !== RULEBOOK_DATA_METADATA_KEY)
+    .reduce((sum, [key, value]) => sum + estimateMetadataBytes(key) + estimateMetadataBytes(value), 0);
+  const rulebookBytes = estimateMetadataBytes(nextRulebookData);
+  return { fits: otherBytes + rulebookBytes <= SAFE_SCENE_METADATA_BUDGET_BYTES, otherBytes, rulebookBytes };
+}
 // GM Notes (Notes button) - opens as a real OBR.modal (gm-notes-modal.html)
 // rather than a tab in this narrow popover, so it gets a fixed, larger
 // canvas. That page owns the free-text notes entirely (its own scene
@@ -20713,7 +20738,20 @@ function refreshRulebookImportStatus() {
   if (deityCount > 0) parts.push(`${deityCount} deit${deityCount === 1 ? "y" : "ies"}`);
   if (monsterCount > 0) parts.push(`${monsterCount} monster${monsterCount === 1 ? "" : "s"}`);
   const el = document.getElementById("rulebook-import-status");
-  if (el) el.textContent = parts.length ? `${parts.join(", ")} currently loaded for this scene.` : "Nothing imported yet.";
+  if (el) {
+    let text = parts.length ? `${parts.join(", ")} currently loaded for this scene.` : "Nothing imported yet.";
+    // A pre-existing import from before the size check below existed can
+    // already be over budget - still usable locally (whatever loaded it
+    // last still has it cached), but worth flagging since it may not
+    // actually be reaching player clients any more.
+    if (lastRulebookData) {
+      const bytes = estimateMetadataBytes(lastRulebookData);
+      if (bytes > SAFE_SCENE_METADATA_BUDGET_BYTES) {
+        text += ` Warning: this is ~${Math.ceil(bytes / 1024)} KB, over Owlbear's ~${Math.ceil(SAFE_SCENE_METADATA_BUDGET_BYTES / 1024)} KB safe budget for this scene's shared data - it may not be reliably syncing to players. Clear and re-import a smaller batch.`;
+      }
+    }
+    el.textContent = text;
+  }
   // Small count badge on the collapsed trigger button (same
   // .open-spells-count treatment the Spells modal's own button uses) - so a
   // GM can see at a glance whether anything's loaded without opening the
@@ -20773,6 +20811,11 @@ document.getElementById("rulebook-import-btn").addEventListener("click", async (
       deities: { ...(existingData.deities || {}), ...(parsed.deities || {}) },
       monsters: { ...(existingData.monsters || {}), ...(parsed.monsters || {}) },
     };
+    const budget = checkRulebookDataFitsSceneBudget(sceneMeta, next);
+    if (!budget.fits) {
+      el.textContent = `Couldn't import - this would use ~${Math.ceil((budget.otherBytes + budget.rulebookBytes) / 1024)} KB, but Owlbear only allows ~${Math.ceil(SAFE_SCENE_METADATA_BUDGET_BYTES / 1024)} KB total for this scene's shared data (already ~${Math.ceil(budget.otherBytes / 1024)} KB used by other things). Import a smaller batch - fewer spells/monsters, or shorter descriptions - and try again.`;
+      return;
+    }
     lastRulebookData = next;
     await OBR.scene.setMetadata({ [RULEBOOK_DATA_METADATA_KEY]: next });
     document.getElementById("rulebook-import-textarea").value = "";

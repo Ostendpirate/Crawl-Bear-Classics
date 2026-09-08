@@ -221,7 +221,7 @@
          reasoning: no other way to tell "GitHub Pages hasn't redeployed
          this file yet" from "OBR is still showing an old copy of the
          modal" from "it deployed but didn't fix anything." -->
-    <div class="build-stamp" id="gm-notes-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">GM Notes build 2026-09-08 14:20</div>
+    <div class="build-stamp" id="gm-notes-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">GM Notes build 2026-09-08 14:50</div>
     <div class="row">
       <div style="flex:0 0 auto;">
         <label>Import from PDF or Markdown/Text</label>
@@ -307,6 +307,24 @@ const GM_NOTES_MODAL_ID = "com.claude.monster-sheet/gm-notes-modal";
 // fill (applyRulebookDataToMonsterSheet in index.html) picks it up with
 // no separate plumbing on that side.
 const RULEBOOK_DATA_METADATA_KEY = "com.claude.monster-sheet/rulebook-data";
+// Same reasoning and same numbers as index.html's own copy of this check
+// (RULEBOOK_DATA_METADATA_KEY's comment there has the full story) - OBR's
+// ~16 kB cap is on a scene's ENTIRE metadata object, and this key can
+// easily be the single biggest thing in it, so a write here needs the
+// same honest pre-check rather than letting OBR silently swallow one that
+// looks successful locally but never reaches other clients.
+function estimateMetadataBytes(value) {
+  try { return new TextEncoder().encode(JSON.stringify(value)).length; }
+  catch (err) { return 0; }
+}
+const SAFE_SCENE_METADATA_BUDGET_BYTES = 15000;
+function checkRulebookDataFitsSceneBudget(sceneMeta, nextRulebookData) {
+  const otherBytes = Object.entries(sceneMeta || {})
+    .filter(([key]) => key !== RULEBOOK_DATA_METADATA_KEY)
+    .reduce((sum, [key, value]) => sum + estimateMetadataBytes(key) + estimateMetadataBytes(value), 0);
+  const rulebookBytes = estimateMetadataBytes(nextRulebookData);
+  return { fits: otherBytes + rulebookBytes <= SAFE_SCENE_METADATA_BUDGET_BYTES, otherBytes, rulebookBytes };
+}
 
 // Which note was last open, and how far scrolled into each note's Preview
 // - both are "where I was looking," per-device viewing state rather than
@@ -1096,6 +1114,12 @@ document.getElementById("gm-notes-extract-btn").addEventListener("click", async 
       deities: existing.deities || {},
       monsters: { ...(existing.monsters || {}), ...monsters },
     };
+    const budget = checkRulebookDataFitsSceneBudget(sceneMeta, next);
+    if (!budget.fits) {
+      statusEl.textContent = `Couldn't save - this scene's shared rulebook data would reach ~${Math.ceil((budget.otherBytes + budget.rulebookBytes) / 1024)} KB, over Owlbear's ~${Math.ceil(SAFE_SCENE_METADATA_BUDGET_BYTES / 1024)} KB limit. Trim existing spells/monsters (via the Sheet's Rulebook Data Import) before extracting more.`;
+      statusEl.style.color = "#c97b7b";
+      return;
+    }
     await OBR.scene.setMetadata({ [RULEBOOK_DATA_METADATA_KEY]: next });
     const names = Object.keys(monsters).join(", ");
     statusEl.textContent = `Imported ${blocks.length} monster${blocks.length === 1 ? "" : "s"}: ${names}. Type a matching Name on a Monster sheet to auto-fill it.`;
