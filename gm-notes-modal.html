@@ -25,6 +25,7 @@
   }
   #app { display: flex; flex-direction: column; height: 100%; padding: 14px 16px 16px; }
   h1 { font-size: 16px; margin: 0 0 2px; letter-spacing: 0.3px; }
+  .build-stamp { text-align: right; font-size: 9px; color: var(--muted); margin: 0 0 8px; letter-spacing: 0.3px; }
   .header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
   #gm-notes-close-btn {
     flex: 0 0 auto;
@@ -213,6 +214,14 @@
       <button type="button" id="gm-notes-close-btn" title="Close">✕</button>
     </div>
     <div class="subtitle">Private scratch space, hidden from players - session prep, secrets, NPC motives, whatever. It's still ordinary scene data underneath (same as the roll log), not encrypted, so treat it as "a player won't casually stumble onto this," not "a player can never access this."</div>
+    <!-- This modal is a SEPARATE file from index.html, served from its own
+         URL - index.html's own #build-stamp only confirms THAT file
+         redeployed, not this one. Bumped by hand alongside it on every
+         meaningful commit that touches this file (see CLAUDE.md), same
+         reasoning: no other way to tell "GitHub Pages hasn't redeployed
+         this file yet" from "OBR is still showing an old copy of the
+         modal" from "it deployed but didn't fix anything." -->
+    <div class="build-stamp" id="gm-notes-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">GM Notes build 2026-09-08 10:41</div>
     <div class="row">
       <div style="flex:0 0 auto;">
         <label>Import from PDF or Markdown/Text</label>
@@ -1287,6 +1296,13 @@ function applyIncomingCampaignNote(roomMeta) {
 }
 
 OBR.onReady(async () => {
+  // Same build stamp as the visible one near the top - logged here too so
+  // it's checkable from devtools without needing to actually look at the
+  // modal (e.g. right after an import, before it's obvious whether the
+  // fix that's supposed to be live actually is).
+  const stampEl = document.getElementById("gm-notes-build-stamp");
+  console.log(`DCC GM Notes - ${stampEl ? stampEl.textContent : "(no build stamp found)"}`);
+
   // Registered before any awaited call below, so a rejection further down
   // can never leave these unattached.
   OBR.scene.onMetadataChange((metadata) => {
