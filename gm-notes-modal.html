@@ -221,7 +221,7 @@
          reasoning: no other way to tell "GitHub Pages hasn't redeployed
          this file yet" from "OBR is still showing an old copy of the
          modal" from "it deployed but didn't fix anything." -->
-    <div class="build-stamp" id="gm-notes-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">GM Notes build 2026-09-08 10:41</div>
+    <div class="build-stamp" id="gm-notes-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">GM Notes build 2026-09-08 12:05</div>
     <div class="row">
       <div style="flex:0 0 auto;">
         <label>Import from PDF or Markdown/Text</label>
@@ -276,13 +276,19 @@ const GM_NOTES_METADATA_KEY = "com.claude.monster-sheet/gm-notes";
 const GM_CAMPAIGN_NOTE_METADATA_KEY = "com.claude.monster-sheet/gm-campaign-note";
 const CAMPAIGN_NOTE_ID = "campaign-overview";
 
-// A single room/scene-metadata VALUE is capped by OBR at 16 kB (see
-// index.html's ROOM_TOKEN_TEMPLATE_PREFIX comment for the full story on
-// that limit, found the hard way via the same "saved" feature there). The
-// campaign note hits the exact same wall once its own content - especially
-// content pulled in via PDF import - grows past 16 kB by itself, so its
-// content is split into as many small chunks as needed, well under that
-// cap, rather than stored as one potentially-oversized value.
+// OBR caps a metadata write at 16 kB (see index.html's ROOM_TOKEN_TEMPLATE_PREFIX
+// comment for the full story on that limit, found the hard way via the same
+// "saved" feature there) - but turns out that's the TOTAL size of one
+// setMetadata() call, combining every key+value passed to it together, not
+// a per-value cap the way the first fix here assumed. Splitting a note's
+// content into several small chunk keys didn't actually help on its own,
+// since all those chunks were still being sent in one call whose combined
+// size added right back up to roughly the note's original, un-split size -
+// confirmed by "over size limit" still firing on import even after chunking
+// existed. So content is still split into chunks (keeps any ONE value well
+// under the cap on its own), AND those writes get issued as multiple
+// separate setMetadata() calls (see setMetadataInBatches below), each kept
+// under budget by itself - the actual fix is the second part.
 const METADATA_CHUNK_BYTES = 12000; // headroom under the 16 kB cap for JSON/key overhead
 function chunkTextByBytes(text, maxBytes) {
   const bytes = new TextEncoder().encode(text || "");
@@ -776,29 +782,72 @@ const persistAllNotesTimeouts = {};
 // longer needs - returns the new {noteIds, chunkCounts} so the caller can
 // update lastKnownSceneNoteIds/lastKnownNoteChunkCounts only once the
 // write actually succeeds.
+// Chunks (and clears) for each note are inserted before that note's own
+// manifest key, and the top-level {noteIds} manifest last of all - since
+// setMetadataInBatches now issues these as several SEQUENTIAL calls rather
+// than one atomic one, a manifest landing before the content it describes
+// would leave a reader that lands mid-write seeing a manifest pointing at
+// chunks that don't exist yet. Writing content first means a partial
+// failure worst-cases into "the old manifest still matches the old
+// content" rather than "the new manifest already promises new content".
 function buildSceneNotesWrites() {
   const writes = {};
   const currentIds = notesList.map(n => n.id);
-  writes[GM_NOTES_METADATA_KEY] = { noteIds: currentIds };
 
   lastKnownSceneNoteIds.forEach(id => {
     if (currentIds.includes(id)) return;
-    writes[noteManifestKeyFor(id)] = null;
     const oldCount = lastKnownNoteChunkCounts[id] || 0;
     for (let i = 0; i < oldCount; i++) writes[noteChunkKeyFor(id, i)] = null;
+    writes[noteManifestKeyFor(id)] = null;
   });
 
   const nextChunkCounts = {};
   notesList.forEach(note => {
     const chunks = chunkTextByBytes(note.content, METADATA_CHUNK_BYTES);
-    writes[noteManifestKeyFor(note.id)] = { title: note.title, chunkCount: chunks.length };
     chunks.forEach((chunk, i) => { writes[noteChunkKeyFor(note.id, i)] = chunk; });
     const oldCount = lastKnownNoteChunkCounts[note.id] || 0;
     for (let i = chunks.length; i < oldCount; i++) writes[noteChunkKeyFor(note.id, i)] = null;
+    writes[noteManifestKeyFor(note.id)] = { title: note.title, chunkCount: chunks.length };
     nextChunkCounts[note.id] = chunks.length;
   });
 
+  writes[GM_NOTES_METADATA_KEY] = { noteIds: currentIds };
+
   return { writes, currentIds, nextChunkCounts };
+}
+
+// The 16 kB cap (see METADATA_CHUNK_BYTES above) applies to a setMetadata()
+// call's TOTAL combined payload, not to each key's value alone - so a
+// { key: value } writes object built from several chunk keys still has to
+// go out as SEVERAL separate calls, each kept under budget by itself,
+// rather than one call listing every key. Sequential, not parallel/
+// Promise.all - two calls to the same metadata store racing each other
+// could apply out of order. estimateWriteBytes is deliberately rough (key
+// name + JSON-stringified value): it only needs to keep batches safely
+// under the cap, not match OBR's exact accounting.
+function estimateWriteBytes(key, value) {
+  try { return new TextEncoder().encode(key + JSON.stringify(value)).length; }
+  catch (err) { return 0; }
+}
+async function setMetadataInBatches(setMetadataFn, writes) {
+  const entries = Object.entries(writes);
+  const batches = [];
+  let current = {};
+  let currentBytes = 0;
+  entries.forEach(([key, value]) => {
+    const bytes = estimateWriteBytes(key, value);
+    if (currentBytes > 0 && currentBytes + bytes > METADATA_CHUNK_BYTES) {
+      batches.push(current);
+      current = {};
+      currentBytes = 0;
+    }
+    current[key] = value;
+    currentBytes += bytes;
+  });
+  if (Object.keys(current).length) batches.push(current);
+  for (const batch of batches) {
+    await setMetadataFn(batch);
+  }
 }
 
 async function persistAllNotes(successMessage, statusElId = "gm-notes-save-status") {
@@ -806,17 +855,15 @@ async function persistAllNotes(successMessage, statusElId = "gm-notes-save-statu
 
   const { writes: sceneWrites, currentIds, nextChunkCounts } = buildSceneNotesWrites();
 
-  // Split into chunks (see METADATA_CHUNK_BYTES) rather than writing the
-  // note as one value - a campaign note built up from a couple of PDF
-  // imports can easily be well past OBR's 16 kB per-value cap on its own,
-  // which is exactly why "the Campaign Overview note never actually saves"
-  // turned out to be the same root cause as the saved-token bug in
-  // index.html, just hitting a single note's own content instead of a
-  // collection of many tokens.
+  // Split into chunks (see METADATA_CHUNK_BYTES) and, via setMetadataInBatches
+  // below, into several separate calls - a campaign note built up from a
+  // couple of PDF imports can easily be well past OBR's 16 kB per-call cap
+  // on its own, which is exactly why "the Campaign Overview note never
+  // actually saves" turned out to be the same root cause as the saved-token
+  // bug in index.html, just hitting a single note's own content instead of
+  // a collection of many tokens.
   const chunks = chunkTextByBytes(campaignNote.content, METADATA_CHUNK_BYTES);
-  const campaignWrites = {
-    [GM_CAMPAIGN_NOTE_METADATA_KEY]: { title: campaignNote.title, chunkCount: chunks.length },
-  };
+  const campaignWrites = {};
   chunks.forEach((chunk, i) => { campaignWrites[campaignNoteChunkKey(i)] = chunk; });
   // Clear any chunk keys the PREVIOUS save used that this one no longer
   // needs (the note got shorter) - otherwise stale trailing content would
@@ -825,10 +872,14 @@ async function persistAllNotes(successMessage, statusElId = "gm-notes-save-statu
   for (let i = chunks.length; i < lastKnownCampaignChunkCount; i++) {
     campaignWrites[campaignNoteChunkKey(i)] = null;
   }
+  // Manifest last - see buildSceneNotesWrites' comment on why content
+  // needs to land before the manifest that describes it, now that these go
+  // out as several sequential calls rather than one atomic one.
+  campaignWrites[GM_CAMPAIGN_NOTE_METADATA_KEY] = { title: campaignNote.title, chunkCount: chunks.length };
 
   const [sceneResult, campaignResult] = await Promise.allSettled([
-    OBR.scene.setMetadata(sceneWrites),
-    OBR.room.setMetadata(campaignWrites),
+    setMetadataInBatches((batch) => OBR.scene.setMetadata(batch), sceneWrites),
+    setMetadataInBatches((batch) => OBR.room.setMetadata(batch), campaignWrites),
   ]);
   if (sceneResult.status === "fulfilled") {
     lastKnownSceneNoteIds = currentIds;
