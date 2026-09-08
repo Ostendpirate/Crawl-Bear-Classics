@@ -25,7 +25,19 @@
   }
   #app { display: flex; flex-direction: column; height: 100%; padding: 14px 16px 16px; }
   h1 { font-size: 16px; margin: 0 0 2px; letter-spacing: 0.3px; }
-  .build-stamp { text-align: right; font-size: 9px; color: var(--muted); margin: 0 0 8px; letter-spacing: 0.3px; }
+  .build-stamp { text-align: right; font-size: 9px; color: var(--muted); letter-spacing: 0.3px; }
+  .build-stamp-row { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: 0 0 8px; }
+  .reset-btn {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 9px;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+    font-family: inherit;
+    padding: 0;
+  }
+  .reset-btn:hover { color: #c97b7b; text-decoration: underline; }
   .header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
   #gm-notes-close-btn {
     flex: 0 0 auto;
@@ -221,7 +233,10 @@
          reasoning: no other way to tell "GitHub Pages hasn't redeployed
          this file yet" from "OBR is still showing an old copy of the
          modal" from "it deployed but didn't fix anything." -->
-    <div class="build-stamp" id="gm-notes-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">GM Notes build 2026-09-08 13:15</div>
+    <div class="build-stamp-row">
+      <div class="build-stamp" id="gm-notes-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">GM Notes build 2026-09-08 13:45</div>
+      <button type="button" id="gm-notes-reset-btn" class="reset-btn" title="Permanently deletes the Campaign Overview note and every note in this scene, then clears out any stuck data behind them. Use this ONLY if saving keeps failing with a size-limit error even for something tiny you just typed - that means Owlbear's own sync has a backlog stuck behind an earlier failed write that a normal save can't clear on its own. Cannot be undone.">⚠ Reset GM Notes storage</button>
+    </div>
     <div class="row">
       <div style="flex:0 0 auto;">
         <label>Import from PDF or Markdown/Text</label>
@@ -931,7 +946,7 @@ async function persistAllNotes(successMessage, statusElId = "gm-notes-save-statu
     const isSizeLimit = /size limit/i.test(failure.reason.message || "");
     const which = campaignResult.status === "rejected" ? "the Campaign Overview note" : "this scene's notes";
     statusEl.textContent = isSizeLimit
-      ? `Couldn't save - ${which} is too large for Owlbear's storage even split into chunks. Trim it down and try again.`
+      ? `Couldn't save - ${which} hit Owlbear's size limit even paced into small batches. If this keeps happening on every save (even a tiny edit), Owlbear's sync may have a stuck backlog - see "Reset GM Notes storage" above.`
       : `Save failed: ${failure.reason.message}`;
     statusEl.style.color = "#c97b7b";
     return;
@@ -941,6 +956,73 @@ async function persistAllNotes(successMessage, statusElId = "gm-notes-save-statu
   clearTimeout(persistAllNotesTimeouts[statusElId]);
   persistAllNotesTimeouts[statusElId] = setTimeout(() => { statusEl.textContent = ""; }, 3000);
 }
+
+// Recovery path for "OBR keeps reporting a size-limit error on every save,
+// even a tiny one" - confirmed via the console that this means OBR's OWN
+// client has a backlog of local metadata changes it can't flush to the
+// server (the error fires as an unhandled rejection from OBR's own code on
+// page load, before this extension does anything), not something a normal
+// paced save from this page can clear on its own. Reads keys straight from
+// freshly-fetched metadata rather than trusting notesList/campaignNote or
+// lastKnownSceneNoteIds/lastKnownCampaignChunkCount - an earlier save that
+// looked successful (resolved locally) but never actually reached the
+// server, per the same bug, could have left orphaned keys this page's own
+// in-memory state was never told about. Clears ONE key per call, each with
+// a full FLUSH_PAUSE_MS pause after - the most conservative pacing
+// possible, since the entire point is recovering from a batch that wasn't
+// paced enough in the first place.
+async function hardResetGmNotesStorage(onProgress) {
+  const [roomMeta, sceneMeta] = await Promise.all([OBR.room.getMetadata(), OBR.scene.getMetadata()]);
+  const roomKeys = Object.keys(roomMeta).filter(k =>
+    k === GM_CAMPAIGN_NOTE_METADATA_KEY || k.startsWith(GM_CAMPAIGN_NOTE_METADATA_KEY + ":"));
+  const sceneKeys = Object.keys(sceneMeta).filter(k =>
+    k === GM_NOTES_METADATA_KEY || k.startsWith(GM_NOTES_METADATA_KEY + ":"));
+  const total = roomKeys.length + sceneKeys.length;
+  let done = 0;
+  for (const key of roomKeys) {
+    if (onProgress) onProgress(done + 1, total);
+    console.log(`DCC GM notes [reset]: clearing room key ${key}`);
+    await OBR.room.setMetadata({ [key]: null });
+    done++;
+    await delay(FLUSH_PAUSE_MS);
+  }
+  for (const key of sceneKeys) {
+    if (onProgress) onProgress(done + 1, total);
+    console.log(`DCC GM notes [reset]: clearing scene key ${key}`);
+    await OBR.scene.setMetadata({ [key]: null });
+    done++;
+    await delay(FLUSH_PAUSE_MS);
+  }
+}
+
+document.getElementById("gm-notes-reset-btn").addEventListener("click", async () => {
+  const confirmed = window.confirm(
+    "This permanently deletes the Campaign Overview note and every note in this scene, then clears out any stuck data behind them.\n\n" +
+    "Use this ONLY if saving keeps failing with a size-limit error even for something tiny you just typed - that means Owlbear's own sync has a backlog stuck behind an earlier failed write that a normal save can't clear on its own.\n\n" +
+    "This cannot be undone. Continue?"
+  );
+  if (!confirmed) return;
+  const statusEl = document.getElementById("gm-notes-import-status");
+  statusEl.style.color = "";
+  try {
+    await hardResetGmNotesStorage((i, total) => { statusEl.textContent = `Clearing... (${i}/${total})`; });
+    notesList = [];
+    campaignNote = { id: CAMPAIGN_NOTE_ID, title: "Campaign Overview", content: "" };
+    lastKnownSceneNoteIds = [];
+    lastKnownNoteChunkCounts = {};
+    lastKnownCampaignChunkCount = 0;
+    activeNoteId = CAMPAIGN_NOTE_ID;
+    saveLastActiveNoteId(activeNoteId);
+    loadNoteIntoEditor(campaignNote);
+    renderNotesSidebar();
+    statusEl.textContent = "Reset complete - GM Notes storage is now empty.";
+    statusEl.style.color = "var(--good)";
+  } catch (err) {
+    console.error("DCC GM notes: reset failed", err);
+    statusEl.textContent = `Reset failed partway through: ${err.message}. Check the console for which key failed, then try again.`;
+    statusEl.style.color = "#c97b7b";
+  }
+});
 
 // marked + DOMPurify are only needed to render Preview, so they're loaded
 // lazily from the same esm.sh CDN this page already pulls the OBR SDK and
