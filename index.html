@@ -1638,7 +1638,7 @@
       <button class="tab-btn" id="nav-notes" style="display:none;">Notes</button>
       <button class="tab-btn" id="nav-pins" style="display:none;">Pins</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-09-08 14:55</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-09-08 19:39</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -7149,6 +7149,11 @@ async function saveCurrent() {
         if (item.text) {
           item.text.plainText = name;
           item.text.type = "PLAIN";
+          // Applied here too (not just the GM-only bulk sweep in
+          // enforceTokenNameplateFontSize) so a player renaming their own
+          // token gets the fix immediately, without waiting on a GM
+          // client's items.onChange to catch up to it.
+          item.text.style = { ...item.text.style, fontSize: TOKEN_NAMEPLATE_FONT_SIZE };
         }
       }
     });
@@ -16746,6 +16751,7 @@ async function refreshTokenRoster() {
       await migrateLegacyTokenTemplates();
       await ensureRosterIds(lastRosterItems);
       await applyPersistentOwnership(lastRosterItems);
+      await enforceTokenNameplateFontSize(lastRosterItems);
       await pruneOrphanedTokenTemplates();
       const beforeCount = lastRosterItems.length;
       // No longer passed lastRosterItems - cloneMissingAssignedTokens now
@@ -16934,6 +16940,38 @@ async function applyPersistentOwnershipImpl(items) {
     });
   } catch (err) {
     console.error("DCC sheet: failed to apply persistent ownership", err);
+  }
+}
+
+// Every token's on-map nameplate, forced to one consistent size rather
+// than whatever Owlbear's own per-token default happened to be (which
+// varies a lot across tokens dragged in from different sources/sessions).
+// Only OBR's native Image tokens carry the .text nameplate object this
+// touches - a shape this extension builds itself (e.g. a familiar's
+// token, see buildShape() above) never gets one, so there's nothing to
+// resize for those.
+const TOKEN_NAMEPLATE_FONT_SIZE = 60;
+function hasTokenNameplate(item) {
+  return item.layer === "CHARACTER" && !!item.text;
+}
+// GM-only, same reasoning as ensureRosterIds/applyPersistentOwnership
+// above: a scene-wide item write, so only one client (the GM's) needs to
+// run it - the others will see the result sync in via items.onChange like
+// any other change. Skips items already at the target size so a no-op
+// pass never triggers a pointless sync round-trip.
+async function enforceTokenNameplateFontSize(items) {
+  if (currentPlayerRole !== "GM") return;
+  const needsResize = items.filter(item => hasTokenNameplate(item) && item.text.style?.fontSize !== TOKEN_NAMEPLATE_FONT_SIZE);
+  if (!needsResize.length) return;
+  try {
+    await OBR.scene.items.updateItems(needsResize.map(item => item.id), draftItems => {
+      draftItems.forEach(item => {
+        if (!item.text) return;
+        item.text.style = { ...item.text.style, fontSize: TOKEN_NAMEPLATE_FONT_SIZE };
+      });
+    });
+  } catch (err) {
+    console.error("DCC sheet: failed to enforce token nameplate font size", err);
   }
 }
 
@@ -21747,6 +21785,7 @@ OBR.onReady(async () => {
     if (currentPlayerRole === "GM") {
       await ensureRosterIds(lastRosterItems);
       await applyPersistentOwnership(lastRosterItems);
+      await enforceTokenNameplateFontSize(lastRosterItems);
     }
   });
 
