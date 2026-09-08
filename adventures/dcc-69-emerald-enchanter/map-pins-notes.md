@@ -1,4 +1,8 @@
-# Map Pins — design notes (not yet built)
+# Map Pins — original design notes (now built)
+
+**This has been built.** See `../../map-pins-modal.html`, opened from the Sheet popover's GM-only **Pins** button (`index.html`'s `openMapPinsModal`). The right-click "Open Room Notes" jump described below also shipped, in `overlay.html` + `gm-notes-modal.html`. This file is kept as-is for historical context on the original sketch, not as a to-do list — see those files' own comments for how the shipped version actually works (it differs in a few places, notably calibration being a manual test-pin step rather than trusted math, and the jump using a broadcast channel to reach an already-open GM Notes modal).
+
+The rest of this file is the original sketch, unedited:
 
 This is a sketch for a possible future feature, not a working file — Crawl-Bear-Classics keeps every feature self-contained inside its own HTML file's `<script type="module">` block (see `CLAUDE.md`), so this would need to live inside a new modal (e.g. `map-pins-modal.html`, opened the same way `gm-notes-modal.html` and `rulebook-data-builder.html` are) rather than as a standalone `.js` file.
 
@@ -85,4 +89,4 @@ OBR.contextMenu.create({
 - The exact scroll-to-heading hookup into GM Notes' existing note viewer, once one exists to hook into.
 - Calibrating the image-to-scene coordinate math against a real placed background image, since Owlbear's anchor behavior isn't something this sketch has been run against yet.
 
-Ask for this to be built out as a real modal when you're ready — it's a genuine feature addition to DCC Suite, not just a content drop, so it's worth doing deliberately against the current `esm.sh` SDK version and the app's build-stamp/version conventions.
+~~Ask for this to be built out as a real modal when you're ready — it's a genuine feature addition to DCC Suite, not just a content drop, so it's worth doing deliberately against the current `esm.sh` SDK version and the app's build-stamp/version conventions.~~ Done — see the note at the top of this file.
