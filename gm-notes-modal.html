@@ -221,7 +221,7 @@
          reasoning: no other way to tell "GitHub Pages hasn't redeployed
          this file yet" from "OBR is still showing an old copy of the
          modal" from "it deployed but didn't fix anything." -->
-    <div class="build-stamp" id="gm-notes-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">GM Notes build 2026-09-08 12:40</div>
+    <div class="build-stamp" id="gm-notes-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">GM Notes build 2026-09-08 13:15</div>
     <div class="row">
       <div style="flex:0 0 auto;">
         <label>Import from PDF or Markdown/Text</label>
@@ -829,15 +829,26 @@ function estimateWriteBytes(key, value) {
   try { return new TextEncoder().encode(key + JSON.stringify(value)).length; }
   catch (err) { return 0; }
 }
-// label + verbose logging are a diagnostic left in deliberately (not just
-// during dev) - the 16 kB error has resurfaced twice now despite each fix
-// checking out against a mocked OBR, meaning the mock's model of the real
-// limit is wrong in some way not yet identified. Logging exactly what each
-// call actually sends and whether OBR accepts it is the fastest way to see
-// which part of the theory (call-total cap vs. something else, like the
-// SDK sending more than just this call's own patch) is wrong, straight
-// from the browser console against the real backend instead of a guess.
-async function setMetadataInBatches(setMetadataFn, writes, label = "") {
+// Confirmed via the browser console against real OBR (not a mock): each
+// batch below resolves fine on its own - the "over size limit" error shows
+// up as an UNHANDLED rejection thrown deep inside OBR's own client bundle
+// (room-*.js: set/handle/handleMessage), not as a rejection of the promise
+// THIS code is awaiting. That only makes sense if OBR.room/scene.setMetadata
+// resolves as soon as a change is applied to a LOCAL copy of the metadata,
+// while the actual sync to the server is buffered and flushed separately -
+// so firing several calls back-to-back (each individually well under the
+// cap) lets OBR's own client coalesce more than one of them into a single
+// outgoing sync that's still oversized, entirely outside this code's view.
+// The fix is pacing: a short pause after each batch gives OBR's own flush
+// time to actually go out to the server before the next batch's change
+// gets queued up behind it and coalesced together. FLUSH_PAUSE_MS is an
+// empirical guess (not a documented OBR value) - if the size error still
+// shows up as an unhandled rejection in the console after this, that
+// number needs to go up.
+const FLUSH_PAUSE_MS = 800;
+function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+async function setMetadataInBatches(setMetadataFn, writes, label = "", onProgress) {
   const entries = Object.entries(writes);
   const batches = [];
   let current = {};
@@ -859,6 +870,7 @@ async function setMetadataInBatches(setMetadataFn, writes, label = "") {
     const keys = Object.keys(batch);
     const size = new TextEncoder().encode(JSON.stringify(batch)).length;
     console.log(`DCC GM notes [${label}]: batch ${i + 1}/${batches.length} - ${keys.length} key(s), ~${size} bytes -`, keys);
+    if (onProgress && batches.length > 1) onProgress(i + 1, batches.length);
     try {
       await setMetadataFn(batch);
       console.log(`DCC GM notes [${label}]: batch ${i + 1}/${batches.length} OK`);
@@ -866,6 +878,7 @@ async function setMetadataInBatches(setMetadataFn, writes, label = "") {
       console.error(`DCC GM notes [${label}]: batch ${i + 1}/${batches.length} FAILED (${size} bytes, keys: ${keys.join(", ")})`, err);
       throw err;
     }
+    if (i < batches.length - 1) await delay(FLUSH_PAUSE_MS);
   }
 }
 
@@ -896,9 +909,15 @@ async function persistAllNotes(successMessage, statusElId = "gm-notes-save-statu
   // out as several sequential calls rather than one atomic one.
   campaignWrites[GM_CAMPAIGN_NOTE_METADATA_KEY] = { title: campaignNote.title, chunkCount: chunks.length };
 
+  // A multi-batch save now takes a deliberate pause between batches (see
+  // FLUSH_PAUSE_MS) - worth a couple seconds of visible progress so a big
+  // note's save doesn't just look frozen partway through.
+  statusEl.textContent = "Saving...";
+  statusEl.style.color = "";
+  const onProgress = (i, total) => { statusEl.textContent = `Saving... (${i}/${total})`; };
   const [sceneResult, campaignResult] = await Promise.allSettled([
-    setMetadataInBatches((batch) => OBR.scene.setMetadata(batch), sceneWrites, "scene notes"),
-    setMetadataInBatches((batch) => OBR.room.setMetadata(batch), campaignWrites, "campaign note"),
+    setMetadataInBatches((batch) => OBR.scene.setMetadata(batch), sceneWrites, "scene notes", onProgress),
+    setMetadataInBatches((batch) => OBR.room.setMetadata(batch), campaignWrites, "campaign note", onProgress),
   ]);
   if (sceneResult.status === "fulfilled") {
     lastKnownSceneNoteIds = currentIds;
