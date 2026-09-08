@@ -208,7 +208,7 @@ const LEVEL_COLOR_PALETTE = [
 let mapImages = [];
 let parsedPins = [];
 let levelColors = new Map();
-let existingPinKeys = new Set(); // "doc id" for pins already on the scene
+let existingPinKeys = new Set(); // "doc id" for pins already on the scene
 let existingPinItemIds = [];
 let testPinItemId = null;
 
@@ -219,7 +219,7 @@ function setStatus(id, message, kind) {
   el.className = "status" + (kind ? ` ${kind}` : "");
 }
 
-function pinKey(pin) { return `${pin.doc} ${pin.id}`; }
+function pinKey(pin) { return `${pin.doc} ${pin.id}`; }
 
 function levelColorFor(level) {
   if (!levelColors.has(level)) {
@@ -442,7 +442,7 @@ async function refreshExistingPins() {
     existingPinItemIds = pinItems.map(i => i.id);
     existingPinKeys = new Set(pinItems.map(i => {
       const meta = i.metadata[ROOM_PIN_METADATA_KEY];
-      return `${meta.doc} ${meta.id}`;
+      return `${meta.doc} ${meta.id}`;
     }));
     document.getElementById("existing-pin-count").textContent = String(pinItems.length);
   } catch (err) {
