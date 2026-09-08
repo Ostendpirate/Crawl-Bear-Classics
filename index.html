@@ -1636,8 +1636,9 @@
       <button class="tab-btn" id="nav-dice">Dice</button>
       <button class="tab-btn" id="nav-chat">Log</button>
       <button class="tab-btn" id="nav-notes" style="display:none;">Notes</button>
+      <button class="tab-btn" id="nav-pins" style="display:none;">Pins</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-09-08 14:50</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-09-08 14:55</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -2989,6 +2990,13 @@ function checkRulebookDataFitsSceneBudget(sceneMeta, nextRulebookData) {
 // metadata directly.
 const GM_NOTES_MODAL_ID = "com.claude.monster-sheet/gm-notes-modal";
 const GM_NOTES_MODAL_URL = "https://ostendpirate.github.io/Crawl-Bear-Classics/gm-notes-modal.html";
+
+// Map Pins (Pins button) - same pattern as GM Notes above: a real
+// OBR.modal (map-pins-modal.html) that owns its own scene-item reads/
+// writes entirely. GM-only for the same reason as Notes - see
+// refreshNotesTabVisibility's comment, which applies here too.
+const MAP_PINS_MODAL_ID = "com.claude.monster-sheet/map-pins-modal";
+const MAP_PINS_MODAL_URL = "https://ostendpirate.github.io/Crawl-Bear-Classics/map-pins-modal.html";
 
 const EMPTY_STATE_DEFAULT_HTML = `Select a token on the map to view or edit its DCC character sheet.<br/><br/>Changes save automatically to the token so anyone in the room sees the same sheet.`;
 const EMPTY_STATE_NOT_OWNED_HTML = `This token isn't assigned to you.<br/><br/>Ask your GM to assign it to you, or pick one of your own tokens from the list above.`;
@@ -16103,6 +16111,9 @@ document.getElementById("nav-chat").addEventListener("click", () => setView("cha
 // (see openGmNotesModal) instead of switching the popover's own narrow
 // panel, so it gets a fixed, much larger canvas to write/read/import in.
 document.getElementById("nav-notes").addEventListener("click", () => openGmNotesModal());
+// Same reasoning as Notes above - Pins opens as its own OBR.modal
+// (openMapPinsModal) rather than a tab, for the same fixed larger canvas.
+document.getElementById("nav-pins").addEventListener("click", () => openMapPinsModal());
 
 // ---- Combat Tracker & Chat Log ----
 let sceneState = { round: 1, activeId: null };
@@ -17135,6 +17146,25 @@ function openGmNotesModal() {
     width: 1300,
     height: 760,
   }).catch(err => console.error("DCC sheet: failed to open GM notes modal", err));
+}
+
+function openMapPinsModal() {
+  OBR.modal.open({
+    id: MAP_PINS_MODAL_ID,
+    url: MAP_PINS_MODAL_URL,
+    width: 960,
+    height: 760,
+  }).catch(err => console.error("DCC sheet: failed to open Map Pins modal", err));
+}
+
+// The Pins button is GM-only, same reasoning as refreshNotesTabVisibility
+// above (no real server-side privacy in OBR's model, just hiding the
+// button from players). Closes the modal too if role flips away from GM
+// mid-session.
+function refreshPinsTabVisibility() {
+  const btn = document.getElementById("nav-pins");
+  if (btn) btn.style.display = currentPlayerRole === "GM" ? "" : "none";
+  if (currentPlayerRole !== "GM") OBR.modal.close(MAP_PINS_MODAL_ID).catch(() => {});
 }
 
 // Builds the <option> list for the Owner select. Always includes the
@@ -21576,6 +21606,7 @@ OBR.onReady(async () => {
       refreshOwnerRowVisibility();
       refreshClearLogVisibility();
       refreshNotesTabVisibility();
+      refreshPinsTabVisibility();
       rosterNeedsRerender = true;
     }
     if (typeof player.id === "string" && player.id !== currentPlayerId) {
@@ -21795,6 +21826,7 @@ OBR.onReady(async () => {
     refreshOwnerRowVisibility();
     refreshClearLogVisibility();
     refreshNotesTabVisibility();
+    refreshPinsTabVisibility();
   } catch (err) {
     console.error("DCC sheet: initial getRole failed", err);
   }
