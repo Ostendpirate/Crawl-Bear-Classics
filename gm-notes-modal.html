@@ -221,7 +221,7 @@
          reasoning: no other way to tell "GitHub Pages hasn't redeployed
          this file yet" from "OBR is still showing an old copy of the
          modal" from "it deployed but didn't fix anything." -->
-    <div class="build-stamp" id="gm-notes-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">GM Notes build 2026-09-08 12:05</div>
+    <div class="build-stamp" id="gm-notes-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">GM Notes build 2026-09-08 12:40</div>
     <div class="row">
       <div style="flex:0 0 auto;">
         <label>Import from PDF or Markdown/Text</label>
@@ -829,7 +829,15 @@ function estimateWriteBytes(key, value) {
   try { return new TextEncoder().encode(key + JSON.stringify(value)).length; }
   catch (err) { return 0; }
 }
-async function setMetadataInBatches(setMetadataFn, writes) {
+// label + verbose logging are a diagnostic left in deliberately (not just
+// during dev) - the 16 kB error has resurfaced twice now despite each fix
+// checking out against a mocked OBR, meaning the mock's model of the real
+// limit is wrong in some way not yet identified. Logging exactly what each
+// call actually sends and whether OBR accepts it is the fastest way to see
+// which part of the theory (call-total cap vs. something else, like the
+// SDK sending more than just this call's own patch) is wrong, straight
+// from the browser console against the real backend instead of a guess.
+async function setMetadataInBatches(setMetadataFn, writes, label = "") {
   const entries = Object.entries(writes);
   const batches = [];
   let current = {};
@@ -845,8 +853,19 @@ async function setMetadataInBatches(setMetadataFn, writes) {
     currentBytes += bytes;
   });
   if (Object.keys(current).length) batches.push(current);
-  for (const batch of batches) {
-    await setMetadataFn(batch);
+  console.log(`DCC GM notes [${label}]: writing ${entries.length} key(s) across ${batches.length} batch(es)`);
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    const keys = Object.keys(batch);
+    const size = new TextEncoder().encode(JSON.stringify(batch)).length;
+    console.log(`DCC GM notes [${label}]: batch ${i + 1}/${batches.length} - ${keys.length} key(s), ~${size} bytes -`, keys);
+    try {
+      await setMetadataFn(batch);
+      console.log(`DCC GM notes [${label}]: batch ${i + 1}/${batches.length} OK`);
+    } catch (err) {
+      console.error(`DCC GM notes [${label}]: batch ${i + 1}/${batches.length} FAILED (${size} bytes, keys: ${keys.join(", ")})`, err);
+      throw err;
+    }
   }
 }
 
@@ -878,8 +897,8 @@ async function persistAllNotes(successMessage, statusElId = "gm-notes-save-statu
   campaignWrites[GM_CAMPAIGN_NOTE_METADATA_KEY] = { title: campaignNote.title, chunkCount: chunks.length };
 
   const [sceneResult, campaignResult] = await Promise.allSettled([
-    setMetadataInBatches((batch) => OBR.scene.setMetadata(batch), sceneWrites),
-    setMetadataInBatches((batch) => OBR.room.setMetadata(batch), campaignWrites),
+    setMetadataInBatches((batch) => OBR.scene.setMetadata(batch), sceneWrites, "scene notes"),
+    setMetadataInBatches((batch) => OBR.room.setMetadata(batch), campaignWrites, "campaign note"),
   ]);
   if (sceneResult.status === "fulfilled") {
     lastKnownSceneNoteIds = currentIds;
@@ -1346,6 +1365,22 @@ function applyIncomingCampaignNote(roomMeta) {
   syncActiveNoteAndRender();
 }
 
+// See the call site's comment (OBR.onReady, initial getMetadata block) for
+// why this exists. Logs the total serialized size of a full metadata
+// object plus its 8 largest keys, so a bloated total (vs. a bloated single
+// key) is obvious at a glance from the console.
+function logMetadataSizeBreakdown(label, meta) {
+  const entries = Object.entries(meta || {});
+  const sized = entries.map(([key, value]) => ({
+    key,
+    bytes: new TextEncoder().encode(key + JSON.stringify(value)).length,
+  }));
+  const total = sized.reduce((sum, e) => sum + e.bytes, 0);
+  sized.sort((a, b) => b.bytes - a.bytes);
+  console.log(`DCC GM notes: ${label} metadata - ${entries.length} key(s), ~${total} bytes total`);
+  if (sized.length) console.table(sized.slice(0, 8));
+}
+
 OBR.onReady(async () => {
   // Same build stamp as the visible one near the top - logged here too so
   // it's checkable from devtools without needing to actually look at the
@@ -1387,6 +1422,20 @@ OBR.onReady(async () => {
     OBR.room.getMetadata(),
     OBR.scene.getMetadata(),
   ]);
+  // Diagnostic: the 16 kB write error has resurfaced even after batching
+  // each call to stay under budget on its own, which only makes sense if
+  // something other than "this one call's own payload" is what's actually
+  // being measured - e.g. the total size of ALL room metadata, accumulated
+  // across every key this and other extensions (index.html's saved-token
+  // feature included) have ever written there. Logging the totals and the
+  // biggest individual keys on every open makes that visible without
+  // guessing.
+  if (roomResult.status === "fulfilled") {
+    logMetadataSizeBreakdown("room", roomResult.value);
+  }
+  if (sceneResult.status === "fulfilled") {
+    logMetadataSizeBreakdown("scene", sceneResult.value);
+  }
   if (roomResult.status === "fulfilled") {
     campaignNote = parseCampaignNoteFromRoomMeta(roomResult.value);
   } else {
