@@ -25,19 +25,7 @@
   }
   #app { display: flex; flex-direction: column; height: 100%; padding: 14px 16px 16px; }
   h1 { font-size: 16px; margin: 0 0 2px; letter-spacing: 0.3px; }
-  .build-stamp { text-align: right; font-size: 9px; color: var(--muted); letter-spacing: 0.3px; }
-  .build-stamp-row { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: 0 0 8px; }
-  .reset-btn {
-    background: none;
-    border: none;
-    color: var(--muted);
-    font-size: 9px;
-    letter-spacing: 0.3px;
-    cursor: pointer;
-    font-family: inherit;
-    padding: 0;
-  }
-  .reset-btn:hover { color: #c97b7b; text-decoration: underline; }
+  .build-stamp { text-align: right; font-size: 9px; color: var(--muted); letter-spacing: 0.3px; margin: 0 0 8px; }
   .header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
   #gm-notes-close-btn {
     flex: 0 0 auto;
@@ -225,7 +213,7 @@
       <h1>GM Notes</h1>
       <button type="button" id="gm-notes-close-btn" title="Close">✕</button>
     </div>
-    <div class="subtitle">Private scratch space, hidden from players - session prep, secrets, NPC motives, whatever. It's still ordinary scene data underneath (same as the roll log), not encrypted, so treat it as "a player won't casually stumble onto this," not "a player can never access this."</div>
+    <div class="subtitle">Private scratch space, hidden from players - session prep, secrets, NPC motives, whatever. Note text is stored on this device/browser only, not synced live to your other devices or a co-GM (Owlbear's own sync has a hard size limit that real notes and PDF imports routinely exceed), so treat it as "a player won't casually stumble onto this," not "a player can never access this," and remember it lives here on this browser specifically.</div>
     <!-- This modal is a SEPARATE file from index.html, served from its own
          URL - index.html's own #build-stamp only confirms THAT file
          redeployed, not this one. Bumped by hand alongside it on every
@@ -233,10 +221,7 @@
          reasoning: no other way to tell "GitHub Pages hasn't redeployed
          this file yet" from "OBR is still showing an old copy of the
          modal" from "it deployed but didn't fix anything." -->
-    <div class="build-stamp-row">
-      <div class="build-stamp" id="gm-notes-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">GM Notes build 2026-09-08 13:45</div>
-      <button type="button" id="gm-notes-reset-btn" class="reset-btn" title="Permanently deletes the Campaign Overview note and every note in this scene, then clears out any stuck data behind them. Use this ONLY if saving keeps failing with a size-limit error even for something tiny you just typed - that means Owlbear's own sync has a backlog stuck behind an earlier failed write that a normal save can't clear on its own. Cannot be undone.">⚠ Reset GM Notes storage</button>
-    </div>
+    <div class="build-stamp" id="gm-notes-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">GM Notes build 2026-09-08 14:20</div>
     <div class="row">
       <div style="flex:0 0 auto;">
         <label>Import from PDF or Markdown/Text</label>
@@ -277,80 +262,41 @@
 <script type="module">
 import OBR from "https://esm.sh/@owlbear-rodeo/sdk@2";
 
-// Same key index.html used to write when this held a single plain-text
-// blob - keeping it identical is what lets this modal read/write the same
-// scene data. Its VALUE shape has changed though (see parseNotesFromSceneMeta).
-// This key holds the per-SCENE notes list - each OBR scene has its own
-// metadata, so switching maps naturally swaps out which notes show here.
+// OBR turned out to enforce a hard ~16 kB cap on a room's (and a scene's)
+// ENTIRE metadata object, TOTAL, shared across every key any extension
+// writes there - not a per-value cap, and not a per-write-call cap (both
+// were tried here first; neither held up against the real backend). A
+// GM's actual notes/PDF imports routinely exceed what's left of that
+// budget once index.html's own saved-token and rulebook-data features
+// have taken their share, so note CONTENT can't live in OBR metadata at
+// all and stay reliable - it lives in this page's own IndexedDB instead
+// (see NOTES_DB_NAME below), same as the PDF page images already did, for
+// the same reason: local storage has no practical size limit, OBR's
+// metadata sync does. The tradeoff: note text is now per-device, not
+// synced live to the GM's other devices or a co-GM - see the UI copy near
+// the notes list for how this is explained there.
+//
+// The one thing still worth keeping in OBR scene metadata is the tiny
+// LIST of which note ids belong to the current scene - just an array of
+// UUID strings, negligible size even with a hundred notes, and it rides
+// for free on OBR's own per-scene metadata scoping (switching maps
+// naturally swaps which list this key returns) without needing this page
+// to invent its own scene identifier, which the SDK doesn't expose.
 const GM_NOTES_METADATA_KEY = "com.claude.monster-sheet/gm-notes";
-// The campaign-wide overview note, by contrast, lives in ROOM metadata
-// (not scene metadata) - a room's metadata is shared across every scene
-// in it, exactly what "one note that overviews all scenes" needs. It's a
-// single pinned note rather than a list: unlike the per-scene notes,
-// there's meant to be exactly one of these.
-const GM_CAMPAIGN_NOTE_METADATA_KEY = "com.claude.monster-sheet/gm-campaign-note";
+// The campaign note is a room-wide singleton (never a list), so it
+// doesn't even need that - just a fixed id in the local notes store,
+// always available without any OBR metadata involvement at all.
 const CAMPAIGN_NOTE_ID = "campaign-overview";
+// No longer written going forward - only read once, during the one-time
+// migration below, to pull forward whatever a GM already had saved here
+// under the old (OBR-metadata-based) scheme before this page stops using
+// it. See migrateLegacyNotesToLocalStorage.
+const LEGACY_GM_CAMPAIGN_NOTE_METADATA_KEY = "com.claude.monster-sheet/gm-campaign-note";
 
-// OBR caps a metadata write at 16 kB (see index.html's ROOM_TOKEN_TEMPLATE_PREFIX
-// comment for the full story on that limit, found the hard way via the same
-// "saved" feature there) - but turns out that's the TOTAL size of one
-// setMetadata() call, combining every key+value passed to it together, not
-// a per-value cap the way the first fix here assumed. Splitting a note's
-// content into several small chunk keys didn't actually help on its own,
-// since all those chunks were still being sent in one call whose combined
-// size added right back up to roughly the note's original, un-split size -
-// confirmed by "over size limit" still firing on import even after chunking
-// existed. So content is still split into chunks (keeps any ONE value well
-// under the cap on its own), AND those writes get issued as multiple
-// separate setMetadata() calls (see setMetadataInBatches below), each kept
-// under budget by itself - the actual fix is the second part.
-const METADATA_CHUNK_BYTES = 12000; // headroom under the 16 kB cap for JSON/key overhead
-function chunkTextByBytes(text, maxBytes) {
-  const bytes = new TextEncoder().encode(text || "");
-  if (bytes.length <= maxBytes) return [text || ""];
-  const chunks = [];
-  let start = 0;
-  while (start < bytes.length) {
-    let end = Math.min(start + maxBytes, bytes.length);
-    // Don't split a multi-byte UTF-8 sequence in half - back off to the
-    // start of whatever character straddles the boundary.
-    while (end < bytes.length && (bytes[end] & 0xC0) === 0x80) end--;
-    chunks.push(new TextDecoder().decode(bytes.slice(start, end)));
-    start = end;
-  }
-  return chunks;
-}
-function campaignNoteChunkKey(index) {
-  return `${GM_CAMPAIGN_NOTE_METADATA_KEY}:chunk:${index}`;
-}
-// How many chunks the LAST successfully loaded/saved campaign note used -
-// needed so a save that SHRINKS the note (fewer chunks than before)
-// explicitly clears the now-unused trailing chunk keys, instead of
-// leaving stale content sitting there that a future load would otherwise
-// have no reason to know is orphaned.
-let lastKnownCampaignChunkCount = 0;
-
-// Per-scene notes get the SAME two problems the campaign note had: many
-// notes together can exceed 16 kB combined (same fix as the saved-token
-// bug - one scene-metadata key per note instead of one shared list), and
-// any single note's own content (e.g. one big PDF import) can exceed it
-// on its own (same chunking as the campaign note, just per-note instead
-// of the one pinned note). GM_NOTES_METADATA_KEY itself becomes a small
-// manifest ({ noteIds: [...] }) rather than holding every note's content
-// directly.
-function noteManifestKeyFor(noteId) {
-  return `${GM_NOTES_METADATA_KEY}:note:${noteId}`;
-}
-function noteChunkKeyFor(noteId, index) {
-  return `${GM_NOTES_METADATA_KEY}:note:${noteId}:chunk:${index}`;
-}
-// Mirrors lastKnownCampaignChunkCount, per note id, plus which note ids
-// existed as of the last successful load/save - both needed so a save can
-// tell "this note got shorter, clear its trailing chunks" and "this note
-// is gone entirely, clear its manifest and every chunk it had" apart from
-// "this note never existed here at all, nothing to clear."
+// Mirrors which note ids existed here as of the last successful load/save,
+// so a save can tell "this note is gone, delete its local record too"
+// apart from "this note never existed here at all."
 let lastKnownSceneNoteIds = [];
-let lastKnownNoteChunkCounts = {};
 // Must exactly match the id index.html's openGmNotesModal() uses to open
 // this same modal - OBR.modal.close needs it to know which modal to close,
 // and there's no way to ask OBR "what's my own id" from inside the page.
@@ -416,7 +362,12 @@ function saveLastActiveNoteId(id) {
 // never leave this browser: importing the same PDF on another device just
 // won't show a Pages tab there until it's re-imported on that device too.
 const PDF_PAGES_DB_NAME = "dcc-gm-notes-pdf-pages";
-const PDF_PAGES_DB_VERSION = 1;
+// v1 -> v2 added the "notes" store (see getLocalNote/putLocalNote/
+// deleteLocalNote below) once note TEXT content moved local-only too, not
+// just PDF page images - same database, name kept as-is since renaming it
+// would just churn every existing GM's already-populated PDF page cache
+// for no functional benefit.
+const PDF_PAGES_DB_VERSION = 2;
 const PDF_PAGE_RENDER_SCALE = 1.5;
 const PDF_SCROLL_STORAGE_KEY = "dcc-gm-notes-pdf-scroll-positions";
 
@@ -432,6 +383,9 @@ function openPdfPagesDb() {
         }
         if (!db.objectStoreNames.contains("meta")) {
           db.createObjectStore("meta", { keyPath: "noteId" });
+        }
+        if (!db.objectStoreNames.contains("notes")) {
+          db.createObjectStore("notes", { keyPath: "id" });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -492,6 +446,38 @@ async function deletePdfPagesForNote(noteId) {
   });
 }
 
+// The actual note storage now that content lives here instead of OBR
+// metadata (see the comment on GM_NOTES_METADATA_KEY for why) - one record
+// per note id, campaign note included under its fixed CAMPAIGN_NOTE_ID.
+// No practical size limit, and no size-related failure mode to guard
+// against the way every OBR-metadata write above did.
+async function getLocalNote(id) {
+  const db = await openPdfPagesDb();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction("notes", "readonly").objectStore("notes").get(id);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function putLocalNote(note) {
+  const db = await openPdfPagesDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction("notes", "readwrite");
+    tx.objectStore("notes").put(note);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+async function deleteLocalNote(id) {
+  const db = await openPdfPagesDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction("notes", "readwrite");
+    tx.objectStore("notes").delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 // In-memory mirror of which notes have cached page images, so the Pages
 // tab can show/hide instantly without an async IndexedDB round-trip on
 // every note switch. Populated at startup and kept in sync on
@@ -508,94 +494,25 @@ async function loadPdfMetaCache() {
 }
 loadPdfMetaCache();
 
-// This key used to hold a single plain-text string (see git history)
-// rather than a list of notes. Wrapped into a one-item list in memory
-// under a stable id - nothing is written back until a GM actually hits
-// Save, at which point it persists in the new { notes: [...] } shape for
-// good and every client reading it afterward takes the array branch.
-// Three formats to handle, oldest first:
-//  1. A bare string (pre-multi-note) - wrapped into a single note under a
-//     stable id, exactly as before.
-//  2. { notes: [{id, title, content}, ...] } as ONE combined scene-
-//     metadata value - the format used before per-note chunking existed.
-//  3. { noteIds: [...] } - the current manifest, with each note's own
-//     title/content spread across its own key(s) (see noteManifestKeyFor/
-//     noteChunkKeyFor). Also updates lastKnownSceneNoteIds/
-//     lastKnownNoteChunkCounts so the next save knows what to clear.
-// Takes the FULL scene metadata (not just GM_NOTES_METADATA_KEY's own
-// value) since format 3's actual content lives across several keys -
-// onMetadataChange/getMetadata always deliver the complete current scene
-// metadata (confirmed against the SDK's own types: Metadata, not
-// Partial<Metadata>), so every note's keys are always there to read.
-function parseNotesFromSceneMeta(sceneMeta) {
-  const meta = sceneMeta || {};
-  const topLevel = meta[GM_NOTES_METADATA_KEY];
-
-  if (typeof topLevel === "string") {
-    lastKnownSceneNoteIds = [];
-    lastKnownNoteChunkCounts = {};
-    return topLevel ? [{ id: LEGACY_NOTE_ID, title: "Notes", content: topLevel }] : [];
-  }
-
-  if (topLevel && Array.isArray(topLevel.noteIds)) {
-    const chunkCounts = {};
-    const notes = topLevel.noteIds.map(id => {
-      const noteManifest = meta[noteManifestKeyFor(id)];
-      if (!noteManifest || typeof noteManifest !== "object") return { id, title: "Untitled", content: "" };
-      const title = noteManifest.title || "Untitled";
-      if (typeof noteManifest.chunkCount === "number") {
-        const parts = [];
-        for (let i = 0; i < noteManifest.chunkCount; i++) {
-          const chunk = meta[noteChunkKeyFor(id, i)];
-          parts.push(typeof chunk === "string" ? chunk : "");
-        }
-        chunkCounts[id] = noteManifest.chunkCount;
-        return { id, title, content: parts.join("") };
-      }
-      return { id, title, content: noteManifest.content || "" };
-    });
-    lastKnownSceneNoteIds = topLevel.noteIds.slice();
-    lastKnownNoteChunkCounts = chunkCounts;
-    return notes;
-  }
-
-  if (topLevel && Array.isArray(topLevel.notes)) {
-    lastKnownSceneNoteIds = [];
-    lastKnownNoteChunkCounts = {};
-    return topLevel.notes;
-  }
-
-  lastKnownSceneNoteIds = [];
-  lastKnownNoteChunkCounts = {};
+// Ongoing (post-migration) read of the scene's note id list - by this
+// point GM_NOTES_METADATA_KEY only ever holds the small current
+// { noteIds: [...] } shape (see migrateLegacyNotesToLocalStorage for the
+// one-time conversion of every older shape this key used to hold). Each
+// id is then looked up in local storage (getLocalNote) for its actual
+// title/content - an id with no local record means it was created on
+// ANOTHER of the GM's devices and never saved on this one.
+function sceneNoteIdsFromSceneMeta(sceneMeta) {
+  const topLevel = (sceneMeta || {})[GM_NOTES_METADATA_KEY];
+  if (topLevel && Array.isArray(topLevel.noteIds)) return topLevel.noteIds.slice();
   return [];
 }
 
-// Reads the manifest key (title + chunkCount) plus however many chunk
-// keys it names, and reassembles them into the note's real content - see
-// METADATA_CHUNK_BYTES for why the content isn't just one value. Also
-// updates lastKnownCampaignChunkCount so the next save knows how many
-// trailing chunks to clear if the note has since shrunk. Falls back to
-// the OLD, pre-chunking { title, content } shape for a manifest saved
-// before this existed (chunkCount absent) - still ordinary old data, not
-// something to silently drop.
-function parseCampaignNoteFromRoomMeta(roomMeta) {
-  const manifest = (roomMeta || {})[GM_CAMPAIGN_NOTE_METADATA_KEY];
-  if (!manifest || typeof manifest !== "object") {
-    lastKnownCampaignChunkCount = 0;
-    return { id: CAMPAIGN_NOTE_ID, title: "Campaign Overview", content: "" };
-  }
-  const title = manifest.title || "Campaign Overview";
-  if (typeof manifest.chunkCount === "number") {
-    const parts = [];
-    for (let i = 0; i < manifest.chunkCount; i++) {
-      const chunk = roomMeta[campaignNoteChunkKey(i)];
-      parts.push(typeof chunk === "string" ? chunk : "");
-    }
-    lastKnownCampaignChunkCount = manifest.chunkCount;
-    return { id: CAMPAIGN_NOTE_ID, title, content: parts.join("") };
-  }
-  lastKnownCampaignChunkCount = 0;
-  return { id: CAMPAIGN_NOTE_ID, title, content: manifest.content || "" };
+async function loadNotesListFromIds(noteIds) {
+  const notes = await Promise.all(noteIds.map(async id => {
+    const local = await getLocalNote(id);
+    return local || { id, title: "Untitled (from another device)", content: "" };
+  }));
+  return notes;
 }
 
 function getActiveNote() {
@@ -643,8 +560,8 @@ function renderNotesSidebar() {
   const listEl = document.getElementById("gm-notes-list");
   listEl.innerHTML = "";
 
-  // Pinned campaign-wide note (room metadata - see GM_CAMPAIGN_NOTE_METADATA_KEY)
-  // always sits above the per-scene list below it, and has no delete button -
+  // Pinned campaign-wide note (local storage, fixed CAMPAIGN_NOTE_ID) always
+  // sits above the per-scene list below it, and has no delete button -
   // there's meant to be exactly one of these.
   const pinnedItem = document.createElement("div");
   pinnedItem.className = "note-item pinned-note" + (activeNoteId === CAMPAIGN_NOTE_ID ? " active" : "");
@@ -787,242 +704,151 @@ function deleteNote(id) {
 // different part of the screen. Timeouts are tracked per element so one
 // caller's message doesn't get cut short by the other's.
 const persistAllNotesTimeouts = {};
-// Builds the { [GM_NOTES_METADATA_KEY]: {noteIds} , ...per-note manifest/
-// chunk keys } write payload for the CURRENT notesList, same chunking
-// principle as the campaign note (see persistAllNotes' own comment) but
-// also splitting the notes themselves across individual keys - both "many
-// notes together exceed 16 kB" and "one note's own content exceeds it"
-// are real risks once a GM's been importing PDFs into scene notes too.
-// Also clears whatever a note that's since been deleted, or shrunk, no
-// longer needs - returns the new {noteIds, chunkCounts} so the caller can
-// update lastKnownSceneNoteIds/lastKnownNoteChunkCounts only once the
-// write actually succeeds.
-// Chunks (and clears) for each note are inserted before that note's own
-// manifest key, and the top-level {noteIds} manifest last of all - since
-// setMetadataInBatches now issues these as several SEQUENTIAL calls rather
-// than one atomic one, a manifest landing before the content it describes
-// would leave a reader that lands mid-write seeing a manifest pointing at
-// chunks that don't exist yet. Writing content first means a partial
-// failure worst-cases into "the old manifest still matches the old
-// content" rather than "the new manifest already promises new content".
-function buildSceneNotesWrites() {
-  const writes = {};
-  const currentIds = notesList.map(n => n.id);
-
-  lastKnownSceneNoteIds.forEach(id => {
-    if (currentIds.includes(id)) return;
-    const oldCount = lastKnownNoteChunkCounts[id] || 0;
-    for (let i = 0; i < oldCount; i++) writes[noteChunkKeyFor(id, i)] = null;
-    writes[noteManifestKeyFor(id)] = null;
-  });
-
-  const nextChunkCounts = {};
-  notesList.forEach(note => {
-    const chunks = chunkTextByBytes(note.content, METADATA_CHUNK_BYTES);
-    chunks.forEach((chunk, i) => { writes[noteChunkKeyFor(note.id, i)] = chunk; });
-    const oldCount = lastKnownNoteChunkCounts[note.id] || 0;
-    for (let i = chunks.length; i < oldCount; i++) writes[noteChunkKeyFor(note.id, i)] = null;
-    writes[noteManifestKeyFor(note.id)] = { title: note.title, chunkCount: chunks.length };
-    nextChunkCounts[note.id] = chunks.length;
-  });
-
-  writes[GM_NOTES_METADATA_KEY] = { noteIds: currentIds };
-
-  return { writes, currentIds, nextChunkCounts };
-}
-
-// The 16 kB cap (see METADATA_CHUNK_BYTES above) applies to a setMetadata()
-// call's TOTAL combined payload, not to each key's value alone - so a
-// { key: value } writes object built from several chunk keys still has to
-// go out as SEVERAL separate calls, each kept under budget by itself,
-// rather than one call listing every key. Sequential, not parallel/
-// Promise.all - two calls to the same metadata store racing each other
-// could apply out of order. estimateWriteBytes is deliberately rough (key
-// name + JSON-stringified value): it only needs to keep batches safely
-// under the cap, not match OBR's exact accounting.
-function estimateWriteBytes(key, value) {
-  try { return new TextEncoder().encode(key + JSON.stringify(value)).length; }
-  catch (err) { return 0; }
-}
-// Confirmed via the browser console against real OBR (not a mock): each
-// batch below resolves fine on its own - the "over size limit" error shows
-// up as an UNHANDLED rejection thrown deep inside OBR's own client bundle
-// (room-*.js: set/handle/handleMessage), not as a rejection of the promise
-// THIS code is awaiting. That only makes sense if OBR.room/scene.setMetadata
-// resolves as soon as a change is applied to a LOCAL copy of the metadata,
-// while the actual sync to the server is buffered and flushed separately -
-// so firing several calls back-to-back (each individually well under the
-// cap) lets OBR's own client coalesce more than one of them into a single
-// outgoing sync that's still oversized, entirely outside this code's view.
-// The fix is pacing: a short pause after each batch gives OBR's own flush
-// time to actually go out to the server before the next batch's change
-// gets queued up behind it and coalesced together. FLUSH_PAUSE_MS is an
-// empirical guess (not a documented OBR value) - if the size error still
-// shows up as an unhandled rejection in the console after this, that
-// number needs to go up.
-const FLUSH_PAUSE_MS = 800;
-function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-
-async function setMetadataInBatches(setMetadataFn, writes, label = "", onProgress) {
-  const entries = Object.entries(writes);
-  const batches = [];
-  let current = {};
-  let currentBytes = 0;
-  entries.forEach(([key, value]) => {
-    const bytes = estimateWriteBytes(key, value);
-    if (currentBytes > 0 && currentBytes + bytes > METADATA_CHUNK_BYTES) {
-      batches.push(current);
-      current = {};
-      currentBytes = 0;
-    }
-    current[key] = value;
-    currentBytes += bytes;
-  });
-  if (Object.keys(current).length) batches.push(current);
-  console.log(`DCC GM notes [${label}]: writing ${entries.length} key(s) across ${batches.length} batch(es)`);
-  for (let i = 0; i < batches.length; i++) {
-    const batch = batches[i];
-    const keys = Object.keys(batch);
-    const size = new TextEncoder().encode(JSON.stringify(batch)).length;
-    console.log(`DCC GM notes [${label}]: batch ${i + 1}/${batches.length} - ${keys.length} key(s), ~${size} bytes -`, keys);
-    if (onProgress && batches.length > 1) onProgress(i + 1, batches.length);
-    try {
-      await setMetadataFn(batch);
-      console.log(`DCC GM notes [${label}]: batch ${i + 1}/${batches.length} OK`);
-    } catch (err) {
-      console.error(`DCC GM notes [${label}]: batch ${i + 1}/${batches.length} FAILED (${size} bytes, keys: ${keys.join(", ")})`, err);
-      throw err;
-    }
-    if (i < batches.length - 1) await delay(FLUSH_PAUSE_MS);
-  }
-}
-
+// Content is local now (see the comment on GM_NOTES_METADATA_KEY) - the
+// only thing that still touches OBR is the tiny scene-notes id list, one
+// small setMetadata call, no chunking/batching/pacing machinery needed
+// for it at all. If even THAT fails, it means some other feature (see
+// migrateLegacyNotesToLocalStorage's own findings on Rulebook Data
+// Import) has already used up this scene's entire metadata budget - the
+// note content is already safely saved locally by that point regardless,
+// so this is degraded (the note LIST won't follow the GM to another
+// device) rather than lost data, and is reported as such rather than as
+// a save failure.
 async function persistAllNotes(successMessage, statusElId = "gm-notes-save-status") {
   const statusEl = document.getElementById(statusElId);
-
-  const { writes: sceneWrites, currentIds, nextChunkCounts } = buildSceneNotesWrites();
-
-  // Split into chunks (see METADATA_CHUNK_BYTES) and, via setMetadataInBatches
-  // below, into several separate calls - a campaign note built up from a
-  // couple of PDF imports can easily be well past OBR's 16 kB per-call cap
-  // on its own, which is exactly why "the Campaign Overview note never
-  // actually saves" turned out to be the same root cause as the saved-token
-  // bug in index.html, just hitting a single note's own content instead of
-  // a collection of many tokens.
-  const chunks = chunkTextByBytes(campaignNote.content, METADATA_CHUNK_BYTES);
-  const campaignWrites = {};
-  chunks.forEach((chunk, i) => { campaignWrites[campaignNoteChunkKey(i)] = chunk; });
-  // Clear any chunk keys the PREVIOUS save used that this one no longer
-  // needs (the note got shorter) - otherwise stale trailing content would
-  // sit there forever, orphaned and invisible to anything reading the new,
-  // smaller chunkCount.
-  for (let i = chunks.length; i < lastKnownCampaignChunkCount; i++) {
-    campaignWrites[campaignNoteChunkKey(i)] = null;
-  }
-  // Manifest last - see buildSceneNotesWrites' comment on why content
-  // needs to land before the manifest that describes it, now that these go
-  // out as several sequential calls rather than one atomic one.
-  campaignWrites[GM_CAMPAIGN_NOTE_METADATA_KEY] = { title: campaignNote.title, chunkCount: chunks.length };
-
-  // A multi-batch save now takes a deliberate pause between batches (see
-  // FLUSH_PAUSE_MS) - worth a couple seconds of visible progress so a big
-  // note's save doesn't just look frozen partway through.
   statusEl.textContent = "Saving...";
   statusEl.style.color = "";
-  const onProgress = (i, total) => { statusEl.textContent = `Saving... (${i}/${total})`; };
-  const [sceneResult, campaignResult] = await Promise.allSettled([
-    setMetadataInBatches((batch) => OBR.scene.setMetadata(batch), sceneWrites, "scene notes", onProgress),
-    setMetadataInBatches((batch) => OBR.room.setMetadata(batch), campaignWrites, "campaign note", onProgress),
-  ]);
-  if (sceneResult.status === "fulfilled") {
-    lastKnownSceneNoteIds = currentIds;
-    lastKnownNoteChunkCounts = nextChunkCounts;
-  }
-  if (campaignResult.status === "fulfilled") lastKnownCampaignChunkCount = chunks.length;
+  try {
+    await putLocalNote({ id: CAMPAIGN_NOTE_ID, title: campaignNote.title, content: campaignNote.content });
 
-  const failure = [sceneResult, campaignResult].find(r => r.status === "rejected");
-  if (failure) {
-    console.error("DCC GM notes: save failed", failure.reason);
-    const isSizeLimit = /size limit/i.test(failure.reason.message || "");
-    const which = campaignResult.status === "rejected" ? "the Campaign Overview note" : "this scene's notes";
-    statusEl.textContent = isSizeLimit
-      ? `Couldn't save - ${which} hit Owlbear's size limit even paced into small batches. If this keeps happening on every save (even a tiny edit), Owlbear's sync may have a stuck backlog - see "Reset GM Notes storage" above.`
-      : `Save failed: ${failure.reason.message}`;
+    const currentIds = notesList.map(n => n.id);
+    await Promise.all(notesList.map(note =>
+      putLocalNote({ id: note.id, title: note.title, content: note.content })));
+    const removedIds = lastKnownSceneNoteIds.filter(id => !currentIds.includes(id));
+    await Promise.all(removedIds.map(id => deleteLocalNote(id)));
+
+    try {
+      await OBR.scene.setMetadata({ [GM_NOTES_METADATA_KEY]: { noteIds: currentIds } });
+      lastKnownSceneNoteIds = currentIds;
+    } catch (err) {
+      console.error("DCC GM notes: scene note-list sync failed (note content is still saved locally)", err);
+      statusEl.textContent = `${successMessage} (Note list didn't sync to Owlbear - this scene's metadata may be full from another feature. Content is saved on this device either way.)`;
+      statusEl.style.color = "var(--good)";
+      clearTimeout(persistAllNotesTimeouts[statusElId]);
+      persistAllNotesTimeouts[statusElId] = setTimeout(() => { statusEl.textContent = ""; }, 6000);
+      return;
+    }
+
+    statusEl.textContent = successMessage;
+    statusEl.style.color = "var(--good)";
+  } catch (err) {
+    console.error("DCC GM notes: save failed", err);
+    statusEl.textContent = `Save failed: ${err.message}`;
     statusEl.style.color = "#c97b7b";
     return;
   }
-  statusEl.textContent = successMessage;
-  statusEl.style.color = "var(--good)";
   clearTimeout(persistAllNotesTimeouts[statusElId]);
   persistAllNotesTimeouts[statusElId] = setTimeout(() => { statusEl.textContent = ""; }, 3000);
 }
 
-// Recovery path for "OBR keeps reporting a size-limit error on every save,
-// even a tiny one" - confirmed via the console that this means OBR's OWN
-// client has a backlog of local metadata changes it can't flush to the
-// server (the error fires as an unhandled rejection from OBR's own code on
-// page load, before this extension does anything), not something a normal
-// paced save from this page can clear on its own. Reads keys straight from
-// freshly-fetched metadata rather than trusting notesList/campaignNote or
-// lastKnownSceneNoteIds/lastKnownCampaignChunkCount - an earlier save that
-// looked successful (resolved locally) but never actually reached the
-// server, per the same bug, could have left orphaned keys this page's own
-// in-memory state was never told about. Clears ONE key per call, each with
-// a full FLUSH_PAUSE_MS pause after - the most conservative pacing
-// possible, since the entire point is recovering from a batch that wasn't
-// paced enough in the first place.
-async function hardResetGmNotesStorage(onProgress) {
-  const [roomMeta, sceneMeta] = await Promise.all([OBR.room.getMetadata(), OBR.scene.getMetadata()]);
-  const roomKeys = Object.keys(roomMeta).filter(k =>
-    k === GM_CAMPAIGN_NOTE_METADATA_KEY || k.startsWith(GM_CAMPAIGN_NOTE_METADATA_KEY + ":"));
-  const sceneKeys = Object.keys(sceneMeta).filter(k =>
-    k === GM_NOTES_METADATA_KEY || k.startsWith(GM_NOTES_METADATA_KEY + ":"));
-  const total = roomKeys.length + sceneKeys.length;
-  let done = 0;
-  for (const key of roomKeys) {
-    if (onProgress) onProgress(done + 1, total);
-    console.log(`DCC GM notes [reset]: clearing room key ${key}`);
-    await OBR.room.setMetadata({ [key]: null });
-    done++;
-    await delay(FLUSH_PAUSE_MS);
+// ONE-TIME MIGRATION ONLY, run once at boot before anything else touches
+// scene/room metadata (see OBR.onReady) - reads every historical shape
+// this feature has stored notes in under OBR's metadata sync, copies
+// whatever's there into local storage, then clears the old keys so they
+// stop counting against OBR's shared per-scene/per-room budget for every
+// OTHER feature's metadata writes too. Never overwrites a note that
+// already exists locally (a GM who already re-saved something here since
+// the local store started existing takes priority over old synced data).
+// Safe to run for a GM with nothing to migrate - every read comes back
+// empty and the writes/clears are skipped entirely.
+function extractLegacyNotesFromSceneMeta(sceneMeta) {
+  const meta = sceneMeta || {};
+  const topLevel = meta[GM_NOTES_METADATA_KEY];
+  if (typeof topLevel === "string") {
+    return topLevel ? [{ id: LEGACY_NOTE_ID, title: "Notes", content: topLevel }] : [];
   }
-  for (const key of sceneKeys) {
-    if (onProgress) onProgress(done + 1, total);
-    console.log(`DCC GM notes [reset]: clearing scene key ${key}`);
-    await OBR.scene.setMetadata({ [key]: null });
-    done++;
-    await delay(FLUSH_PAUSE_MS);
+  if (topLevel && Array.isArray(topLevel.noteIds)) {
+    return topLevel.noteIds.map(id => {
+      const manifestKey = `${GM_NOTES_METADATA_KEY}:note:${id}`;
+      const noteManifest = meta[manifestKey];
+      if (!noteManifest || typeof noteManifest !== "object") return { id, title: "Untitled", content: "" };
+      const title = noteManifest.title || "Untitled";
+      if (typeof noteManifest.chunkCount === "number") {
+        const parts = [];
+        for (let i = 0; i < noteManifest.chunkCount; i++) {
+          const chunk = meta[`${manifestKey}:chunk:${i}`];
+          parts.push(typeof chunk === "string" ? chunk : "");
+        }
+        return { id, title, content: parts.join("") };
+      }
+      return { id, title, content: noteManifest.content || "" };
+    });
+  }
+  if (topLevel && Array.isArray(topLevel.notes)) return topLevel.notes;
+  return [];
+}
+function extractLegacyCampaignNoteFromRoomMeta(roomMeta) {
+  const manifest = (roomMeta || {})[LEGACY_GM_CAMPAIGN_NOTE_METADATA_KEY];
+  if (!manifest || typeof manifest !== "object") return null;
+  const title = manifest.title || "Campaign Overview";
+  if (typeof manifest.chunkCount === "number") {
+    const parts = [];
+    for (let i = 0; i < manifest.chunkCount; i++) {
+      const chunk = roomMeta[`${LEGACY_GM_CAMPAIGN_NOTE_METADATA_KEY}:chunk:${i}`];
+      parts.push(typeof chunk === "string" ? chunk : "");
+    }
+    return { title, content: parts.join("") };
+  }
+  return { title, content: manifest.content || "" };
+}
+async function migrateLegacyNotesToLocalStorage() {
+  const [roomMeta, sceneMeta] = await Promise.all([OBR.room.getMetadata(), OBR.scene.getMetadata()]);
+
+  const legacyCampaign = extractLegacyCampaignNoteFromRoomMeta(roomMeta);
+  if (legacyCampaign && !(await getLocalNote(CAMPAIGN_NOTE_ID))) {
+    await putLocalNote({ id: CAMPAIGN_NOTE_ID, title: legacyCampaign.title, content: legacyCampaign.content });
+  }
+  const legacyRoomKeys = Object.keys(roomMeta).filter(k =>
+    k === LEGACY_GM_CAMPAIGN_NOTE_METADATA_KEY || k.startsWith(LEGACY_GM_CAMPAIGN_NOTE_METADATA_KEY + ":"));
+  for (const key of legacyRoomKeys) {
+    try { await OBR.room.setMetadata({ [key]: null }); }
+    catch (err) { console.error(`DCC GM notes: failed to clear legacy room key ${key} during migration`, err); }
+  }
+
+  const topLevel = sceneMeta[GM_NOTES_METADATA_KEY];
+  const wasChunkedFormat = topLevel && typeof topLevel === "object" && Array.isArray(topLevel.noteIds);
+  const wasLegacyFormat = typeof topLevel === "string" || (topLevel && Array.isArray(topLevel.notes)) || wasChunkedFormat;
+  if (!wasLegacyFormat) return;
+
+  const legacyNotes = extractLegacyNotesFromSceneMeta(sceneMeta);
+  for (const note of legacyNotes) {
+    if (!(await getLocalNote(note.id))) {
+      await putLocalNote({ id: note.id, title: note.title, content: note.content });
+    }
+  }
+  // Rewrites GM_NOTES_METADATA_KEY down to just the small { noteIds }
+  // shape, clearing whatever per-note manifest/chunk keys the old chunked
+  // scheme left behind in the SAME call - this is a net size DECREASE
+  // (old chunk content is gone, replaced by a handful of short id
+  // strings), so it should go through even in a scene whose metadata is
+  // otherwise already over budget from something else.
+  const clears = {};
+  if (wasChunkedFormat) {
+    topLevel.noteIds.forEach(id => {
+      const manifestKey = `${GM_NOTES_METADATA_KEY}:note:${id}`;
+      const manifest = sceneMeta[manifestKey];
+      clears[manifestKey] = null;
+      if (manifest && typeof manifest.chunkCount === "number") {
+        for (let i = 0; i < manifest.chunkCount; i++) clears[`${manifestKey}:chunk:${i}`] = null;
+      }
+    });
+  }
+  try {
+    await OBR.scene.setMetadata({ ...clears, [GM_NOTES_METADATA_KEY]: { noteIds: legacyNotes.map(n => n.id) } });
+  } catch (err) {
+    console.error("DCC GM notes: failed to rewrite scene notes manifest after migration - legacy keys may linger", err);
   }
 }
-
-document.getElementById("gm-notes-reset-btn").addEventListener("click", async () => {
-  const confirmed = window.confirm(
-    "This permanently deletes the Campaign Overview note and every note in this scene, then clears out any stuck data behind them.\n\n" +
-    "Use this ONLY if saving keeps failing with a size-limit error even for something tiny you just typed - that means Owlbear's own sync has a backlog stuck behind an earlier failed write that a normal save can't clear on its own.\n\n" +
-    "This cannot be undone. Continue?"
-  );
-  if (!confirmed) return;
-  const statusEl = document.getElementById("gm-notes-import-status");
-  statusEl.style.color = "";
-  try {
-    await hardResetGmNotesStorage((i, total) => { statusEl.textContent = `Clearing... (${i}/${total})`; });
-    notesList = [];
-    campaignNote = { id: CAMPAIGN_NOTE_ID, title: "Campaign Overview", content: "" };
-    lastKnownSceneNoteIds = [];
-    lastKnownNoteChunkCounts = {};
-    lastKnownCampaignChunkCount = 0;
-    activeNoteId = CAMPAIGN_NOTE_ID;
-    saveLastActiveNoteId(activeNoteId);
-    loadNoteIntoEditor(campaignNote);
-    renderNotesSidebar();
-    statusEl.textContent = "Reset complete - GM Notes storage is now empty.";
-    statusEl.style.color = "var(--good)";
-  } catch (err) {
-    console.error("DCC GM notes: reset failed", err);
-    statusEl.textContent = `Reset failed partway through: ${err.message}. Check the console for which key failed, then try again.`;
-    statusEl.style.color = "#c97b7b";
-  }
-});
 
 // marked + DOMPurify are only needed to render Preview, so they're loaded
 // lazily from the same esm.sh CDN this page already pulls the OBR SDK and
@@ -1433,36 +1259,24 @@ function syncActiveNoteAndRender() {
 }
 
 // Applied both on initial load and on every incoming SCENE metadata change
-// (another GM client editing this scene's notes, or this same save echoing
-// back). Skipped while a SCENE note is what's actually being typed right
-// now, so an echo never clobbers it - editing the campaign note doesn't
-// block this, since incoming scene notes don't touch what's on screen then.
-function applyIncomingNotes(sceneMeta) {
+// (another of the GM's own devices adding/removing a note in this scene,
+// or this same save echoing back). Skipped while a SCENE note is what's
+// actually being typed right now, so an echo never clobbers it - editing
+// the campaign note doesn't block this, since incoming scene notes don't
+// touch what's on screen then. Content itself is no longer part of what's
+// incoming here (see GM_NOTES_METADATA_KEY's comment) - only the id list
+// is; an id with nothing in this device's local store shows as a clearly
+// labeled placeholder (see loadNotesListFromIds) rather than silently
+// blank, so it doesn't read as data loss.
+async function applyIncomingNotes(sceneMeta) {
   const active = document.activeElement;
   const editingSceneNote = activeNoteId !== CAMPAIGN_NOTE_ID &&
     active && (active.id === "gm-notes-title" || active.id === "gm-notes-textarea");
   if (editingSceneNote) return;
 
-  notesList = parseNotesFromSceneMeta(sceneMeta);
-  syncActiveNoteAndRender();
-}
-
-// Same idea as applyIncomingNotes, but for the campaign-wide note in ROOM
-// metadata - fires independently, since a room metadata change and a scene
-// metadata change are two different OBR events that don't imply each other.
-// Takes the FULL room metadata (not just one key's value) since the note's
-// content is spread across a manifest key plus however many chunk keys it
-// names (see METADATA_CHUNK_BYTES) - onMetadataChange always delivers the
-// complete current metadata (confirmed against the SDK's own types:
-// Metadata, not Partial<Metadata>), so every chunk is always there to read
-// regardless of which key's write actually triggered this call.
-function applyIncomingCampaignNote(roomMeta) {
-  const active = document.activeElement;
-  const editingCampaignNote = activeNoteId === CAMPAIGN_NOTE_ID &&
-    active && (active.id === "gm-notes-title" || active.id === "gm-notes-textarea");
-  if (editingCampaignNote) return;
-
-  campaignNote = parseCampaignNoteFromRoomMeta(roomMeta);
+  const noteIds = sceneNoteIdsFromSceneMeta(sceneMeta);
+  notesList = await loadNotesListFromIds(noteIds);
+  lastKnownSceneNoteIds = noteIds;
   syncActiveNoteAndRender();
 }
 
@@ -1490,20 +1304,27 @@ OBR.onReady(async () => {
   const stampEl = document.getElementById("gm-notes-build-stamp");
   console.log(`DCC GM Notes - ${stampEl ? stampEl.textContent : "(no build stamp found)"}`);
 
+  // Runs before anything else touches scene/room metadata - see its own
+  // comment for what it does and why it has to go first.
+  try {
+    await migrateLegacyNotesToLocalStorage();
+  } catch (err) {
+    console.error("DCC GM notes: legacy migration failed - old synced notes may still need a manual re-save", err);
+  }
+
   // Registered before any awaited call below, so a rejection further down
-  // can never leave these unattached.
+  // can never leave this unattached. Room metadata is no longer involved
+  // in GM Notes at all (see GM_NOTES_METADATA_KEY's comment), so there's
+  // no OBR.room.onMetadataChange listener here any more - the campaign
+  // note only ever changes through this page's own local Save now.
   OBR.scene.onMetadataChange((metadata) => {
     applyIncomingNotes(metadata);
-  });
-  OBR.room.onMetadataChange((metadata) => {
-    applyIncomingCampaignNote(metadata);
   });
   // OBR.scene.onMetadataChange only fires for edits within whatever scene
   // this extension is currently subscribed to - switching to a DIFFERENT
   // scene isn't a "change" on that subscription, so without this the
   // per-scene notes list would keep showing the previous scene's notes
-  // after the GM switches maps. The room-level campaign note doesn't need
-  // this, since room metadata isn't scene-specific to begin with.
+  // after the GM switches maps.
   OBR.scene.onReadyChange(async (ready) => {
     if (!ready) return;
     try {
@@ -1514,36 +1335,23 @@ OBR.onReady(async () => {
     }
   });
 
-  // Fetched in parallel and applied together so the initial active-note
-  // pick (which needs both the campaign note's id and the scene notes
-  // list to know what's valid) only resolves once, instead of picking the
-  // campaign note first and then immediately flipping to a remembered
-  // scene note a moment later.
+  // Diagnostic left in from tracking down the 16 kB error this session -
+  // still worth keeping: it's how the Rulebook Data Import feature's own
+  // ~17 kB single key (already over OBR's per-scene total on its own) got
+  // found. Logs post-migration, so these numbers now reflect what's left
+  // once GM Notes' own old chunked data has been cleared out.
   const [roomResult, sceneResult] = await Promise.allSettled([
     OBR.room.getMetadata(),
     OBR.scene.getMetadata(),
   ]);
-  // Diagnostic: the 16 kB write error has resurfaced even after batching
-  // each call to stay under budget on its own, which only makes sense if
-  // something other than "this one call's own payload" is what's actually
-  // being measured - e.g. the total size of ALL room metadata, accumulated
-  // across every key this and other extensions (index.html's saved-token
-  // feature included) have ever written there. Logging the totals and the
-  // biggest individual keys on every open makes that visible without
-  // guessing.
-  if (roomResult.status === "fulfilled") {
-    logMetadataSizeBreakdown("room", roomResult.value);
-  }
+  if (roomResult.status === "fulfilled") logMetadataSizeBreakdown("room", roomResult.value);
+  if (sceneResult.status === "fulfilled") logMetadataSizeBreakdown("scene", sceneResult.value);
+
+  campaignNote = (await getLocalNote(CAMPAIGN_NOTE_ID)) || { id: CAMPAIGN_NOTE_ID, title: "Campaign Overview", content: "" };
   if (sceneResult.status === "fulfilled") {
-    logMetadataSizeBreakdown("scene", sceneResult.value);
-  }
-  if (roomResult.status === "fulfilled") {
-    campaignNote = parseCampaignNoteFromRoomMeta(roomResult.value);
-  } else {
-    console.error("DCC GM notes: initial room.getMetadata failed", roomResult.reason);
-  }
-  if (sceneResult.status === "fulfilled") {
-    notesList = parseNotesFromSceneMeta(sceneResult.value);
+    const noteIds = sceneNoteIdsFromSceneMeta(sceneResult.value);
+    notesList = await loadNotesListFromIds(noteIds);
+    lastKnownSceneNoteIds = noteIds;
   } else {
     console.error("DCC GM notes: initial scene.getMetadata failed", sceneResult.reason);
   }
