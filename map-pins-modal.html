@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Map Pins</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #1e1b18;
+    --panel: #2a2521;
+    --border: #45392e;
+    --text: #ecdfc8;
+    --muted: #a89684;
+    --accent: #c97b3d;
+    --good: #5f8f5b;
+    --bad: #c97b7b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+  }
+  #app { max-width: 900px; margin: 0 auto; padding: 14px 18px 40px; }
+  .header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  h1 { font-size: 16px; margin: 0 0 2px; letter-spacing: 0.3px; }
+  #map-pins-close-btn {
+    flex: 0 0 auto;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    width: 26px;
+    height: 26px;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  #map-pins-close-btn:hover { background: var(--accent); color: #1e1b18; border-color: var(--accent); }
+  .subtitle { color: var(--muted); font-size: 11px; margin-bottom: 8px; line-height: 1.5; }
+  .build-stamp { text-align: right; font-size: 9px; color: var(--muted); letter-spacing: 0.3px; margin: 0 0 8px; }
+  fieldset {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 14px;
+    background: var(--panel);
+  }
+  legend { padding: 0 6px; font-weight: 600; color: var(--accent); }
+  label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); margin-bottom: 3px; margin-top: 8px; }
+  label:first-child { margin-top: 0; }
+  input[type="text"], input[type="number"], textarea, select {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 13px;
+  }
+  textarea { resize: vertical; min-height: 70px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; min-width: 0; }
+  .calib-row { display: flex; gap: 8px; align-items: flex-end; }
+  .calib-row > div { flex: 1; }
+  button {
+    font-family: inherit;
+    cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    background: var(--border);
+    color: var(--text);
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+  button:hover:not(:disabled) { filter: brightness(1.15); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .btn-primary { background: var(--accent); color: #1e1b18; font-weight: 600; }
+  .btn-danger { background: var(--border); color: var(--bad); }
+  .btn-danger.armed { background: #a5453a; color: #fff; }
+  .btn-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .status { font-size: 12px; margin-top: 6px; min-height: 16px; }
+  .status.good { color: var(--good); }
+  .status.bad { color: var(--bad); }
+  .count-badge { display: inline-block; background: var(--accent); color: #1e1b18; border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 700; margin-left: 6px; }
+  .pin-preview-list { list-style: none; margin: 10px 0 0; padding: 0; max-height: 220px; overflow-y: auto; }
+  .pin-preview-list li {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 3px;
+    background: var(--bg); font-size: 12px;
+  }
+  .pin-preview-list .swatch { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+  .pin-preview-list .pin-id { color: var(--accent); font-weight: 700; flex: 0 0 auto; }
+  .pin-preview-list .pin-title { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pin-preview-list .pin-doc { color: var(--muted); font-size: 10.5px; flex: 0 0 auto; }
+  .empty-note { color: var(--muted); font-size: 12px; font-style: italic; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="header-row">
+    <h1>Map Pins</h1>
+    <button type="button" id="map-pins-close-btn" title="Close">✕</button>
+  </div>
+  <div class="subtitle">Bulk-drop numbered room-pin labels onto the current scene's map, from a JSON export produced by the <b>Cartographer's Pins</b> companion tool. Pins are real scene items other clients see immediately - right-click one to jump to its notes (once GM Notes has a matching heading).</div>
+  <!-- This modal is a SEPARATE file from index.html, served from its own
+       URL - index.html's own #build-stamp only confirms THAT file
+       redeployed, not this one. Bumped by hand alongside it on every
+       meaningful commit that touches this file (see CLAUDE.md). -->
+  <div class="build-stamp" id="map-pins-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">Map Pins build 2026-09-08 15:10</div>
+
+  <fieldset>
+    <legend>1. Target map image</legend>
+    <div class="row">
+      <div>
+        <label>Image on this scene</label>
+        <select id="map-image-select"></select>
+      </div>
+      <div style="flex: 0 0 auto;">
+        <label>&nbsp;</label>
+        <button type="button" id="refresh-images-btn" title="Re-scan this scene for image items">↻ Refresh</button>
+      </div>
+    </div>
+    <div class="status" id="image-status"></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>2. Pins JSON</legend>
+    <div class="subtitle" style="margin-bottom:6px;">Paste the JSON exported by Cartographer's Pins, or load its file - an array of <code>{doc, level, id, title, x, y}</code>, where x/y are 0-100 percentages of the map image's own width/height.</div>
+    <textarea id="pins-json-input" placeholder="[{&quot;doc&quot;:&quot;main&quot;,&quot;level&quot;:&quot;The Citadel&quot;,&quot;id&quot;:&quot;1-1&quot;,&quot;title&quot;:&quot;Gateway Guardians&quot;,&quot;x&quot;:42.1,&quot;y&quot;:18.6}, ...]"></textarea>
+    <div class="btn-row">
+      <input type="file" id="pins-json-file" accept=".json,application/json" />
+      <button type="button" id="load-pins-btn" class="btn-primary">Load Pins</button>
+    </div>
+    <div class="status" id="pins-load-status"></div>
+    <ul class="pin-preview-list" id="pins-preview-list" style="display:none;"></ul>
+  </fieldset>
+
+  <fieldset>
+    <legend>3. Calibrate <span style="color:var(--muted); font-weight:400; text-transform:none; letter-spacing:0;">(optional)</span></legend>
+    <div class="subtitle" style="margin-bottom:6px;">Owlbear's image-anchor math can drift between SDK versions, so don't trust the raw percentages blind - place one test pin, see where it actually lands versus the real room on the map, and nudge these until it lines up before importing the full batch.</div>
+    <div class="calib-row">
+      <div>
+        <label>Offset X (scene units)</label>
+        <input type="number" id="calib-offset-x" value="0" step="1" />
+      </div>
+      <div>
+        <label>Offset Y (scene units)</label>
+        <input type="number" id="calib-offset-y" value="0" step="1" />
+      </div>
+      <div>
+        <label>Scale multiplier</label>
+        <input type="number" id="calib-scale" value="1" step="0.01" min="0.01" />
+      </div>
+    </div>
+    <div class="btn-row">
+      <button type="button" id="place-test-pin-btn">Place Test Pin</button>
+      <button type="button" id="remove-test-pin-btn">Remove Test Pin</button>
+    </div>
+    <div class="status" id="calib-status"></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>4. Import</legend>
+    <div class="subtitle" style="margin-bottom:6px;">Creates one label per pin, skipping any pin whose doc+id is already placed on this scene (use Remove All Pins below first if you want a clean re-import).</div>
+    <div class="btn-row">
+      <button type="button" id="import-pins-btn" class="btn-primary" disabled>Import Pins</button>
+    </div>
+    <div class="status" id="import-status"></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Existing pins on this scene <span class="count-badge" id="existing-pin-count">0</span></legend>
+    <div class="btn-row">
+      <button type="button" id="refresh-existing-btn">↻ Refresh</button>
+      <button type="button" id="remove-all-pins-btn" class="btn-danger">🗑 Remove All Pins</button>
+    </div>
+    <div class="status" id="existing-status"></div>
+  </fieldset>
+</div>
+
+<script type="module">
+import OBR, { buildLabel } from "https://esm.sh/@owlbear-rodeo/sdk@2";
+
+// Must exactly match the id index.html's openMapPinsModal() uses to open
+// this same modal - OBR.modal.close needs it to know which modal to close,
+// and there's no way to ask OBR "what's my own id" from inside the page.
+const MAP_PINS_MODAL_ID = "com.claude.monster-sheet/map-pins-modal";
+
+// Same metadata namespace GM Notes and Rulebook Data Import already use
+// (see their own METADATA_KEY comments) - keeps every DCC Suite feature's
+// scene-item/metadata footprint under one recognizable prefix.
+const ROOM_PIN_METADATA_KEY = "com.claude.monster-sheet/room-pin";
+
+// Cycled in first-seen order per loaded pin set, not hardcoded to any one
+// adventure's level names - this file is meant to work with whatever
+// Cartographer's Pins JSON a GM hands it, not just DCC #69.
+const LEVEL_COLOR_PALETTE = [
+  "#1c7a52", "#6b5b8a", "#1c6d7a", "#96701f", "#a83f2b",
+  "#3d6b96", "#7a4f1c", "#5b8a6b", "#8a5b7a", "#4f5b8a",
+];
+
+let mapImages = [];
+let parsedPins = [];
+let levelColors = new Map();
+let existingPinKeys = new Set(); // "doc id" for pins already on the scene
+let existingPinItemIds = [];
+let testPinItemId = null;
+
+function statusEl(id) { return document.getElementById(id); }
+function setStatus(id, message, kind) {
+  const el = statusEl(id);
+  el.textContent = message || "";
+  el.className = "status" + (kind ? ` ${kind}` : "");
+}
+
+function pinKey(pin) { return `${pin.doc} ${pin.id}`; }
+
+function levelColorFor(level) {
+  if (!levelColors.has(level)) {
+    levelColors.set(level, LEVEL_COLOR_PALETTE[levelColors.size % LEVEL_COLOR_PALETTE.length]);
+  }
+  return levelColors.get(level);
+}
+
+// --- Map image selection ---------------------------------------------
+
+async function refreshMapImages() {
+  const select = document.getElementById("map-image-select");
+  const prevValue = select.value;
+  try {
+    const items = await OBR.scene.items.getItems();
+    mapImages = items.filter(item => item.type === "IMAGE");
+  } catch (err) {
+    console.error("DCC map pins: failed to fetch scene images", err);
+    setStatus("image-status", `Couldn't read scene items: ${err.message}`, "bad");
+    return;
+  }
+  select.innerHTML = "";
+  if (!mapImages.length) {
+    select.appendChild(new Option("No image items found on this scene", ""));
+    setStatus("image-status", "Place your map image on the scene first, then Refresh.", "bad");
+    updateImportEnabled();
+    return;
+  }
+  mapImages.forEach(item => {
+    const w = item.image?.width ?? "?";
+    const h = item.image?.height ?? "?";
+    const label = `${item.name || "(unnamed image)"} — ${w}×${h}px [${item.layer}]`;
+    select.appendChild(new Option(label, item.id));
+  });
+  if (prevValue && mapImages.some(i => i.id === prevValue)) select.value = prevValue;
+  setStatus("image-status", `${mapImages.length} image item${mapImages.length === 1 ? "" : "s"} found.`, "good");
+  updateImportEnabled();
+}
+
+function selectedMapImage() {
+  const id = document.getElementById("map-image-select").value;
+  return mapImages.find(i => i.id === id) || null;
+}
+
+// item.position is the scene-space anchor OBR renders this image's grid
+// origin at - for a plain image with no grid offset that IS the top-left
+// corner, but that assumption is exactly what the Calibrate step below
+// exists to correct for when it isn't.
+function imageGeometry(item) {
+  const scaleX = item.scale?.x ?? 1;
+  const scaleY = item.scale?.y ?? 1;
+  return {
+    originX: item.position?.x ?? 0,
+    originY: item.position?.y ?? 0,
+    width: (item.image?.width ?? 0) * scaleX,
+    height: (item.image?.height ?? 0) * scaleY,
+  };
+}
+
+function calibration() {
+  return {
+    offsetX: Number(document.getElementById("calib-offset-x").value) || 0,
+    offsetY: Number(document.getElementById("calib-offset-y").value) || 0,
+    scale: Number(document.getElementById("calib-scale").value) || 1,
+  };
+}
+
+function pinScenePosition(pin, geometry, calib) {
+  return {
+    x: geometry.originX + calib.offsetX + (pin.x / 100) * geometry.width * calib.scale,
+    y: geometry.originY + calib.offsetY + (pin.y / 100) * geometry.height * calib.scale,
+  };
+}
+
+// --- Pins JSON loading --------------------------------------------------
+
+function parsePinsJson(raw) {
+  const data = JSON.parse(raw);
+  if (!Array.isArray(data)) throw new Error(`Expected a top-level JSON array, got ${typeof data}.`);
+  const valid = [];
+  let skipped = 0;
+  for (const entry of data) {
+    if (!entry || typeof entry !== "object") { skipped++; continue; }
+    const { doc, level, id, title, x, y } = entry;
+    if (typeof id !== "string" || typeof x !== "number" || typeof y !== "number") { skipped++; continue; }
+    valid.push({
+      doc: typeof doc === "string" && doc ? doc : "default",
+      level: typeof level === "string" && level ? level : "Unnamed level",
+      id,
+      title: typeof title === "string" ? title : "",
+      x, y,
+    });
+  }
+  return { valid, skipped };
+}
+
+function renderPinsPreview() {
+  const list = document.getElementById("pins-preview-list");
+  list.innerHTML = "";
+  if (!parsedPins.length) { list.style.display = "none"; return; }
+  list.style.display = "block";
+  parsedPins.forEach(pin => {
+    const li = document.createElement("li");
+    const swatch = document.createElement("span");
+    swatch.className = "swatch";
+    swatch.style.background = levelColorFor(pin.level);
+    const idSpan = document.createElement("span");
+    idSpan.className = "pin-id";
+    idSpan.textContent = pin.id;
+    const titleSpan = document.createElement("span");
+    titleSpan.className = "pin-title";
+    titleSpan.textContent = pin.title || pin.level;
+    const docSpan = document.createElement("span");
+    docSpan.className = "pin-doc";
+    docSpan.textContent = pin.doc;
+    li.append(swatch, idSpan, titleSpan, docSpan);
+    list.appendChild(li);
+  });
+}
+
+function loadPinsFromText(raw) {
+  try {
+    const { valid, skipped } = parsePinsJson(raw);
+    if (!valid.length) {
+      setStatus("pins-load-status", "No usable pins found - expected objects with at least id, x, and y.", "bad");
+      return;
+    }
+    parsedPins = valid;
+    levelColors = new Map();
+    renderPinsPreview();
+    const skippedNote = skipped ? ` (${skipped} skipped - missing id/x/y)` : "";
+    setStatus("pins-load-status", `Loaded ${valid.length} pin${valid.length === 1 ? "" : "s"}${skippedNote}.`, "good");
+  } catch (err) {
+    setStatus("pins-load-status", `Couldn't parse that as JSON: ${err.message}`, "bad");
+    return;
+  }
+  updateImportEnabled();
+}
+
+document.getElementById("load-pins-btn").addEventListener("click", () => {
+  const raw = document.getElementById("pins-json-input").value.trim();
+  if (!raw) {
+    setStatus("pins-load-status", "Paste JSON or choose a file first.", "bad");
+    return;
+  }
+  loadPinsFromText(raw);
+});
+
+document.getElementById("pins-json-file").addEventListener("change", (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    document.getElementById("pins-json-input").value = String(reader.result || "");
+    loadPinsFromText(String(reader.result || ""));
+  };
+  reader.onerror = () => setStatus("pins-load-status", "Couldn't read that file.", "bad");
+  reader.readAsText(file);
+});
+
+// --- Test pin -------------------------------------------------------
+
+function updateImportEnabled() {
+  document.getElementById("import-pins-btn").disabled = !(parsedPins.length && mapImages.length);
+}
+
+function buildPinItem(pin, position, extraMetadata) {
+  return buildLabel()
+    .position(position)
+    .plainText(pin.id)
+    .backgroundColor(levelColorFor(pin.level))
+    .pointerDirection("DOWN")
+    .metadata({
+      [ROOM_PIN_METADATA_KEY]: { doc: pin.doc, level: pin.level, id: pin.id, title: pin.title, ...extraMetadata },
+    })
+    .layer("NOTE")
+    .build();
+}
+
+document.getElementById("place-test-pin-btn").addEventListener("click", async () => {
+  const image = selectedMapImage();
+  if (!image) { setStatus("calib-status", "Pick a map image first.", "bad"); return; }
+  if (!parsedPins.length) { setStatus("calib-status", "Load pins first.", "bad"); return; }
+  try {
+    if (testPinItemId) {
+      await OBR.scene.items.deleteItems([testPinItemId]).catch(() => {});
+      testPinItemId = null;
+    }
+    const pin = parsedPins[0];
+    const geometry = imageGeometry(image);
+    const position = pinScenePosition(pin, geometry, calibration());
+    const item = buildPinItem({ ...pin, id: `TEST:${pin.id}` }, position, { isTest: true });
+    await OBR.scene.items.addItems([item]);
+    testPinItemId = item.id;
+    setStatus("calib-status", `Test pin placed for "${pin.title || pin.id}" - compare it to the real room, then adjust offset/scale and try again.`, "good");
+  } catch (err) {
+    console.error("DCC map pins: failed to place test pin", err);
+    setStatus("calib-status", `Couldn't place test pin: ${err.message}`, "bad");
+  }
+});
+
+document.getElementById("remove-test-pin-btn").addEventListener("click", async () => {
+  if (!testPinItemId) { setStatus("calib-status", "No test pin placed.", ""); return; }
+  try {
+    await OBR.scene.items.deleteItems([testPinItemId]);
+    testPinItemId = null;
+    setStatus("calib-status", "Test pin removed.", "good");
+  } catch (err) {
+    console.error("DCC map pins: failed to remove test pin", err);
+    setStatus("calib-status", `Couldn't remove test pin: ${err.message}`, "bad");
+  }
+});
+
+// --- Import / existing pins -----------------------------------------
+
+async function refreshExistingPins() {
+  try {
+    const items = await OBR.scene.items.getItems();
+    const pinItems = items.filter(item => item.metadata && item.metadata[ROOM_PIN_METADATA_KEY] && !item.metadata[ROOM_PIN_METADATA_KEY].isTest);
+    existingPinItemIds = pinItems.map(i => i.id);
+    existingPinKeys = new Set(pinItems.map(i => {
+      const meta = i.metadata[ROOM_PIN_METADATA_KEY];
+      return `${meta.doc} ${meta.id}`;
+    }));
+    document.getElementById("existing-pin-count").textContent = String(pinItems.length);
+  } catch (err) {
+    console.error("DCC map pins: failed to refresh existing pins", err);
+    setStatus("existing-status", `Couldn't read scene items: ${err.message}`, "bad");
+  }
+}
+
+document.getElementById("import-pins-btn").addEventListener("click", async () => {
+  const image = selectedMapImage();
+  if (!image) { setStatus("import-status", "Pick a map image first.", "bad"); return; }
+  if (!parsedPins.length) { setStatus("import-status", "Load pins first.", "bad"); return; }
+  const btn = document.getElementById("import-pins-btn");
+  btn.disabled = true;
+  try {
+    if (testPinItemId) {
+      await OBR.scene.items.deleteItems([testPinItemId]).catch(() => {});
+      testPinItemId = null;
+    }
+    await refreshExistingPins();
+    const geometry = imageGeometry(image);
+    const calib = calibration();
+    const toCreate = parsedPins.filter(pin => !existingPinKeys.has(pinKey(pin)));
+    const skippedCount = parsedPins.length - toCreate.length;
+    if (!toCreate.length) {
+      setStatus("import-status", "Every loaded pin is already placed on this scene.", "");
+      return;
+    }
+    const items = toCreate.map(pin => buildPinItem(pin, pinScenePosition(pin, geometry, calib)));
+    await OBR.scene.items.addItems(items);
+    const skippedNote = skippedCount ? ` (${skippedCount} already placed, skipped)` : "";
+    setStatus("import-status", `Imported ${toCreate.length} pin${toCreate.length === 1 ? "" : "s"}${skippedNote}.`, "good");
+    await refreshExistingPins();
+  } catch (err) {
+    console.error("DCC map pins: import failed", err);
+    setStatus("import-status", `Import failed: ${err.message}`, "bad");
+  } finally {
+    updateImportEnabled();
+  }
+});
+
+// This app has no confirm() dialog convention (see index.html's Clear Log
+// button) - the first click only arms the button ("Confirm?"); a second
+// click within REMOVE_ALL_ARM_MS actually deletes. Anything else disarms.
+const REMOVE_ALL_ARM_MS = 4000;
+let removeAllArmTimeout = null;
+function disarmRemoveAllBtn() {
+  const btn = document.getElementById("remove-all-pins-btn");
+  clearTimeout(removeAllArmTimeout);
+  removeAllArmTimeout = null;
+  if (!btn) return;
+  btn.classList.remove("armed");
+  btn.textContent = "🗑 Remove All Pins";
+}
+document.getElementById("remove-all-pins-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("remove-all-pins-btn");
+  if (!removeAllArmTimeout) {
+    btn.classList.add("armed");
+    btn.textContent = "Confirm remove all?";
+    removeAllArmTimeout = setTimeout(disarmRemoveAllBtn, REMOVE_ALL_ARM_MS);
+    return;
+  }
+  disarmRemoveAllBtn();
+  btn.disabled = true;
+  try {
+    await refreshExistingPins();
+    if (existingPinItemIds.length) await OBR.scene.items.deleteItems(existingPinItemIds);
+    setStatus("existing-status", `Removed ${existingPinItemIds.length} pin${existingPinItemIds.length === 1 ? "" : "s"}.`, "good");
+    await refreshExistingPins();
+  } catch (err) {
+    console.error("DCC map pins: failed to remove all pins", err);
+    setStatus("existing-status", `Couldn't remove pins: ${err.message}`, "bad");
+  }
+  btn.disabled = false;
+});
+
+document.getElementById("refresh-images-btn").addEventListener("click", refreshMapImages);
+document.getElementById("refresh-existing-btn").addEventListener("click", refreshExistingPins);
+document.getElementById("map-pins-close-btn").addEventListener("click", () => {
+  OBR.modal.close(MAP_PINS_MODAL_ID).catch(err => console.error("DCC map pins: failed to close modal", err));
+});
+
+OBR.onReady(async () => {
+  const stampEl = document.getElementById("map-pins-build-stamp");
+  console.log(`DCC Map Pins - ${stampEl ? stampEl.textContent : "(no build stamp found)"}`);
+  await Promise.all([refreshMapImages(), refreshExistingPins()]);
+});
+</script>
+</body>
+</html>
