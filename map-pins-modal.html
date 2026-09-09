@@ -111,7 +111,10 @@
     line-height: 0;
   }
   .map-preview-img { display: block; width: 100%; height: auto; user-select: none; -webkit-user-drag: none; }
-  .map-preview-pins { position: absolute; inset: 0; }
+  /* pointer-events:none so this empty full-cover overlay doesn't steal
+     clicks meant for the <img> beneath it - individual .map-pin-marker
+     children opt back into pointer events themselves (drag/unplace). */
+  .map-preview-pins { position: absolute; inset: 0; pointer-events: none; }
   .map-pin-marker {
     position: absolute;
     width: 16px;
@@ -137,7 +140,7 @@
        URL - index.html's own #build-stamp only confirms THAT file
        redeployed, not this one. Bumped by hand alongside it on every
        meaningful commit that touches this file (see CLAUDE.md). -->
-  <div class="build-stamp" id="map-pins-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">Map Pins build 2026-09-09 10:46</div>
+  <div class="build-stamp" id="map-pins-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">Map Pins build 2026-09-09 16:02</div>
 
   <fieldset>
     <legend>1. Target map image</legend>
