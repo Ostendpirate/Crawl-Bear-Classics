@@ -112,7 +112,7 @@
        URL - index.html's own #build-stamp only confirms THAT file
        redeployed, not this one. Bumped by hand alongside it on every
        meaningful commit that touches this file (see CLAUDE.md). -->
-  <div class="build-stamp" id="map-pins-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">Map Pins build 2026-09-08 15:10</div>
+  <div class="build-stamp" id="map-pins-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">Map Pins build 2026-09-09 10:27</div>
 
   <fieldset>
     <legend>1. Target map image</legend>
@@ -127,6 +127,20 @@
       </div>
     </div>
     <div class="status" id="image-status"></div>
+    <!-- Diagnostic only - lets a GM hand over the real position/scale/grid
+         fields OBR reports for their own placed image, so pinScenePosition()
+         above can eventually be replaced with real math instead of the
+         Calibrate step's test-pin trial-and-error (see that fieldset's own
+         comment on why it's a guess right now: item.position isn't
+         guaranteed to be the image's top-left corner, and this file has no
+         way to confirm the exact anchor/grid fields without a live sample). -->
+    <div class="btn-row" style="margin-top:8px;">
+      <button type="button" id="inspect-image-btn">🔍 Inspect Selected Image (for debugging pin math)</button>
+    </div>
+    <textarea id="image-inspect-output" readonly style="display:none; min-height:180px; margin-top:6px;"></textarea>
+    <div class="btn-row" id="inspect-copy-row" style="display:none;">
+      <button type="button" id="copy-inspect-btn">Copy to Clipboard</button>
+    </div>
   </fieldset>
 
   <fieldset>
@@ -517,6 +531,33 @@ document.getElementById("remove-all-pins-btn").addEventListener("click", async (
     setStatus("existing-status", `Couldn't remove pins: ${err.message}`, "bad");
   }
   btn.disabled = false;
+});
+
+document.getElementById("inspect-image-btn").addEventListener("click", () => {
+  const image = selectedMapImage();
+  const output = document.getElementById("image-inspect-output");
+  const copyRow = document.getElementById("inspect-copy-row");
+  if (!image) {
+    setStatus("image-status", "Pick a map image first.", "bad");
+    return;
+  }
+  output.value = JSON.stringify(image, null, 2);
+  output.style.display = "block";
+  copyRow.style.display = "flex";
+  console.log("DCC map pins: selected image item", image);
+});
+
+document.getElementById("copy-inspect-btn").addEventListener("click", async () => {
+  const el = document.getElementById("image-inspect-output");
+  try {
+    await navigator.clipboard.writeText(el.value);
+    setStatus("image-status", "Copied image details to clipboard.", "good");
+  } catch (err) {
+    // Clipboard API can be blocked (permissions, non-secure context) - fall
+    // back to select-all so it can still be copied manually.
+    el.select();
+    setStatus("image-status", "Couldn't copy automatically - text is selected, use Cmd/Ctrl+C.", "");
+  }
 });
 
 document.getElementById("refresh-images-btn").addEventListener("click", refreshMapImages);
