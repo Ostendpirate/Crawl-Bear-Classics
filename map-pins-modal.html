@@ -112,7 +112,7 @@
        URL - index.html's own #build-stamp only confirms THAT file
        redeployed, not this one. Bumped by hand alongside it on every
        meaningful commit that touches this file (see CLAUDE.md). -->
-  <div class="build-stamp" id="map-pins-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">Map Pins build 2026-09-09 10:27</div>
+  <div class="build-stamp" id="map-pins-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">Map Pins build 2026-09-09 10:36</div>
 
   <fieldset>
     <legend>1. Target map image</legend>
@@ -127,20 +127,6 @@
       </div>
     </div>
     <div class="status" id="image-status"></div>
-    <!-- Diagnostic only - lets a GM hand over the real position/scale/grid
-         fields OBR reports for their own placed image, so pinScenePosition()
-         above can eventually be replaced with real math instead of the
-         Calibrate step's test-pin trial-and-error (see that fieldset's own
-         comment on why it's a guess right now: item.position isn't
-         guaranteed to be the image's top-left corner, and this file has no
-         way to confirm the exact anchor/grid fields without a live sample). -->
-    <div class="btn-row" style="margin-top:8px;">
-      <button type="button" id="inspect-image-btn">🔍 Inspect Selected Image (for debugging pin math)</button>
-    </div>
-    <textarea id="image-inspect-output" readonly style="display:none; min-height:180px; margin-top:6px;"></textarea>
-    <div class="btn-row" id="inspect-copy-row" style="display:none;">
-      <button type="button" id="copy-inspect-btn">Copy to Clipboard</button>
-    </div>
   </fieldset>
 
   <fieldset>
@@ -156,8 +142,8 @@
   </fieldset>
 
   <fieldset>
-    <legend>3. Calibrate <span style="color:var(--muted); font-weight:400; text-transform:none; letter-spacing:0;">(optional)</span></legend>
-    <div class="subtitle" style="margin-bottom:6px;">Owlbear's image-anchor math can drift between SDK versions, so don't trust the raw percentages blind - place one test pin, see where it actually lands versus the real room on the map, and nudge these until it lines up before importing the full batch.</div>
+    <legend>3. Fine-tune <span style="color:var(--muted); font-weight:400; text-transform:none; letter-spacing:0;">(optional)</span></legend>
+    <div class="subtitle" style="margin-bottom:6px;">Pin position is computed from Owlbear's own reported bounding box for the image, so it should already land correctly - Place Test Pin is just a sanity check before you commit to the full batch. Only touch these if that test pin is visibly off (e.g. the image is rotated, which throws off the math below).</div>
     <div class="calib-row">
       <div>
         <label>Offset X (scene units)</label>
@@ -278,18 +264,27 @@ function selectedMapImage() {
   return mapImages.find(i => i.id === id) || null;
 }
 
-// item.position is the scene-space anchor OBR renders this image's grid
-// origin at - for a plain image with no grid offset that IS the top-left
-// corner, but that assumption is exactly what the Calibrate step below
-// exists to correct for when it isn't.
-function imageGeometry(item) {
-  const scaleX = item.scale?.x ?? 1;
-  const scaleY = item.scale?.y ?? 1;
+// item.position is NOT reliably the image's top-left corner - it's
+// anchored to the image's own grid.offset point, which is only {0,0} (and
+// therefore equal to top-left) when a GM hasn't had to nudge the grid
+// inward to line up with the map art. Reverse-engineering that by hand
+// from position/scale/grid.offset/dpi would mean carrying OBR's exact
+// anchor formula (confirmed via its published SDK v2 type declarations
+// at unpkg.com/@owlbear-rodeo/sdk@2/lib/types/items, 2026-09-09 - no
+// public docs page spells the formula out directly) - getItemBounds()
+// sidesteps needing that entirely by asking OBR for the already-computed
+// axis-aligned bounding box in scene units directly, min/width/height and
+// all. The one thing it doesn't account for is rotation: a rotated image
+// gets a bounding box bigger than the image itself, which the "Fine-tune"
+// calibration below exists to manually correct for on the rare map that
+// isn't axis-aligned.
+async function imageGeometry(item) {
+  const bounds = await OBR.scene.items.getItemBounds([item.id]);
   return {
-    originX: item.position?.x ?? 0,
-    originY: item.position?.y ?? 0,
-    width: (item.image?.width ?? 0) * scaleX,
-    height: (item.image?.height ?? 0) * scaleY,
+    originX: bounds.min.x,
+    originY: bounds.min.y,
+    width: bounds.width,
+    height: bounds.height,
   };
 }
 
@@ -423,12 +418,13 @@ document.getElementById("place-test-pin-btn").addEventListener("click", async ()
       testPinItemId = null;
     }
     const pin = parsedPins[0];
-    const geometry = imageGeometry(image);
+    const geometry = await imageGeometry(image);
     const position = pinScenePosition(pin, geometry, calibration());
     const item = buildPinItem({ ...pin, id: `TEST:${pin.id}` }, position, { isTest: true });
     await OBR.scene.items.addItems([item]);
     testPinItemId = item.id;
-    setStatus("calib-status", `Test pin placed for "${pin.title || pin.id}" - compare it to the real room, then adjust offset/scale and try again.`, "good");
+    const rotationNote = image.rotation ? " Heads up: this image is rotated, which the bounding-box math above doesn't account for - expect it to be off." : "";
+    setStatus("calib-status", `Test pin placed for "${pin.title || pin.id}" - compare it to the real room.${rotationNote}`, "good");
   } catch (err) {
     console.error("DCC map pins: failed to place test pin", err);
     setStatus("calib-status", `Couldn't place test pin: ${err.message}`, "bad");
@@ -477,7 +473,7 @@ document.getElementById("import-pins-btn").addEventListener("click", async () =>
       testPinItemId = null;
     }
     await refreshExistingPins();
-    const geometry = imageGeometry(image);
+    const geometry = await imageGeometry(image);
     const calib = calibration();
     const toCreate = parsedPins.filter(pin => !existingPinKeys.has(pinKey(pin)));
     const skippedCount = parsedPins.length - toCreate.length;
@@ -531,33 +527,6 @@ document.getElementById("remove-all-pins-btn").addEventListener("click", async (
     setStatus("existing-status", `Couldn't remove pins: ${err.message}`, "bad");
   }
   btn.disabled = false;
-});
-
-document.getElementById("inspect-image-btn").addEventListener("click", () => {
-  const image = selectedMapImage();
-  const output = document.getElementById("image-inspect-output");
-  const copyRow = document.getElementById("inspect-copy-row");
-  if (!image) {
-    setStatus("image-status", "Pick a map image first.", "bad");
-    return;
-  }
-  output.value = JSON.stringify(image, null, 2);
-  output.style.display = "block";
-  copyRow.style.display = "flex";
-  console.log("DCC map pins: selected image item", image);
-});
-
-document.getElementById("copy-inspect-btn").addEventListener("click", async () => {
-  const el = document.getElementById("image-inspect-output");
-  try {
-    await navigator.clipboard.writeText(el.value);
-    setStatus("image-status", "Copied image details to clipboard.", "good");
-  } catch (err) {
-    // Clipboard API can be blocked (permissions, non-secure context) - fall
-    // back to select-all so it can still be copied manually.
-    el.select();
-    setStatus("image-status", "Couldn't copy automatically - text is selected, use Cmd/Ctrl+C.", "");
-  }
 });
 
 document.getElementById("refresh-images-btn").addEventListener("click", refreshMapImages);
