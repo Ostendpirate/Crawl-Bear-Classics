@@ -66,8 +66,6 @@
   textarea { resize: vertical; min-height: 70px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; }
   .row { display: flex; gap: 8px; }
   .row > * { flex: 1; min-width: 0; }
-  .calib-row { display: flex; gap: 8px; align-items: flex-end; }
-  .calib-row > div { flex: 1; }
   button {
     font-family: inherit;
     cursor: pointer;
@@ -98,7 +96,34 @@
   .pin-preview-list .pin-id { color: var(--accent); font-weight: 700; flex: 0 0 auto; }
   .pin-preview-list .pin-title { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pin-preview-list .pin-doc { color: var(--muted); font-size: 10.5px; flex: 0 0 auto; }
+  .pin-preview-list .pin-placed-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; border: 1px solid var(--muted); }
+  .pin-preview-list .pin-placed-dot.placed { background: var(--good); border-color: var(--good); }
   .empty-note { color: var(--muted); font-size: 12px; font-style: italic; }
+  .map-preview-wrap {
+    position: relative;
+    max-width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-top: 8px;
+    cursor: crosshair;
+    display: none;
+    line-height: 0;
+  }
+  .map-preview-img { display: block; width: 100%; height: auto; user-select: none; -webkit-user-drag: none; }
+  .map-preview-pins { position: absolute; inset: 0; }
+  .map-pin-marker {
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    margin: -8px 0 0 -8px;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px rgba(0,0,0,.5);
+    cursor: grab;
+    pointer-events: auto;
+  }
+  .map-pin-marker:active { cursor: grabbing; }
 </style>
 </head>
 <body>
@@ -107,12 +132,12 @@
     <h1>Map Pins</h1>
     <button type="button" id="map-pins-close-btn" title="Close">✕</button>
   </div>
-  <div class="subtitle">Bulk-drop numbered room-pin labels onto the current scene's map, from a JSON export produced by the <b>Cartographer's Pins</b> companion tool. Pins are real scene items other clients see immediately - right-click one to jump to its notes (once GM Notes has a matching heading).</div>
+  <div class="subtitle">Click directly on your map image below to drop numbered room-pin labels onto the current scene - no separate tool, no coordinates to copy/paste. (An already-placed JSON export from an older session still imports fine too.) Pins are real scene items other clients see immediately - right-click one to jump to its notes (once GM Notes has a matching heading).</div>
   <!-- This modal is a SEPARATE file from index.html, served from its own
        URL - index.html's own #build-stamp only confirms THAT file
        redeployed, not this one. Bumped by hand alongside it on every
        meaningful commit that touches this file (see CLAUDE.md). -->
-  <div class="build-stamp" id="map-pins-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">Map Pins build 2026-09-09 10:36</div>
+  <div class="build-stamp" id="map-pins-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">Map Pins build 2026-09-09 10:46</div>
 
   <fieldset>
     <legend>1. Target map image</legend>
@@ -130,44 +155,41 @@
   </fieldset>
 
   <fieldset>
-    <legend>2. Pins JSON</legend>
-    <div class="subtitle" style="margin-bottom:6px;">Paste the JSON exported by Cartographer's Pins, or load its file - an array of <code>{doc, level, id, title, x, y}</code>, where x/y are 0-100 percentages of the map image's own width/height.</div>
-    <textarea id="pins-json-input" placeholder="[{&quot;doc&quot;:&quot;main&quot;,&quot;level&quot;:&quot;The Citadel&quot;,&quot;id&quot;:&quot;1-1&quot;,&quot;title&quot;:&quot;Gateway Guardians&quot;,&quot;x&quot;:42.1,&quot;y&quot;:18.6}, ...]"></textarea>
+    <legend>2. Rooms</legend>
+    <div class="subtitle" style="margin-bottom:6px;">Paste or load a room list - an array of <code>{doc, level, id, title}</code> (e.g. an adventure's own <code>*_areas.json</code>). No coordinates needed here; you'll click each room's spot on the map below. Already have a JSON export with <code>x</code>/<code>y</code> baked in from an older session? That works too - those rooms show up already placed.</div>
+    <textarea id="pins-json-input" placeholder="[{&quot;doc&quot;:&quot;main&quot;,&quot;level&quot;:&quot;The Citadel&quot;,&quot;id&quot;:&quot;1-1&quot;,&quot;title&quot;:&quot;Gateway Guardians&quot;}, ...]"></textarea>
     <div class="btn-row">
       <input type="file" id="pins-json-file" accept=".json,application/json" />
-      <button type="button" id="load-pins-btn" class="btn-primary">Load Pins</button>
+      <button type="button" id="load-pins-btn" class="btn-primary">Load Rooms</button>
     </div>
     <div class="status" id="pins-load-status"></div>
     <ul class="pin-preview-list" id="pins-preview-list" style="display:none;"></ul>
   </fieldset>
 
   <fieldset>
-    <legend>3. Fine-tune <span style="color:var(--muted); font-weight:400; text-transform:none; letter-spacing:0;">(optional)</span></legend>
-    <div class="subtitle" style="margin-bottom:6px;">Pin position is computed from Owlbear's own reported bounding box for the image, so it should already land correctly - Place Test Pin is just a sanity check before you commit to the full batch. Only touch these if that test pin is visibly off (e.g. the image is rotated, which throws off the math below).</div>
-    <div class="calib-row">
+    <legend>3. Place pins on the map</legend>
+    <div class="row" id="pending-room-row">
       <div>
-        <label>Offset X (scene units)</label>
-        <input type="number" id="calib-offset-x" value="0" step="1" />
+        <label>Room to place next</label>
+        <select id="pending-room-select" disabled></select>
       </div>
-      <div>
-        <label>Offset Y (scene units)</label>
-        <input type="number" id="calib-offset-y" value="0" step="1" />
-      </div>
-      <div>
-        <label>Scale multiplier</label>
-        <input type="number" id="calib-scale" value="1" step="0.01" min="0.01" />
+      <div style="flex: 0 0 auto;">
+        <label>&nbsp;</label>
+        <span class="count-badge" id="placed-count-badge">0 / 0 placed</span>
       </div>
     </div>
-    <div class="btn-row">
-      <button type="button" id="place-test-pin-btn">Place Test Pin</button>
-      <button type="button" id="remove-test-pin-btn">Remove Test Pin</button>
+    <div class="subtitle" style="margin: 6px 0;">Click anywhere on the map to drop a pin for the selected room - it advances to the next pending room automatically. Drag an existing pin to nudge it, or click it to unplace it and pick again.</div>
+    <div class="status bad" id="rotation-warning" style="display:none;"></div>
+    <div class="map-preview-wrap" id="map-preview-wrap">
+      <img class="map-preview-img" id="map-preview-img" alt="Selected map" />
+      <div class="map-preview-pins" id="map-preview-pins"></div>
     </div>
-    <div class="status" id="calib-status"></div>
+    <div class="status" id="place-status"></div>
   </fieldset>
 
   <fieldset>
     <legend>4. Import</legend>
-    <div class="subtitle" style="margin-bottom:6px;">Creates one label per pin, skipping any pin whose doc+id is already placed on this scene (use Remove All Pins below first if you want a clean re-import).</div>
+    <div class="subtitle" style="margin-bottom:6px;">Creates one label per placed pin, skipping any pin whose doc+id is already placed on this scene (use Remove All Pins below first if you want a clean re-import).</div>
     <div class="btn-row">
       <button type="button" id="import-pins-btn" class="btn-primary" disabled>Import Pins</button>
     </div>
@@ -206,11 +228,14 @@ const LEVEL_COLOR_PALETTE = [
 ];
 
 let mapImages = [];
-let parsedPins = [];
+// Each entry is {doc, level, id, title, x, y} - x/y are null until placed,
+// either by clicking on the map preview below or by loading a JSON export
+// that already had coordinates baked in. This one array is both the "rooms
+// list" and the "pins list" depending on how far along each entry is.
+let loadedRooms = [];
 let levelColors = new Map();
 let existingPinKeys = new Set(); // "doc id" for pins already on the scene
 let existingPinItemIds = [];
-let testPinItemId = null;
 
 function statusEl(id) { return document.getElementById(id); }
 function setStatus(id, message, kind) {
@@ -219,7 +244,9 @@ function setStatus(id, message, kind) {
   el.className = "status" + (kind ? ` ${kind}` : "");
 }
 
-function pinKey(pin) { return `${pin.doc} ${pin.id}`; }
+function pinKey(room) { return `${room.doc} ${room.id}`; }
+function isPlaced(room) { return typeof room.x === "number" && typeof room.y === "number"; }
+function clamp(n, min, max) { return Math.min(max, Math.max(min, n)); }
 
 function levelColorFor(level) {
   if (!levelColors.has(level)) {
@@ -257,6 +284,7 @@ async function refreshMapImages() {
   if (prevValue && mapImages.some(i => i.id === prevValue)) select.value = prevValue;
   setStatus("image-status", `${mapImages.length} image item${mapImages.length === 1 ? "" : "s"} found.`, "good");
   updateImportEnabled();
+  renderMapPreview();
 }
 
 function selectedMapImage() {
@@ -275,9 +303,10 @@ function selectedMapImage() {
 // sidesteps needing that entirely by asking OBR for the already-computed
 // axis-aligned bounding box in scene units directly, min/width/height and
 // all. The one thing it doesn't account for is rotation: a rotated image
-// gets a bounding box bigger than the image itself, which the "Fine-tune"
-// calibration below exists to manually correct for on the rare map that
-// isn't axis-aligned.
+// gets a bounding box bigger than the image itself, so a pin's x/y%
+// (always relative to the image's OWN unrotated pixel bounds, since
+// that's what the map preview below actually renders) would land off on a
+// rotated placement - see the rotation check in renderMapPreview().
 async function imageGeometry(item) {
   const bounds = await OBR.scene.items.getItemBounds([item.id]);
   return {
@@ -288,24 +317,21 @@ async function imageGeometry(item) {
   };
 }
 
-function calibration() {
+function pinScenePosition(pin, geometry) {
   return {
-    offsetX: Number(document.getElementById("calib-offset-x").value) || 0,
-    offsetY: Number(document.getElementById("calib-offset-y").value) || 0,
-    scale: Number(document.getElementById("calib-scale").value) || 1,
+    x: geometry.originX + (pin.x / 100) * geometry.width,
+    y: geometry.originY + (pin.y / 100) * geometry.height,
   };
 }
 
-function pinScenePosition(pin, geometry, calib) {
-  return {
-    x: geometry.originX + calib.offsetX + (pin.x / 100) * geometry.width * calib.scale,
-    y: geometry.originY + calib.offsetY + (pin.y / 100) * geometry.height * calib.scale,
-  };
-}
+// --- Rooms JSON loading --------------------------------------------------
 
-// --- Pins JSON loading --------------------------------------------------
-
-function parsePinsJson(raw) {
+// x/y are optional here (unlike the old Cartographer's Pins-only import) -
+// a plain rooms list (an adventure's own areas.json, say) has neither, and
+// gets placed by clicking on the map preview below instead. A JSON export
+// that already has them (an older session's work, or another GM's) comes
+// in pre-placed.
+function parseRoomsJson(raw) {
   const data = JSON.parse(raw);
   if (!Array.isArray(data)) throw new Error(`Expected a top-level JSON array, got ${typeof data}.`);
   const valid = [];
@@ -313,13 +339,15 @@ function parsePinsJson(raw) {
   for (const entry of data) {
     if (!entry || typeof entry !== "object") { skipped++; continue; }
     const { doc, level, id, title, x, y } = entry;
-    if (typeof id !== "string" || typeof x !== "number" || typeof y !== "number") { skipped++; continue; }
+    if (typeof id !== "string") { skipped++; continue; }
+    const hasCoords = typeof x === "number" && typeof y === "number";
     valid.push({
       doc: typeof doc === "string" && doc ? doc : "default",
       level: typeof level === "string" && level ? level : "Unnamed level",
       id,
       title: typeof title === "string" ? title : "",
-      x, y,
+      x: hasCoords ? x : null,
+      y: hasCoords ? y : null,
     });
   }
   return { valid, skipped };
@@ -328,39 +356,58 @@ function parsePinsJson(raw) {
 function renderPinsPreview() {
   const list = document.getElementById("pins-preview-list");
   list.innerHTML = "";
-  if (!parsedPins.length) { list.style.display = "none"; return; }
+  if (!loadedRooms.length) { list.style.display = "none"; return; }
   list.style.display = "block";
-  parsedPins.forEach(pin => {
+  loadedRooms.forEach(room => {
     const li = document.createElement("li");
+    const dot = document.createElement("span");
+    dot.className = "pin-placed-dot" + (isPlaced(room) ? " placed" : "");
+    dot.title = isPlaced(room) ? "Placed" : "Not placed yet";
     const swatch = document.createElement("span");
     swatch.className = "swatch";
-    swatch.style.background = levelColorFor(pin.level);
+    swatch.style.background = levelColorFor(room.level);
     const idSpan = document.createElement("span");
     idSpan.className = "pin-id";
-    idSpan.textContent = pin.id;
+    idSpan.textContent = room.id;
     const titleSpan = document.createElement("span");
     titleSpan.className = "pin-title";
-    titleSpan.textContent = pin.title || pin.level;
+    titleSpan.textContent = room.title || room.level;
     const docSpan = document.createElement("span");
     docSpan.className = "pin-doc";
-    docSpan.textContent = pin.doc;
-    li.append(swatch, idSpan, titleSpan, docSpan);
+    docSpan.textContent = room.doc;
+    li.append(dot, swatch, idSpan, titleSpan, docSpan);
     list.appendChild(li);
   });
 }
 
-function loadPinsFromText(raw) {
+function loadRoomsFromText(raw) {
   try {
-    const { valid, skipped } = parsePinsJson(raw);
+    const { valid, skipped } = parseRoomsJson(raw);
     if (!valid.length) {
-      setStatus("pins-load-status", "No usable pins found - expected objects with at least id, x, and y.", "bad");
+      setStatus("pins-load-status", "No usable rooms found - expected objects with at least an id.", "bad");
       return;
     }
-    parsedPins = valid;
+    // Merges by doc+id rather than replacing outright, so loading a second
+    // file (or reloading the same one) doesn't throw away pins already
+    // placed by clicking - a room already known keeps its current x/y
+    // unless the newly-loaded entry itself carries coordinates.
+    const byKey = new Map(loadedRooms.map(r => [pinKey(r), r]));
+    valid.forEach(room => {
+      const existing = byKey.get(pinKey(room));
+      if (existing && !isPlaced(room)) {
+        existing.level = room.level;
+        existing.title = room.title;
+      } else {
+        byKey.set(pinKey(room), room);
+      }
+    });
+    loadedRooms = Array.from(byKey.values());
     levelColors = new Map();
     renderPinsPreview();
-    const skippedNote = skipped ? ` (${skipped} skipped - missing id/x/y)` : "";
-    setStatus("pins-load-status", `Loaded ${valid.length} pin${valid.length === 1 ? "" : "s"}${skippedNote}.`, "good");
+    renderMapPreview();
+    const skippedNote = skipped ? ` (${skipped} skipped - missing id)` : "";
+    const placedCount = loadedRooms.filter(isPlaced).length;
+    setStatus("pins-load-status", `Loaded ${valid.length} room${valid.length === 1 ? "" : "s"}${skippedNote} - ${placedCount} already placed.`, "good");
   } catch (err) {
     setStatus("pins-load-status", `Couldn't parse that as JSON: ${err.message}`, "bad");
     return;
@@ -374,7 +421,7 @@ document.getElementById("load-pins-btn").addEventListener("click", () => {
     setStatus("pins-load-status", "Paste JSON or choose a file first.", "bad");
     return;
   }
-  loadPinsFromText(raw);
+  loadRoomsFromText(raw);
 });
 
 document.getElementById("pins-json-file").addEventListener("change", (e) => {
@@ -383,64 +430,149 @@ document.getElementById("pins-json-file").addEventListener("change", (e) => {
   const reader = new FileReader();
   reader.onload = () => {
     document.getElementById("pins-json-input").value = String(reader.result || "");
-    loadPinsFromText(String(reader.result || ""));
+    loadRoomsFromText(String(reader.result || ""));
   };
   reader.onerror = () => setStatus("pins-load-status", "Couldn't read that file.", "bad");
   reader.readAsText(file);
 });
 
-// --- Test pin -------------------------------------------------------
+// --- Map preview / click-to-place ------------------------------------
 
 function updateImportEnabled() {
-  document.getElementById("import-pins-btn").disabled = !(parsedPins.length && mapImages.length);
+  document.getElementById("import-pins-btn").disabled = !(loadedRooms.some(isPlaced) && mapImages.length);
 }
 
-function buildPinItem(pin, position, extraMetadata) {
+function buildPinItem(pin, position) {
   return buildLabel()
     .position(position)
     .plainText(pin.id)
     .backgroundColor(levelColorFor(pin.level))
     .pointerDirection("DOWN")
     .metadata({
-      [ROOM_PIN_METADATA_KEY]: { doc: pin.doc, level: pin.level, id: pin.id, title: pin.title, ...extraMetadata },
+      [ROOM_PIN_METADATA_KEY]: { doc: pin.doc, level: pin.level, id: pin.id, title: pin.title },
     })
     .layer("NOTE")
     .build();
 }
 
-document.getElementById("place-test-pin-btn").addEventListener("click", async () => {
-  const image = selectedMapImage();
-  if (!image) { setStatus("calib-status", "Pick a map image first.", "bad"); return; }
-  if (!parsedPins.length) { setStatus("calib-status", "Load pins first.", "bad"); return; }
-  try {
-    if (testPinItemId) {
-      await OBR.scene.items.deleteItems([testPinItemId]).catch(() => {});
-      testPinItemId = null;
-    }
-    const pin = parsedPins[0];
-    const geometry = await imageGeometry(image);
-    const position = pinScenePosition(pin, geometry, calibration());
-    const item = buildPinItem({ ...pin, id: `TEST:${pin.id}` }, position, { isTest: true });
-    await OBR.scene.items.addItems([item]);
-    testPinItemId = item.id;
-    const rotationNote = image.rotation ? " Heads up: this image is rotated, which the bounding-box math above doesn't account for - expect it to be off." : "";
-    setStatus("calib-status", `Test pin placed for "${pin.title || pin.id}" - compare it to the real room.${rotationNote}`, "good");
-  } catch (err) {
-    console.error("DCC map pins: failed to place test pin", err);
-    setStatus("calib-status", `Couldn't place test pin: ${err.message}`, "bad");
+// Rebuilds the "which room gets the next click" dropdown from whatever in
+// loadedRooms isn't placed yet, and the X/Y placed-count badge next to it.
+// Re-run after every load/place/move/unplace so both always match reality.
+function renderPendingRoomSelect() {
+  const select = document.getElementById("pending-room-select");
+  const prevValue = select.value;
+  const pending = loadedRooms.filter(r => !isPlaced(r));
+  const placedCount = loadedRooms.length - pending.length;
+  document.getElementById("placed-count-badge").textContent = `${placedCount} / ${loadedRooms.length} placed`;
+  select.innerHTML = "";
+  if (!pending.length) {
+    select.appendChild(new Option(loadedRooms.length ? "All rooms placed" : "Load rooms above first", ""));
+    select.disabled = true;
+    return;
   }
-});
+  select.disabled = false;
+  pending.forEach(room => {
+    select.appendChild(new Option(`${room.id}${room.title ? " – " + room.title : ""} (${room.level})`, pinKey(room)));
+  });
+  if (prevValue && pending.some(r => pinKey(r) === prevValue)) select.value = prevValue;
+}
 
-document.getElementById("remove-test-pin-btn").addEventListener("click", async () => {
-  if (!testPinItemId) { setStatus("calib-status", "No test pin placed.", ""); return; }
-  try {
-    await OBR.scene.items.deleteItems([testPinItemId]);
-    testPinItemId = null;
-    setStatus("calib-status", "Test pin removed.", "good");
-  } catch (err) {
-    console.error("DCC map pins: failed to remove test pin", err);
-    setStatus("calib-status", `Couldn't remove test pin: ${err.message}`, "bad");
+// Draws the selected map image plus a marker per already-placed room.
+// Runs after every image selection, room load, and placement/move/removal
+// so the preview always matches loadedRooms exactly - it's the single
+// source of truth here, not a cache of it.
+function renderMapPreview() {
+  const wrap = document.getElementById("map-preview-wrap");
+  const img = document.getElementById("map-preview-img");
+  const image = selectedMapImage();
+  if (!image) { wrap.style.display = "none"; renderPendingRoomSelect(); return; }
+  if (img.dataset.srcId !== image.id) {
+    img.src = image.image.url;
+    img.dataset.srcId = image.id;
   }
+  wrap.style.display = "block";
+  const warningEl = document.getElementById("rotation-warning");
+  warningEl.style.display = image.rotation ? "block" : "none";
+  warningEl.textContent = image.rotation
+    ? "Heads up: this image is rotated in the scene - pin placement isn't rotation-aware yet, so imported pins will land off-position."
+    : "";
+
+  const pinsLayer = document.getElementById("map-preview-pins");
+  pinsLayer.innerHTML = "";
+  loadedRooms.filter(isPlaced).forEach(room => {
+    const marker = document.createElement("div");
+    marker.className = "map-pin-marker";
+    marker.style.left = `${room.x}%`;
+    marker.style.top = `${room.y}%`;
+    marker.style.background = levelColorFor(room.level);
+    marker.title = `${room.id}${room.title ? " – " + room.title : ""} - drag to move, click to unplace`;
+    attachMarkerDragHandlers(marker, room);
+    pinsLayer.appendChild(marker);
+  });
+  renderPendingRoomSelect();
+}
+
+// Single-finger drag-or-click disambiguation: a plain click (no meaningful
+// mouse movement between down and up) unplaces the room back to pending;
+// an actual drag updates its x/y instead. Listens on `window` (not the
+// marker) for move/up so a fast drag that outruns the marker's own small
+// hit area doesn't drop the gesture.
+function attachMarkerDragHandlers(marker, room) {
+  marker.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const wrap = document.getElementById("map-preview-wrap");
+    const startX = e.clientX, startY = e.clientY;
+    let moved = false;
+
+    function onMove(ev) {
+      if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 4) return;
+      moved = true;
+      const rect = wrap.getBoundingClientRect();
+      const xPct = clamp(((ev.clientX - rect.left) / rect.width) * 100, 0, 100);
+      const yPct = clamp(((ev.clientY - rect.top) / rect.height) * 100, 0, 100);
+      marker.style.left = `${xPct}%`;
+      marker.style.top = `${yPct}%`;
+      room.x = xPct;
+      room.y = yPct;
+    }
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      if (moved) {
+        renderPinsPreview();
+        updateImportEnabled();
+        setStatus("place-status", `Moved ${room.id}.`, "good");
+      } else {
+        room.x = null;
+        room.y = null;
+        renderMapPreview();
+        renderPinsPreview();
+        updateImportEnabled();
+        setStatus("place-status", `Unplaced ${room.id} - pick it again above to re-place.`, "");
+      }
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  });
+}
+
+document.getElementById("map-preview-img").addEventListener("click", (e) => {
+  const select = document.getElementById("pending-room-select");
+  const key = select.value;
+  if (!key) {
+    setStatus("place-status", "Load rooms above first, or every loaded room is already placed.", "bad");
+    return;
+  }
+  const room = loadedRooms.find(r => pinKey(r) === key);
+  if (!room) return;
+  const rect = e.currentTarget.getBoundingClientRect();
+  room.x = clamp(((e.clientX - rect.left) / rect.width) * 100, 0, 100);
+  room.y = clamp(((e.clientY - rect.top) / rect.height) * 100, 0, 100);
+  renderMapPreview();
+  renderPinsPreview();
+  updateImportEnabled();
+  setStatus("place-status", `Placed ${room.id}${room.title ? " – " + room.title : ""}.`, "good");
 });
 
 // --- Import / existing pins -----------------------------------------
@@ -463,25 +595,21 @@ async function refreshExistingPins() {
 
 document.getElementById("import-pins-btn").addEventListener("click", async () => {
   const image = selectedMapImage();
+  const placedRooms = loadedRooms.filter(isPlaced);
   if (!image) { setStatus("import-status", "Pick a map image first.", "bad"); return; }
-  if (!parsedPins.length) { setStatus("import-status", "Load pins first.", "bad"); return; }
+  if (!placedRooms.length) { setStatus("import-status", "Place at least one pin on the map first.", "bad"); return; }
   const btn = document.getElementById("import-pins-btn");
   btn.disabled = true;
   try {
-    if (testPinItemId) {
-      await OBR.scene.items.deleteItems([testPinItemId]).catch(() => {});
-      testPinItemId = null;
-    }
     await refreshExistingPins();
     const geometry = await imageGeometry(image);
-    const calib = calibration();
-    const toCreate = parsedPins.filter(pin => !existingPinKeys.has(pinKey(pin)));
-    const skippedCount = parsedPins.length - toCreate.length;
+    const toCreate = placedRooms.filter(pin => !existingPinKeys.has(pinKey(pin)));
+    const skippedCount = placedRooms.length - toCreate.length;
     if (!toCreate.length) {
-      setStatus("import-status", "Every loaded pin is already placed on this scene.", "");
+      setStatus("import-status", "Every placed pin is already on this scene.", "");
       return;
     }
-    const items = toCreate.map(pin => buildPinItem(pin, pinScenePosition(pin, geometry, calib)));
+    const items = toCreate.map(pin => buildPinItem(pin, pinScenePosition(pin, geometry)));
     await OBR.scene.items.addItems(items);
     const skippedNote = skippedCount ? ` (${skippedCount} already placed, skipped)` : "";
     setStatus("import-status", `Imported ${toCreate.length} pin${toCreate.length === 1 ? "" : "s"}${skippedNote}.`, "good");
@@ -529,6 +657,10 @@ document.getElementById("remove-all-pins-btn").addEventListener("click", async (
   btn.disabled = false;
 });
 
+document.getElementById("map-image-select").addEventListener("change", () => {
+  updateImportEnabled();
+  renderMapPreview();
+});
 document.getElementById("refresh-images-btn").addEventListener("click", refreshMapImages);
 document.getElementById("refresh-existing-btn").addEventListener("click", refreshExistingPins);
 document.getElementById("map-pins-close-btn").addEventListener("click", () => {
