@@ -140,7 +140,7 @@
        URL - index.html's own #build-stamp only confirms THAT file
        redeployed, not this one. Bumped by hand alongside it on every
        meaningful commit that touches this file (see CLAUDE.md). -->
-  <div class="build-stamp" id="map-pins-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">Map Pins build 2026-09-10 09:32</div>
+  <div class="build-stamp" id="map-pins-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">Map Pins build 2026-09-10 10:16</div>
 
   <fieldset>
     <legend>1. Target map image</legend>
@@ -485,6 +485,47 @@ function buildPinItem(pin, position) {
     .build();
 }
 
+// Owlbear doesn't document exactly how a Label's `position` anchors
+// relative to its rendered box + pointer chrome (padding, font size, the
+// little pointerDirection tail) - reports of imported pins landing a
+// consistent amount off (see git history) point at this, not the image
+// math above (which getItemBounds already made exact). Rather than guess
+// at that undocumented formula, this drops ONE disposable probe label far
+// off the visible map, asks OBR where it actually rendered (getItemBounds
+// again - the same trick imageGeometry uses), and uses the gap between
+// the probe's target and its actual rendered center as a correction
+// applied to every real pin in this import batch. Off in a far corner
+// rather than near the real pins, so even the brief moment it exists on
+// the shared scene isn't visible to anyone looking at the map. Falls back
+// to no correction (plus a console warning) if the probe round-trip
+// itself fails for any reason - better to import slightly off than not
+// at all.
+const LABEL_ANCHOR_PROBE_POSITION = { x: -1000000, y: -1000000 };
+async function computeLabelAnchorCorrection() {
+  let probeId = null;
+  try {
+    const probe = buildLabel()
+      .position(LABEL_ANCHOR_PROBE_POSITION)
+      .plainText("?")
+      .metadata({ [ROOM_PIN_METADATA_KEY]: { isTest: true } })
+      .layer("NOTE")
+      .build();
+    probeId = probe.id;
+    await OBR.scene.items.addItems([probe]);
+    const bounds = await OBR.scene.items.getItemBounds([probeId]);
+    const actualCenter = { x: (bounds.min.x + bounds.max.x) / 2, y: (bounds.min.y + bounds.max.y) / 2 };
+    return {
+      dx: LABEL_ANCHOR_PROBE_POSITION.x - actualCenter.x,
+      dy: LABEL_ANCHOR_PROBE_POSITION.y - actualCenter.y,
+    };
+  } catch (err) {
+    console.error("DCC map pins: label anchor probe failed - importing without a position correction", err);
+    return { dx: 0, dy: 0 };
+  } finally {
+    if (probeId) await OBR.scene.items.deleteItems([probeId]).catch(() => {});
+  }
+}
+
 // Rebuilds the "which room gets the next click" dropdown and the X/Y
 // placed-count badge. Rooms with no pin yet come first (so the default
 // selection - and auto-advance after a placement - naturally walks
@@ -684,7 +725,12 @@ document.getElementById("import-pins-btn").addEventListener("click", async () =>
       setStatus("import-status", "Every placed pin is already on this scene.", "");
       return;
     }
-    const items = toCreate.map(pin => buildPinItem(pin, pinScenePosition(pin, geometry)));
+    setStatus("import-status", "Calibrating pin position...", "");
+    const correction = await computeLabelAnchorCorrection();
+    const items = toCreate.map(pin => {
+      const target = pinScenePosition(pin, geometry);
+      return buildPinItem(pin, { x: target.x + correction.dx, y: target.y + correction.dy });
+    });
     await OBR.scene.items.addItems(items);
     const skippedNote = skippedCount ? ` (${skippedCount} already placed, skipped)` : "";
     setStatus("import-status", `Imported ${toCreate.length} pin${toCreate.length === 1 ? "" : "s"}${skippedNote}.`, "good");
