@@ -85,6 +85,11 @@
   .status { font-size: 12px; margin-top: 6px; min-height: 16px; }
   .status.good { color: var(--good); }
   .status.bad { color: var(--bad); }
+  /* Overrides the generic `label` rule above (uppercase/muted/block, meant
+     for form-field captions) - this is a checkbox's own descriptive text,
+     not a field caption, so it needs to read like normal body copy. */
+  .checkbox-row { display: flex; align-items: center; gap: 6px; font-size: 12px; text-transform: none; letter-spacing: normal; color: var(--text); cursor: pointer; margin: 0 0 8px; }
+  .checkbox-row input { width: auto; }
   .count-badge { display: inline-block; background: var(--accent); color: #1e1b18; border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 700; margin-left: 6px; }
   .pin-preview-list { list-style: none; margin: 10px 0 0; padding: 0; max-height: 220px; overflow-y: auto; }
   .pin-preview-list li {
@@ -140,7 +145,7 @@
        URL - index.html's own #build-stamp only confirms THAT file
        redeployed, not this one. Bumped by hand alongside it on every
        meaningful commit that touches this file (see CLAUDE.md). -->
-  <div class="build-stamp" id="map-pins-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">Map Pins build 2026-09-10 10:16</div>
+  <div class="build-stamp" id="map-pins-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">Map Pins build 2026-09-10 10:25</div>
 
   <fieldset>
     <legend>1. Target map image</legend>
@@ -193,6 +198,10 @@
   <fieldset>
     <legend>4. Import</legend>
     <div class="subtitle" style="margin-bottom:6px;">Creates one label per placed pin, skipping any that already exist at that exact spot on this scene - a second pin for the same room at a different spot still imports (use Remove All Pins below first if you want a clean re-import instead).</div>
+    <label class="checkbox-row">
+      <input type="checkbox" id="hide-from-players-checkbox" />
+      <span>Hide pins from players (GM-only - you'll still see them, dimmed)</span>
+    </label>
     <div class="btn-row">
       <button type="button" id="import-pins-btn" class="btn-primary" disabled>Import Pins</button>
     </div>
@@ -469,7 +478,7 @@ function updateImportEnabled() {
   document.getElementById("import-pins-btn").disabled = !(placedPins.length && mapImages.length);
 }
 
-function buildPinItem(pin, position) {
+function buildPinItem(pin, position, hidden) {
   return buildLabel()
     .position(position)
     // x/y (the original 0-100 percentages, not the scene position) ride
@@ -482,6 +491,11 @@ function buildPinItem(pin, position) {
     .backgroundColor(levelColorFor(pin.level))
     .pointerDirection("DOWN")
     .layer("NOTE")
+    // visible:false is a real, documented Owlbear behavior (not a custom
+    // convention of this app) - transparent/dimmed for the GM, fully
+    // invisible to players, same as hiding any other image/token. See the
+    // "Hide from players" checkbox above.
+    .visible(!hidden)
     .build();
 }
 
@@ -509,6 +523,7 @@ async function computeLabelAnchorCorrection() {
       .plainText("?")
       .metadata({ [ROOM_PIN_METADATA_KEY]: { isTest: true } })
       .layer("NOTE")
+      .visible(false) // belt-and-suspenders on top of being off in the void - see the cleanup in the finally block below
       .build();
     probeId = probe.id;
     await OBR.scene.items.addItems([probe]);
@@ -727,9 +742,10 @@ document.getElementById("import-pins-btn").addEventListener("click", async () =>
     }
     setStatus("import-status", "Calibrating pin position...", "");
     const correction = await computeLabelAnchorCorrection();
+    const hideFromPlayers = document.getElementById("hide-from-players-checkbox").checked;
     const items = toCreate.map(pin => {
       const target = pinScenePosition(pin, geometry);
-      return buildPinItem(pin, { x: target.x + correction.dx, y: target.y + correction.dy });
+      return buildPinItem(pin, { x: target.x + correction.dx, y: target.y + correction.dy }, hideFromPlayers);
     });
     await OBR.scene.items.addItems(items);
     const skippedNote = skippedCount ? ` (${skippedCount} already placed, skipped)` : "";
@@ -776,6 +792,20 @@ document.getElementById("remove-all-pins-btn").addEventListener("click", async (
     setStatus("existing-status", `Couldn't remove pins: ${err.message}`, "bad");
   }
   btn.disabled = false;
+});
+
+// Remembered per-device (not synced) - same reasoning as every other
+// "how I like this tool set up" preference elsewhere in DCC Suite (e.g.
+// GM Notes' last-active-note): this is about this GM's own workflow, not
+// campaign data, so it doesn't belong in scene/room metadata. Wrapped in
+// try/catch since some browser contexts (private windows, blocked site
+// data) throw on localStorage access entirely.
+const HIDE_FROM_PLAYERS_STORAGE_KEY = "dcc-map-pins-hide-from-players";
+try {
+  document.getElementById("hide-from-players-checkbox").checked = localStorage.getItem(HIDE_FROM_PLAYERS_STORAGE_KEY) === "true";
+} catch (err) { /* default unchecked is fine */ }
+document.getElementById("hide-from-players-checkbox").addEventListener("change", (e) => {
+  try { localStorage.setItem(HIDE_FROM_PLAYERS_STORAGE_KEY, e.target.checked ? "true" : "false"); } catch (err) { /* not persisted this session, not fatal */ }
 });
 
 document.getElementById("map-image-select").addEventListener("change", () => {
