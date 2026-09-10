@@ -489,7 +489,8 @@ function buildPinItem(pin, position, hidden) {
     })
     .plainText(pin.id)
     .backgroundColor(levelColorFor(pin.level))
-    .pointerDirection("DOWN")
+    // Deliberately NO pointerDirection - see computeLabelAnchorCorrection's
+    // comment for why a directional pointer is what broke this.
     .layer("NOTE")
     // visible:false is a real, documented Owlbear behavior (not a custom
     // convention of this app) - transparent/dimmed for the GM, fully
@@ -500,20 +501,35 @@ function buildPinItem(pin, position, hidden) {
 }
 
 // Owlbear doesn't document exactly how a Label's `position` anchors
-// relative to its rendered box + pointer chrome (padding, font size, the
-// little pointerDirection tail) - reports of imported pins landing a
-// consistent amount off (see git history) point at this, not the image
-// math above (which getItemBounds already made exact). Rather than guess
-// at that undocumented formula, this drops ONE disposable probe label far
+// relative to its rendered box + padding/font chrome, so rather than guess
+// at that undocumented formula this drops ONE disposable probe label far
 // off the visible map, asks OBR where it actually rendered (getItemBounds
-// again - the same trick imageGeometry uses), and uses the gap between
-// the probe's target and its actual rendered center as a correction
-// applied to every real pin in this import batch. Off in a far corner
-// rather than near the real pins, so even the brief moment it exists on
-// the shared scene isn't visible to anyone looking at the map. Falls back
-// to no correction (plus a console warning) if the probe round-trip
-// itself fails for any reason - better to import slightly off than not
-// at all.
+// again - the same trick imageGeometry uses), and uses the gap between the
+// probe's target and its actual rendered center as a correction applied to
+// every real pin in this import batch. Off in a far corner rather than
+// near the real pins, so even the brief moment it exists on the shared
+// scene isn't visible to anyone looking at the map. Falls back to no
+// correction (plus a console warning) if the probe round-trip itself fails
+// for any reason - better to import slightly off than not at all.
+//
+// This used to also carry a pointerDirection("DOWN") tail on the probe's
+// real counterpart (buildPinItem) but NOT on the probe itself - two
+// mismatched shapes, so the measured correction never actually reflected
+// what a real pin renders as. Worse, Labels are screen-space scaled (fixed
+// PIXEL size regardless of zoom - see docs.owlbear.rodeo's own Label
+// reference), so a directional pointer's tail is a fixed pixel length that
+// converts to a DIFFERENT number of scene/grid units depending on the
+// viewport zoom at the moment getItemBounds() is queried - there is no
+// single scene-unit correction that holds at every zoom level for a
+// shape with an asymmetric tail. That combination (wrong shape, plus an
+// inherently zoom-dependent gap even with the right shape) is what made
+// pins land a consistent-looking amount off that also changed with zoom.
+// Dropping the pointer entirely (see buildPinItem) removes the asymmetric
+// chrome causing the zoom-dependent drift - a plain box's padding is
+// symmetric around `position`, so it grows/shrinks with zoom around a
+// fixed center rather than shifting that center. This probe now exists
+// only to catch any small remaining zoom-invariant gap (e.g. from padding
+// or corner rounding), not to fight a tail that no longer exists.
 const LABEL_ANCHOR_PROBE_POSITION = { x: -1000000, y: -1000000 };
 async function computeLabelAnchorCorrection() {
   let probeId = null;
