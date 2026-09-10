@@ -140,7 +140,7 @@
     <h1>Map Pins</h1>
     <button type="button" id="map-pins-close-btn" title="Close">✕</button>
   </div>
-  <div class="subtitle">Click directly on your map image below to drop numbered room-pin labels onto the current scene - no separate tool, no coordinates to copy/paste. (An already-placed JSON export from an older session still imports fine too.) Pins are real scene items other clients see immediately - right-click one to jump to its notes (once GM Notes has a matching heading).</div>
+  <div class="subtitle">Click directly on your map image below to drop numbered room-pin labels onto the current scene - no separate tool, no coordinates to copy/paste. (An already-placed JSON export from an older session still imports fine too.) Pins are real scene items other clients see immediately - click (select) one on the map and use the "Open Room Notes" icon that appears next to it to jump to its notes (once GM Notes has a matching heading).</div>
   <!-- This modal is a SEPARATE file from index.html, served from its own
        URL - index.html's own #build-stamp only confirms THAT file
        redeployed, not this one. Bumped by hand alongside it on every
@@ -503,9 +503,11 @@ function updateImportEnabled() {
 function buildPinItem(pin, position, hidden, diameter) {
   return buildShape()
     .position(position)
-    // Not rendered on the map (see the redesign comment above) but still
-    // shows up wherever OBR surfaces an item's own name - hovering it in
-    // the native scene, its right-click menu title, etc.
+    // Not rendered on the map (see the redesign comment above) - just the
+    // item's own name field, in case OBR surfaces it somewhere (its own
+    // selection UI, an outliner-style extension, etc). Room identification
+    // in practice happens via this modal's own pins list and the "Open
+    // Room Notes" icon that appears when you click (select) a pin.
     .name(pin.title || pin.id)
     .shapeType("CIRCLE")
     .width(diameter)
@@ -517,8 +519,9 @@ function buildPinItem(pin, position, hidden, diameter) {
     // along so a future import can tell two pins for the same room apart
     // by where they actually are - see existingPositionKeys above. The
     // room id/title show via this modal's own pins list and the map's
-    // right-click "Open Room Notes" menu (see overlay.html), not as
-    // on-map text - see the redesign comment above for why.
+    // click-to-select "Open Room Notes" icon (see overlay.html - Owlbear's
+    // contextMenu API triggers on selecting an item, not a right-click),
+    // not as on-map text - see the redesign comment above for why.
     .metadata({
       [ROOM_PIN_METADATA_KEY]: { doc: pin.doc, level: pin.level, id: pin.id, title: pin.title, x: pin.x, y: pin.y },
     })

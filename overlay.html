@@ -20,9 +20,11 @@ const DICE_ROLL_CHANNEL = "com.claude.monster-sheet/dice-roll";
 const DICE_MODAL_ID = "com.claude.monster-sheet/dice-modal";
 const DICE_MODAL_URL = "https://ostendpirate.github.io/Crawl-Bear-Classics/dice-modal.html";
 
-// Matches map-pins-modal.html's own copy of this key - room-pin labels
+// Matches map-pins-modal.html's own copy of this key - room-pin markers
 // created there carry it, this background page reads it back to offer a
-// right-click "Open Room Notes" jump on them.
+// click-to-select "Open Room Notes" jump on them (Owlbear's contextMenu
+// API shows its icon(s) when an item is SELECTED, not on right-click -
+// see docs.owlbear.rodeo's own Context Menu tutorial).
 const ROOM_PIN_METADATA_KEY = "com.claude.monster-sheet/room-pin";
 const GM_NOTES_MODAL_ID = "com.claude.monster-sheet/gm-notes-modal";
 const GM_NOTES_MODAL_URL = "https://ostendpirate.github.io/Crawl-Bear-Classics/gm-notes-modal.html";
@@ -75,9 +77,10 @@ OBR.onReady(() => {
 
   // GM Notes is GM-only (see index.html's refreshNotesTabVisibility) -
   // there's no server-side privacy in OBR's model to actually stop a
-  // player right-clicking a pin, so this checks the role itself before
-  // ever opening someone else's private notes, rather than relying on
-  // the context menu icon's own filter (which only matches item
+  // player selecting a pin and clicking this icon themselves, so this
+  // checks the role itself before ever opening someone else's private
+  // notes, rather than relying on the context menu icon's own filter
+  // (which only matches item
   // metadata, not player role).
   OBR.contextMenu.create({
     id: "com.claude.monster-sheet/open-room-pin",
