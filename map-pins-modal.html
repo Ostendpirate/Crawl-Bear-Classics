@@ -219,7 +219,7 @@
 </div>
 
 <script type="module">
-import OBR, { buildLabel } from "https://esm.sh/@owlbear-rodeo/sdk@2";
+import OBR, { buildShape } from "https://esm.sh/@owlbear-rodeo/sdk@2";
 
 // Must exactly match the id index.html's openMapPinsModal() uses to open
 // this same modal - OBR.modal.close needs it to know which modal to close,
@@ -238,6 +238,11 @@ const LEVEL_COLOR_PALETTE = [
   "#1c7a52", "#6b5b8a", "#1c6d7a", "#96701f", "#a83f2b",
   "#3d6b96", "#7a4f1c", "#5b8a6b", "#8a5b7a", "#4f5b8a",
 ];
+
+// A pin dot's diameter as a fraction of the scene's own grid DPI (see the
+// import handler) - proportionate on a tightly-drawn 70px grid or a
+// hi-res 280px one alike, rather than always the same fixed pixel size.
+const PIN_DIAMETER_RATIO = 0.35;
 
 let mapImages = [];
 // The room CATALOG - {doc, level, id, title}, no coordinates. What rooms
@@ -478,19 +483,45 @@ function updateImportEnabled() {
   document.getElementById("import-pins-btn").disabled = !(placedPins.length && mapImages.length);
 }
 
-function buildPinItem(pin, position, hidden) {
-  return buildLabel()
+// Pins used to be Owlbear Label items (a colored, text-bearing speech
+// bubble) - but Owlbear's own docs single Label out as "scaled in
+// screen-space", meaning it renders at a FIXED PIXEL size regardless of
+// map zoom, unlike every other item type. Whatever gap exists between a
+// Label's `position` and where it actually renders is therefore a fixed
+// PIXEL distance, which converts to a DIFFERENT number of scene/grid
+// units depending on the viewport zoom at the moment that gap gets
+// measured (see computeShapeAnchorCorrection below) or later viewed at -
+// there is no single scene-unit correction that can hold at every zoom
+// level for a screen-space item. That's what made pins land a
+// consistent-looking amount off that also changed with the map's zoom.
+// A Shape (plain circle) is NOT screen-space scaled - it's sized in real
+// scene/world units like any ordinary token, so its position-to-render
+// relationship is a fixed geometric fact independent of zoom. Diameter is
+// a fraction of the scene's own grid DPI (see the import handler) rather
+// than a hardcoded pixel count, so it looks proportionate on any map's
+// grid resolution.
+function buildPinItem(pin, position, hidden, diameter) {
+  return buildShape()
     .position(position)
+    // Not rendered on the map (see the redesign comment above) but still
+    // shows up wherever OBR surfaces an item's own name - hovering it in
+    // the native scene, its right-click menu title, etc.
+    .name(pin.title || pin.id)
+    .shapeType("CIRCLE")
+    .width(diameter)
+    .height(diameter)
+    .fillColor(levelColorFor(pin.level))
+    .strokeColor("#000000")
+    .strokeWidth(2)
     // x/y (the original 0-100 percentages, not the scene position) ride
     // along so a future import can tell two pins for the same room apart
-    // by where they actually are - see existingPositionKeys above.
+    // by where they actually are - see existingPositionKeys above. The
+    // room id/title show via this modal's own pins list and the map's
+    // right-click "Open Room Notes" menu (see overlay.html), not as
+    // on-map text - see the redesign comment above for why.
     .metadata({
       [ROOM_PIN_METADATA_KEY]: { doc: pin.doc, level: pin.level, id: pin.id, title: pin.title, x: pin.x, y: pin.y },
     })
-    .plainText(pin.id)
-    .backgroundColor(levelColorFor(pin.level))
-    // Deliberately NO pointerDirection - see computeLabelAnchorCorrection's
-    // comment for why a directional pointer is what broke this.
     .layer("NOTE")
     // visible:false is a real, documented Owlbear behavior (not a custom
     // convention of this app) - transparent/dimmed for the GM, fully
@@ -500,43 +531,33 @@ function buildPinItem(pin, position, hidden) {
     .build();
 }
 
-// Owlbear doesn't document exactly how a Label's `position` anchors
-// relative to its rendered box + padding/font chrome, so rather than guess
-// at that undocumented formula this drops ONE disposable probe label far
-// off the visible map, asks OBR where it actually rendered (getItemBounds
-// again - the same trick imageGeometry uses), and uses the gap between the
-// probe's target and its actual rendered center as a correction applied to
-// every real pin in this import batch. Off in a far corner rather than
-// near the real pins, so even the brief moment it exists on the shared
-// scene isn't visible to anyone looking at the map. Falls back to no
-// correction (plus a console warning) if the probe round-trip itself fails
-// for any reason - better to import slightly off than not at all.
-//
-// This used to also carry a pointerDirection("DOWN") tail on the probe's
-// real counterpart (buildPinItem) but NOT on the probe itself - two
-// mismatched shapes, so the measured correction never actually reflected
-// what a real pin renders as. Worse, Labels are screen-space scaled (fixed
-// PIXEL size regardless of zoom - see docs.owlbear.rodeo's own Label
-// reference), so a directional pointer's tail is a fixed pixel length that
-// converts to a DIFFERENT number of scene/grid units depending on the
-// viewport zoom at the moment getItemBounds() is queried - there is no
-// single scene-unit correction that holds at every zoom level for a
-// shape with an asymmetric tail. That combination (wrong shape, plus an
-// inherently zoom-dependent gap even with the right shape) is what made
-// pins land a consistent-looking amount off that also changed with zoom.
-// Dropping the pointer entirely (see buildPinItem) removes the asymmetric
-// chrome causing the zoom-dependent drift - a plain box's padding is
-// symmetric around `position`, so it grows/shrinks with zoom around a
-// fixed center rather than shifting that center. This probe now exists
-// only to catch any small remaining zoom-invariant gap (e.g. from padding
-// or corner rounding), not to fight a tail that no longer exists.
-const LABEL_ANCHOR_PROBE_POSITION = { x: -1000000, y: -1000000 };
-async function computeLabelAnchorCorrection() {
+// Owlbear doesn't document exactly how a Shape's `position` anchors
+// relative to its rendered bounds, so rather than guess at that formula
+// this drops ONE disposable probe circle far off the visible map, asks
+// OBR where it actually rendered (getItemBounds again - the same trick
+// imageGeometry uses), and uses the gap between the probe's target and
+// its actual rendered center as a correction applied to every real pin in
+// this import batch. Built with the SAME shapeType/diameter as the real
+// pins (see buildPinItem's own comment on why a past version's probe/real
+// shape mismatch mattered) - a circle should anchor at its own center
+// regardless of size, but matching costs nothing and rules out size-
+// dependent surprises. Off in a far corner rather than near the real
+// pins, so even the brief moment it exists on the shared scene isn't
+// visible to anyone looking at the map. Falls back to no correction (plus
+// a console warning) if the probe round-trip itself fails for any reason
+// - better to import slightly off than not at all. Unlike the old
+// Label-based version of this probe, a Shape isn't screen-space scaled,
+// so whatever gap this measures is a genuine, zoom-invariant scene-unit
+// constant - it stays correct at any map zoom once computed.
+const SHAPE_ANCHOR_PROBE_POSITION = { x: -1000000, y: -1000000 };
+async function computeShapeAnchorCorrection(diameter) {
   let probeId = null;
   try {
-    const probe = buildLabel()
-      .position(LABEL_ANCHOR_PROBE_POSITION)
-      .plainText("?")
+    const probe = buildShape()
+      .position(SHAPE_ANCHOR_PROBE_POSITION)
+      .shapeType("CIRCLE")
+      .width(diameter)
+      .height(diameter)
       .metadata({ [ROOM_PIN_METADATA_KEY]: { isTest: true } })
       .layer("NOTE")
       .visible(false) // belt-and-suspenders on top of being off in the void - see the cleanup in the finally block below
@@ -546,11 +567,11 @@ async function computeLabelAnchorCorrection() {
     const bounds = await OBR.scene.items.getItemBounds([probeId]);
     const actualCenter = { x: (bounds.min.x + bounds.max.x) / 2, y: (bounds.min.y + bounds.max.y) / 2 };
     return {
-      dx: LABEL_ANCHOR_PROBE_POSITION.x - actualCenter.x,
-      dy: LABEL_ANCHOR_PROBE_POSITION.y - actualCenter.y,
+      dx: SHAPE_ANCHOR_PROBE_POSITION.x - actualCenter.x,
+      dy: SHAPE_ANCHOR_PROBE_POSITION.y - actualCenter.y,
     };
   } catch (err) {
-    console.error("DCC map pins: label anchor probe failed - importing without a position correction", err);
+    console.error("DCC map pins: shape anchor probe failed - importing without a position correction", err);
     return { dx: 0, dy: 0 };
   } finally {
     if (probeId) await OBR.scene.items.deleteItems([probeId]).catch(() => {});
@@ -757,11 +778,16 @@ document.getElementById("import-pins-btn").addEventListener("click", async () =>
       return;
     }
     setStatus("import-status", "Calibrating pin position...", "");
-    const correction = await computeLabelAnchorCorrection();
+    // Sized off the scene's own grid DPI (not a hardcoded pixel count) so
+    // the dot looks proportionate whether this map's grid is 70px or
+    // 280px per cell - see buildPinItem's own comment.
+    const dpi = await OBR.scene.grid.getDpi();
+    const diameter = Math.max(20, dpi * PIN_DIAMETER_RATIO);
+    const correction = await computeShapeAnchorCorrection(diameter);
     const hideFromPlayers = document.getElementById("hide-from-players-checkbox").checked;
     const items = toCreate.map(pin => {
       const target = pinScenePosition(pin, geometry);
-      return buildPinItem(pin, { x: target.x + correction.dx, y: target.y + correction.dy }, hideFromPlayers);
+      return buildPinItem(pin, { x: target.x + correction.dx, y: target.y + correction.dy }, hideFromPlayers, diameter);
     });
     await OBR.scene.items.addItems(items);
     const skippedNote = skippedCount ? ` (${skippedCount} already placed, skipped)` : "";
