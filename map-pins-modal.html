@@ -140,7 +140,7 @@
        URL - index.html's own #build-stamp only confirms THAT file
        redeployed, not this one. Bumped by hand alongside it on every
        meaningful commit that touches this file (see CLAUDE.md). -->
-  <div class="build-stamp" id="map-pins-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">Map Pins build 2026-09-09 16:02</div>
+  <div class="build-stamp" id="map-pins-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">Map Pins build 2026-09-10 09:32</div>
 
   <fieldset>
     <legend>1. Target map image</legend>
@@ -181,7 +181,7 @@
         <span class="count-badge" id="placed-count-badge">0 / 0 placed</span>
       </div>
     </div>
-    <div class="subtitle" style="margin: 6px 0;">Click anywhere on the map to drop a pin for the selected room - it advances to the next pending room automatically. Drag an existing pin to nudge it, or click it to unplace it and pick again.</div>
+    <div class="subtitle" style="margin: 6px 0;">Click anywhere on the map to drop a pin for the selected room - it advances to the next empty room automatically. Drag an existing pin to nudge it, or click it to remove just that pin. A room that genuinely needs more than one marker (two entrances, shows up twice on the map, etc) can be picked again from the "already placed" group below to add another.</div>
     <div class="status bad" id="rotation-warning" style="display:none;"></div>
     <div class="map-preview-wrap" id="map-preview-wrap">
       <img class="map-preview-img" id="map-preview-img" alt="Selected map" />
@@ -192,7 +192,7 @@
 
   <fieldset>
     <legend>4. Import</legend>
-    <div class="subtitle" style="margin-bottom:6px;">Creates one label per placed pin, skipping any pin whose doc+id is already placed on this scene (use Remove All Pins below first if you want a clean re-import).</div>
+    <div class="subtitle" style="margin-bottom:6px;">Creates one label per placed pin, skipping any that already exist at that exact spot on this scene - a second pin for the same room at a different spot still imports (use Remove All Pins below first if you want a clean re-import instead).</div>
     <div class="btn-row">
       <button type="button" id="import-pins-btn" class="btn-primary" disabled>Import Pins</button>
     </div>
@@ -231,13 +231,22 @@ const LEVEL_COLOR_PALETTE = [
 ];
 
 let mapImages = [];
-// Each entry is {doc, level, id, title, x, y} - x/y are null until placed,
-// either by clicking on the map preview below or by loading a JSON export
-// that already had coordinates baked in. This one array is both the "rooms
-// list" and the "pins list" depending on how far along each entry is.
+// The room CATALOG - {doc, level, id, title}, no coordinates. What rooms
+// exist, independent of how many pins (0, 1, or several) each has so far.
 let loadedRooms = [];
+// One entry PER PIN INSTANCE - {pinId, doc, level, id, title, x, y}. A room
+// can have zero, one, or several pins here (see pinCountFor) - a genuinely
+// multi-entrance room, or one that shows up twice on the map, isn't
+// forced into a single marker the way the first version of this modal did.
+let placedPins = [];
 let levelColors = new Map();
-let existingPinKeys = new Set(); // "doc id" for pins already on the scene
+// Position-aware: a scene item's own placement (see buildPinItem) - lets
+// two distinct pins for the same room both import, while still catching a
+// re-import of the exact same pin. Legacy items from before this existed
+// have no x/y in their metadata, so they fall back to blocking on doc+id
+// alone (see refreshExistingPins) rather than risk a silent duplicate.
+let existingPositionKeys = new Set();
+let existingLegacyRoomKeys = new Set();
 let existingPinItemIds = [];
 
 function statusEl(id) { return document.getElementById(id); }
@@ -247,9 +256,11 @@ function setStatus(id, message, kind) {
   el.className = "status" + (kind ? ` ${kind}` : "");
 }
 
-function pinKey(room) { return `${room.doc} ${room.id}`; }
-function isPlaced(room) { return typeof room.x === "number" && typeof room.y === "number"; }
+function pinKey(entity) { return `${entity.doc} ${entity.id}`; }
+function positionKey(pin) { return `${pinKey(pin)} ${pin.x.toFixed(1)} ${pin.y.toFixed(1)}`; }
+function pinCountFor(room) { return placedPins.filter(p => pinKey(p) === pinKey(room)).length; }
 function clamp(n, min, max) { return Math.min(max, Math.max(min, n)); }
+function genPinId() { return (crypto.randomUUID ? crypto.randomUUID() : `pin-${Date.now()}-${Math.random().toString(36).slice(2)}`); }
 
 function levelColorFor(level) {
   if (!levelColors.has(level)) {
@@ -362,16 +373,17 @@ function renderPinsPreview() {
   if (!loadedRooms.length) { list.style.display = "none"; return; }
   list.style.display = "block";
   loadedRooms.forEach(room => {
+    const count = pinCountFor(room);
     const li = document.createElement("li");
     const dot = document.createElement("span");
-    dot.className = "pin-placed-dot" + (isPlaced(room) ? " placed" : "");
-    dot.title = isPlaced(room) ? "Placed" : "Not placed yet";
+    dot.className = "pin-placed-dot" + (count ? " placed" : "");
+    dot.title = count ? `${count} pin${count === 1 ? "" : "s"} placed` : "Not placed yet";
     const swatch = document.createElement("span");
     swatch.className = "swatch";
     swatch.style.background = levelColorFor(room.level);
     const idSpan = document.createElement("span");
     idSpan.className = "pin-id";
-    idSpan.textContent = room.id;
+    idSpan.textContent = room.id + (count > 1 ? ` ×${count}` : "");
     const titleSpan = document.createElement("span");
     titleSpan.className = "pin-title";
     titleSpan.textContent = room.title || room.level;
@@ -390,18 +402,30 @@ function loadRoomsFromText(raw) {
       setStatus("pins-load-status", "No usable rooms found - expected objects with at least an id.", "bad");
       return;
     }
-    // Merges by doc+id rather than replacing outright, so loading a second
-    // file (or reloading the same one) doesn't throw away pins already
-    // placed by clicking - a room already known keeps its current x/y
-    // unless the newly-loaded entry itself carries coordinates.
+    // Merges the CATALOG by doc+id rather than replacing outright, so
+    // loading a second file (or reloading the same one) doesn't lose
+    // anything - a room already known just gets its level/title refreshed.
     const byKey = new Map(loadedRooms.map(r => [pinKey(r), r]));
-    valid.forEach(room => {
+    let addedPins = 0;
+    valid.forEach(entry => {
+      const { x, y, ...room } = entry;
       const existing = byKey.get(pinKey(room));
-      if (existing && !isPlaced(room)) {
+      if (existing) {
         existing.level = room.level;
         existing.title = room.title;
       } else {
         byKey.set(pinKey(room), room);
+      }
+      // A legacy JSON export that already has coordinates seeds a pin
+      // instance too - skipped only if an identical one (same room, same
+      // spot) is already loaded, so reloading the same file twice doesn't
+      // pile up duplicate markers.
+      if (typeof x === "number" && typeof y === "number") {
+        const candidate = { pinId: genPinId(), doc: room.doc, level: room.level, id: room.id, title: room.title, x, y };
+        if (!placedPins.some(p => positionKey(p) === positionKey(candidate))) {
+          placedPins.push(candidate);
+          addedPins++;
+        }
       }
     });
     loadedRooms = Array.from(byKey.values());
@@ -409,8 +433,8 @@ function loadRoomsFromText(raw) {
     renderPinsPreview();
     renderMapPreview();
     const skippedNote = skipped ? ` (${skipped} skipped - missing id)` : "";
-    const placedCount = loadedRooms.filter(isPlaced).length;
-    setStatus("pins-load-status", `Loaded ${valid.length} room${valid.length === 1 ? "" : "s"}${skippedNote} - ${placedCount} already placed.`, "good");
+    const pinsNote = addedPins ? ` (${addedPins} pin${addedPins === 1 ? "" : "s"} already placed from coordinates in the file)` : "";
+    setStatus("pins-load-status", `Loaded ${valid.length} room${valid.length === 1 ? "" : "s"}${skippedNote}${pinsNote}.`, "good");
   } catch (err) {
     setStatus("pins-load-status", `Couldn't parse that as JSON: ${err.message}`, "bad");
     return;
@@ -442,48 +466,67 @@ document.getElementById("pins-json-file").addEventListener("change", (e) => {
 // --- Map preview / click-to-place ------------------------------------
 
 function updateImportEnabled() {
-  document.getElementById("import-pins-btn").disabled = !(loadedRooms.some(isPlaced) && mapImages.length);
+  document.getElementById("import-pins-btn").disabled = !(placedPins.length && mapImages.length);
 }
 
 function buildPinItem(pin, position) {
   return buildLabel()
     .position(position)
+    // x/y (the original 0-100 percentages, not the scene position) ride
+    // along so a future import can tell two pins for the same room apart
+    // by where they actually are - see existingPositionKeys above.
+    .metadata({
+      [ROOM_PIN_METADATA_KEY]: { doc: pin.doc, level: pin.level, id: pin.id, title: pin.title, x: pin.x, y: pin.y },
+    })
     .plainText(pin.id)
     .backgroundColor(levelColorFor(pin.level))
     .pointerDirection("DOWN")
-    .metadata({
-      [ROOM_PIN_METADATA_KEY]: { doc: pin.doc, level: pin.level, id: pin.id, title: pin.title },
-    })
     .layer("NOTE")
     .build();
 }
 
-// Rebuilds the "which room gets the next click" dropdown from whatever in
-// loadedRooms isn't placed yet, and the X/Y placed-count badge next to it.
-// Re-run after every load/place/move/unplace so both always match reality.
+// Rebuilds the "which room gets the next click" dropdown and the X/Y
+// placed-count badge. Rooms with no pin yet come first (so the default
+// selection - and auto-advance after a placement - naturally walks
+// through them in order); rooms that already have at least one pin are
+// grouped below for the deliberate case of adding a second marker to a
+// room that genuinely needs more than one (two entrances, a room that
+// shows up twice on the map, etc). Re-run after every
+// load/place/move/unplace so this always matches reality.
 function renderPendingRoomSelect() {
   const select = document.getElementById("pending-room-select");
   const prevValue = select.value;
-  const pending = loadedRooms.filter(r => !isPlaced(r));
-  const placedCount = loadedRooms.length - pending.length;
+  const empty = loadedRooms.filter(r => pinCountFor(r) === 0);
+  const withPins = loadedRooms.filter(r => pinCountFor(r) > 0);
+  const placedCount = withPins.length;
   document.getElementById("placed-count-badge").textContent = `${placedCount} / ${loadedRooms.length} placed`;
   select.innerHTML = "";
-  if (!pending.length) {
-    select.appendChild(new Option(loadedRooms.length ? "All rooms placed" : "Load rooms above first", ""));
+  if (!loadedRooms.length) {
+    select.appendChild(new Option("Load rooms above first", ""));
     select.disabled = true;
     return;
   }
   select.disabled = false;
-  pending.forEach(room => {
+  empty.forEach(room => {
     select.appendChild(new Option(`${room.id}${room.title ? " – " + room.title : ""} (${room.level})`, pinKey(room)));
   });
-  if (prevValue && pending.some(r => pinKey(r) === prevValue)) select.value = prevValue;
+  if (withPins.length) {
+    const group = document.createElement("optgroup");
+    group.label = "Already placed - pick again to add another pin";
+    withPins.forEach(room => {
+      const count = pinCountFor(room);
+      group.appendChild(new Option(`${room.id}${room.title ? " – " + room.title : ""} (${count} pin${count === 1 ? "" : "s"})`, pinKey(room)));
+    });
+    select.appendChild(group);
+  }
+  if (prevValue && loadedRooms.some(r => pinKey(r) === prevValue)) select.value = prevValue;
 }
 
-// Draws the selected map image plus a marker per already-placed room.
-// Runs after every image selection, room load, and placement/move/removal
-// so the preview always matches loadedRooms exactly - it's the single
-// source of truth here, not a cache of it.
+// Draws the selected map image plus a marker per placed pin (not per room
+// - a room with two pins gets two markers). Runs after every image
+// selection, room load, and placement/move/removal so the preview always
+// matches placedPins exactly - it's the single source of truth here, not
+// a cache of it.
 function renderMapPreview() {
   const wrap = document.getElementById("map-preview-wrap");
   const img = document.getElementById("map-preview-img");
@@ -502,25 +545,26 @@ function renderMapPreview() {
 
   const pinsLayer = document.getElementById("map-preview-pins");
   pinsLayer.innerHTML = "";
-  loadedRooms.filter(isPlaced).forEach(room => {
+  placedPins.forEach(pin => {
     const marker = document.createElement("div");
     marker.className = "map-pin-marker";
-    marker.style.left = `${room.x}%`;
-    marker.style.top = `${room.y}%`;
-    marker.style.background = levelColorFor(room.level);
-    marker.title = `${room.id}${room.title ? " – " + room.title : ""} - drag to move, click to unplace`;
-    attachMarkerDragHandlers(marker, room);
+    marker.style.left = `${pin.x}%`;
+    marker.style.top = `${pin.y}%`;
+    marker.style.background = levelColorFor(pin.level);
+    marker.title = `${pin.id}${pin.title ? " – " + pin.title : ""} - drag to move, click to remove this pin`;
+    attachMarkerDragHandlers(marker, pin);
     pinsLayer.appendChild(marker);
   });
   renderPendingRoomSelect();
 }
 
 // Single-finger drag-or-click disambiguation: a plain click (no meaningful
-// mouse movement between down and up) unplaces the room back to pending;
-// an actual drag updates its x/y instead. Listens on `window` (not the
-// marker) for move/up so a fast drag that outruns the marker's own small
-// hit area doesn't drop the gesture.
-function attachMarkerDragHandlers(marker, room) {
+// mouse movement between down and up) removes just THIS pin instance; an
+// actual drag updates its x/y instead. A room with other pins keeps them -
+// only the one marker actually clicked is affected. Listens on `window`
+// (not the marker) for move/up so a fast drag that outruns the marker's
+// own small hit area doesn't drop the gesture.
+function attachMarkerDragHandlers(marker, pin) {
   marker.addEventListener("mousedown", (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -536,23 +580,23 @@ function attachMarkerDragHandlers(marker, room) {
       const yPct = clamp(((ev.clientY - rect.top) / rect.height) * 100, 0, 100);
       marker.style.left = `${xPct}%`;
       marker.style.top = `${yPct}%`;
-      room.x = xPct;
-      room.y = yPct;
+      pin.x = xPct;
+      pin.y = yPct;
     }
     function onUp() {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
       if (moved) {
         renderPinsPreview();
+        renderPendingRoomSelect();
         updateImportEnabled();
-        setStatus("place-status", `Moved ${room.id}.`, "good");
+        setStatus("place-status", `Moved ${pin.id}.`, "good");
       } else {
-        room.x = null;
-        room.y = null;
+        placedPins = placedPins.filter(p => p.pinId !== pin.pinId);
         renderMapPreview();
         renderPinsPreview();
         updateImportEnabled();
-        setStatus("place-status", `Unplaced ${room.id} - pick it again above to re-place.`, "");
+        setStatus("place-status", `Removed a pin for ${pin.id} - pick it again above to re-place.`, "");
       }
     }
     window.addEventListener("mousemove", onMove);
@@ -564,17 +608,37 @@ document.getElementById("map-preview-img").addEventListener("click", (e) => {
   const select = document.getElementById("pending-room-select");
   const key = select.value;
   if (!key) {
-    setStatus("place-status", "Load rooms above first, or every loaded room is already placed.", "bad");
+    setStatus("place-status", "Load rooms above first.", "bad");
     return;
   }
   const room = loadedRooms.find(r => pinKey(r) === key);
   if (!room) return;
   const rect = e.currentTarget.getBoundingClientRect();
-  room.x = clamp(((e.clientX - rect.left) / rect.width) * 100, 0, 100);
-  room.y = clamp(((e.clientY - rect.top) / rect.height) * 100, 0, 100);
+  const pin = {
+    pinId: genPinId(),
+    doc: room.doc,
+    level: room.level,
+    id: room.id,
+    title: room.title,
+    x: clamp(((e.clientX - rect.left) / rect.width) * 100, 0, 100),
+    y: clamp(((e.clientY - rect.top) / rect.height) * 100, 0, 100),
+  };
+  placedPins.push(pin);
+  // Auto-advance to the next EMPTY room so the common one-pin-per-room
+  // flow is just click-click-click - but if none are left empty, keep the
+  // current selection so a deliberate extra pin for the same room doesn't
+  // require re-picking it from the dropdown every time.
+  const stillEmpty = loadedRooms.some(r => pinCountFor(r) === 0 && pinKey(r) !== key);
   renderMapPreview();
   renderPinsPreview();
   updateImportEnabled();
+  if (stillEmpty) {
+    const select2 = document.getElementById("pending-room-select");
+    const nextEmpty = loadedRooms.find(r => pinCountFor(r) === 0);
+    if (nextEmpty) select2.value = pinKey(nextEmpty);
+  } else {
+    document.getElementById("pending-room-select").value = key;
+  }
   setStatus("place-status", `Placed ${room.id}${room.title ? " – " + room.title : ""}.`, "good");
 });
 
@@ -585,10 +649,16 @@ async function refreshExistingPins() {
     const items = await OBR.scene.items.getItems();
     const pinItems = items.filter(item => item.metadata && item.metadata[ROOM_PIN_METADATA_KEY] && !item.metadata[ROOM_PIN_METADATA_KEY].isTest);
     existingPinItemIds = pinItems.map(i => i.id);
-    existingPinKeys = new Set(pinItems.map(i => {
-      const meta = i.metadata[ROOM_PIN_METADATA_KEY];
-      return `${meta.doc} ${meta.id}`;
-    }));
+    existingPositionKeys = new Set();
+    existingLegacyRoomKeys = new Set();
+    pinItems.forEach(item => {
+      const meta = item.metadata[ROOM_PIN_METADATA_KEY];
+      if (typeof meta.x === "number" && typeof meta.y === "number") {
+        existingPositionKeys.add(positionKey(meta));
+      } else {
+        existingLegacyRoomKeys.add(pinKey(meta));
+      }
+    });
     document.getElementById("existing-pin-count").textContent = String(pinItems.length);
   } catch (err) {
     console.error("DCC map pins: failed to refresh existing pins", err);
@@ -598,16 +668,18 @@ async function refreshExistingPins() {
 
 document.getElementById("import-pins-btn").addEventListener("click", async () => {
   const image = selectedMapImage();
-  const placedRooms = loadedRooms.filter(isPlaced);
   if (!image) { setStatus("import-status", "Pick a map image first.", "bad"); return; }
-  if (!placedRooms.length) { setStatus("import-status", "Place at least one pin on the map first.", "bad"); return; }
+  if (!placedPins.length) { setStatus("import-status", "Place at least one pin on the map first.", "bad"); return; }
   const btn = document.getElementById("import-pins-btn");
   btn.disabled = true;
   try {
     await refreshExistingPins();
     const geometry = await imageGeometry(image);
-    const toCreate = placedRooms.filter(pin => !existingPinKeys.has(pinKey(pin)));
-    const skippedCount = placedRooms.length - toCreate.length;
+    // Legacy items (placed before pins carried x/y in their own metadata)
+    // block on doc+id alone; newer ones are position-aware so a second,
+    // genuinely different pin for the same room still imports.
+    const toCreate = placedPins.filter(pin => !existingPositionKeys.has(positionKey(pin)) && !existingLegacyRoomKeys.has(pinKey(pin)));
+    const skippedCount = placedPins.length - toCreate.length;
     if (!toCreate.length) {
       setStatus("import-status", "Every placed pin is already on this scene.", "");
       return;
