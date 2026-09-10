@@ -145,7 +145,7 @@
        URL - index.html's own #build-stamp only confirms THAT file
        redeployed, not this one. Bumped by hand alongside it on every
        meaningful commit that touches this file (see CLAUDE.md). -->
-  <div class="build-stamp" id="map-pins-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">Map Pins build 2026-09-10 10:25</div>
+  <div class="build-stamp" id="map-pins-build-stamp" title="If this doesn't match index.html's own build stamp (and you just pushed), Owlbear Rodeo or GitHub Pages may still be serving a cached copy of THIS file specifically - try closing this modal, reopening it, and if that doesn't help, fully reloading the Owlbear tab.">Map Pins build 2026-09-10 10:27</div>
 
   <fieldset>
     <legend>1. Target map image</legend>
@@ -199,7 +199,7 @@
     <legend>4. Import</legend>
     <div class="subtitle" style="margin-bottom:6px;">Creates one label per placed pin, skipping any that already exist at that exact spot on this scene - a second pin for the same room at a different spot still imports (use Remove All Pins below first if you want a clean re-import instead).</div>
     <label class="checkbox-row">
-      <input type="checkbox" id="hide-from-players-checkbox" />
+      <input type="checkbox" id="hide-from-players-checkbox" checked />
       <span>Hide pins from players (GM-only - you'll still see them, dimmed)</span>
     </label>
     <div class="btn-row">
@@ -800,10 +800,16 @@ document.getElementById("remove-all-pins-btn").addEventListener("click", async (
 // campaign data, so it doesn't belong in scene/room metadata. Wrapped in
 // try/catch since some browser contexts (private windows, blocked site
 // data) throw on localStorage access entirely.
+//
+// Defaults to CHECKED (hidden) - the HTML's own `checked` attribute
+// already covers that for a first-ever use where nothing's stored yet, so
+// this only needs to override it to false on an explicit "false" from a
+// GM who's chosen to leave pins visible - anything else (no stored value,
+// or "true") leaves the checked default alone.
 const HIDE_FROM_PLAYERS_STORAGE_KEY = "dcc-map-pins-hide-from-players";
 try {
-  document.getElementById("hide-from-players-checkbox").checked = localStorage.getItem(HIDE_FROM_PLAYERS_STORAGE_KEY) === "true";
-} catch (err) { /* default unchecked is fine */ }
+  document.getElementById("hide-from-players-checkbox").checked = localStorage.getItem(HIDE_FROM_PLAYERS_STORAGE_KEY) !== "false";
+} catch (err) { /* default checked (hidden) is fine */ }
 document.getElementById("hide-from-players-checkbox").addEventListener("change", (e) => {
   try { localStorage.setItem(HIDE_FROM_PLAYERS_STORAGE_KEY, e.target.checked ? "true" : "false"); } catch (err) { /* not persisted this session, not fatal */ }
 });
