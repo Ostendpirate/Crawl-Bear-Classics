@@ -219,7 +219,7 @@
 </div>
 
 <script type="module">
-import OBR, { buildShape } from "https://esm.sh/@owlbear-rodeo/sdk@2";
+import OBR, { buildShape, buildLabel } from "https://esm.sh/@owlbear-rodeo/sdk@2";
 
 // Must exactly match the id index.html's openMapPinsModal() uses to open
 // this same modal - OBR.modal.close needs it to know which modal to close,
@@ -262,6 +262,11 @@ let levelColors = new Map();
 let existingPositionKeys = new Set();
 let existingLegacyRoomKeys = new Set();
 let existingPinItemIds = [];
+// A room's dot + its cosmetic label (see buildPinLabelItem) are both
+// scene items in existingPinItemIds, but only the dot should ever be
+// counted as "a pin" in status text - this tracks that room-level count
+// separately so Remove All Pins can report it honestly.
+let existingMarkerCount = 0;
 
 function statusEl(id) { return document.getElementById(id); }
 function setStatus(id, message, kind) {
@@ -517,11 +522,12 @@ function buildPinItem(pin, position, hidden, diameter) {
     .strokeWidth(2)
     // x/y (the original 0-100 percentages, not the scene position) ride
     // along so a future import can tell two pins for the same room apart
-    // by where they actually are - see existingPositionKeys above. The
-    // room id/title show via this modal's own pins list and the map's
-    // click-to-select "Open Room Notes" icon (see overlay.html - Owlbear's
-    // contextMenu API triggers on selecting an item, not a right-click),
-    // not as on-map text - see the redesign comment above for why.
+    // by where they actually are - see existingPositionKeys above. No
+    // `role` field here (see buildPinLabelItem's own metadata) - that's
+    // what lets refreshExistingPins tell "this is the precision marker,
+    // count/dedup against it" apart from its purely-cosmetic label, and
+    // also what makes an already-imported pin from before labels existed
+    // (no `role` at all either) keep being read as a marker.
     .metadata({
       [ROOM_PIN_METADATA_KEY]: { doc: pin.doc, level: pin.level, id: pin.id, title: pin.title, x: pin.x, y: pin.y },
     })
@@ -530,6 +536,38 @@ function buildPinItem(pin, position, hidden, diameter) {
     // convention of this app) - transparent/dimmed for the GM, fully
     // invisible to players, same as hiding any other image/token. See the
     // "Hide from players" checkbox above.
+    .visible(!hidden)
+    .build();
+}
+
+// A small, PURELY COSMETIC text tag floating just above each pin dot, so
+// a room is identifiable at a glance without clicking it - Owlbear's
+// extension API has no passive "hovering over an item" event on the
+// default select tool (the only hover-like callback, onToolMove, only
+// fires while a custom tool of this extension's own is the ACTIVE tool -
+// not the normal pointer/select tool the GM already has active), so a
+// hover tooltip isn't achievable here; this on-map label is the practical
+// alternative. Deliberately a SEPARATE item from the dot rather than
+// going back to a single Label-as-marker (see buildPinItem's own comment
+// on why that broke positioning) - this one's position is never read back
+// or corrected for, so its being a screen-space-scaled Label (drifting a
+// pixel or two with zoom relative to the dot) is harmless cosmetic jitter
+// instead of a precision bug.
+function buildPinLabelItem(pin, position, hidden) {
+  return buildLabel()
+    .position(position)
+    .plainText(pin.id)
+    .backgroundColor(levelColorFor(pin.level))
+    .layer("NOTE")
+    // `role: "label"` is the ONLY difference from the marker's own
+    // metadata shape (see buildPinItem) - refreshExistingPins uses it to
+    // exclude this item from the pin count and from positionKey/pinKey
+    // dedup (which care about one entry per ROOM, not per scene item),
+    // while still including it in existingPinItemIds so "Remove All Pins"
+    // deletes both the dot and its label together.
+    .metadata({
+      [ROOM_PIN_METADATA_KEY]: { doc: pin.doc, level: pin.level, id: pin.id, title: pin.title, x: pin.x, y: pin.y, role: "label" },
+    })
     .visible(!hidden)
     .build();
 }
@@ -744,10 +782,18 @@ async function refreshExistingPins() {
   try {
     const items = await OBR.scene.items.getItems();
     const pinItems = items.filter(item => item.metadata && item.metadata[ROOM_PIN_METADATA_KEY] && !item.metadata[ROOM_PIN_METADATA_KEY].isTest);
+    // Every scene item carrying this metadata gets deleted together by
+    // Remove All Pins - marker AND its cosmetic label alike (see
+    // buildPinLabelItem) - so this stays unfiltered.
     existingPinItemIds = pinItems.map(i => i.id);
+    // Everything below is about counting/deduping distinct ROOMS, not
+    // scene items - a label carries the exact same doc/id/x/y as its own
+    // marker (see buildPinLabelItem), so without this filter every pin
+    // would count and dedupe-key itself twice.
+    const markerItems = pinItems.filter(item => item.metadata[ROOM_PIN_METADATA_KEY].role !== "label");
     existingPositionKeys = new Set();
     existingLegacyRoomKeys = new Set();
-    pinItems.forEach(item => {
+    markerItems.forEach(item => {
       const meta = item.metadata[ROOM_PIN_METADATA_KEY];
       if (typeof meta.x === "number" && typeof meta.y === "number") {
         existingPositionKeys.add(positionKey(meta));
@@ -755,7 +801,8 @@ async function refreshExistingPins() {
         existingLegacyRoomKeys.add(pinKey(meta));
       }
     });
-    document.getElementById("existing-pin-count").textContent = String(pinItems.length);
+    existingMarkerCount = markerItems.length;
+    document.getElementById("existing-pin-count").textContent = String(existingMarkerCount);
   } catch (err) {
     console.error("DCC map pins: failed to refresh existing pins", err);
     setStatus("existing-status", `Couldn't read scene items: ${err.message}`, "bad");
@@ -788,9 +835,19 @@ document.getElementById("import-pins-btn").addEventListener("click", async () =>
     const diameter = Math.max(20, dpi * PIN_DIAMETER_RATIO);
     const correction = await computeShapeAnchorCorrection(diameter);
     const hideFromPlayers = document.getElementById("hide-from-players-checkbox").checked;
-    const items = toCreate.map(pin => {
+    // Two items per pin: the dot (precisely positioned, see buildPinItem)
+    // and its floating label (see buildPinLabelItem) - NOT run through
+    // `correction`, which was calibrated for a Shape's own anchor
+    // geometry and means nothing for a Label's different, screen-space
+    // one; the label's position is never precision-critical anyway.
+    const items = toCreate.flatMap(pin => {
       const target = pinScenePosition(pin, geometry);
-      return buildPinItem(pin, { x: target.x + correction.dx, y: target.y + correction.dy }, hideFromPlayers, diameter);
+      const markerPosition = { x: target.x + correction.dx, y: target.y + correction.dy };
+      const labelPosition = { x: target.x, y: target.y - diameter };
+      return [
+        buildPinItem(pin, markerPosition, hideFromPlayers, diameter),
+        buildPinLabelItem(pin, labelPosition, hideFromPlayers),
+      ];
     });
     await OBR.scene.items.addItems(items);
     const skippedNote = skippedCount ? ` (${skippedCount} already placed, skipped)` : "";
@@ -829,8 +886,9 @@ document.getElementById("remove-all-pins-btn").addEventListener("click", async (
   btn.disabled = true;
   try {
     await refreshExistingPins();
+    const removedCount = existingMarkerCount;
     if (existingPinItemIds.length) await OBR.scene.items.deleteItems(existingPinItemIds);
-    setStatus("existing-status", `Removed ${existingPinItemIds.length} pin${existingPinItemIds.length === 1 ? "" : "s"}.`, "good");
+    setStatus("existing-status", `Removed ${removedCount} pin${removedCount === 1 ? "" : "s"}.`, "good");
     await refreshExistingPins();
   } catch (err) {
     console.error("DCC map pins: failed to remove all pins", err);
