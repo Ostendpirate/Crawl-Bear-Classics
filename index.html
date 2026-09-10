@@ -1638,7 +1638,7 @@
       <button class="tab-btn" id="nav-notes" style="display:none;">Notes</button>
       <button class="tab-btn" id="nav-pins" style="display:none;">Pins</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-09-10 12:51</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-09-10 14:21</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -21612,6 +21612,29 @@ async function loadSelection(selection) {
   const items = await OBR.scene.items.getItems(selection);
   const item = items[0];
   if (!item) return;
+
+  // Selecting isn't limited to character tokens - a Map Pin (map-pins-
+  // modal.html's Labels) or any other NOTE-layer item can be click-
+  // selected on the map just as easily, and without this check that would
+  // land here and get treated as "a token was selected": since it has no
+  // MONSTER_METADATA_KEY/PC_METADATA_KEY of its own, defaultData() below
+  // would hand back a blank sheet and the Sheet tab would pop open showing
+  // what looks like a brand new, empty character. Treat a non-combat
+  // selection the same as no selection at all instead.
+  if (!isCombatItem(item)) {
+    lastKnownSelectionId = null;
+    if (isEditingSheetField()) return;
+    if (currentItemId && saveTimeout) {
+      clearTimeout(saveTimeout);
+      await saveCurrent();
+    }
+    currentItemId = null;
+    emptyState.innerHTML = EMPTY_STATE_DEFAULT_HTML;
+    emptyState.style.display = "block";
+    sheetEl.style.display = "none";
+    renderTokenRoster();
+    return;
+  }
 
   // The token roster only hides other players' tokens from the list, but
   // Owlbear still lets any player click-select any token on the map. This
