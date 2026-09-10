@@ -1638,7 +1638,7 @@
       <button class="tab-btn" id="nav-notes" style="display:none;">Notes</button>
       <button class="tab-btn" id="nav-pins" style="display:none;">Pins</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-09-08 19:39</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-09-10 10:49</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -16405,80 +16405,125 @@ let roomOwnerMap = {};
 // item's lastModified (Owlbear-managed, updates automatically on any
 // change) against what's already captured.
 //
-// Each saved token gets its OWN room-metadata key (ROOM_TOKEN_TEMPLATE_
-// PREFIX + its roster id) rather than all of them sharing one big combined
-// value under a single key. OBR caps an individual room-metadata VALUE at
-// 16 kB - a full character sheet clone is genuinely big (attacks, spells,
-// armor, injuries, free-text write-ups...), so with everything crammed
-// into one shared value, as few as two richly-detailed saved tokens could
-// already fill that budget, and EVERY subsequent save anywhere in the room
-// would fail - including a brand new token's own first save, which is
-// exactly what "marking an unassigned token as saved doesn't stick" turned
-// out to be. Splitting into one key per token turns that shared 16 kB
-// budget into a per-token one, and means saving/un-saving one token only
-// ever writes that token's own key - not a full re-write of every OTHER
-// saved token's data along with it.
+// This used to live in OBR room metadata (first as one shared combined
+// value, then split into one room-metadata key per token to dodge what
+// looked like a per-VALUE 16 kB cap). Neither held up: OBR's ~16 kB limit
+// turned out to be on a room's ENTIRE metadata object, TOTAL, shared
+// across every key ANY extension writes there - not per-value, not
+// per-write-call - so splitting into per-token keys never actually raised
+// the ceiling, it just meant a handful of richly-detailed saved characters
+// (attacks, spells, armor, injuries, free-text write-ups...) could still
+// exhaust the whole room's budget between them, silently failing every
+// later write room-wide (this extension's own Rulebook Data, GM Notes,
+// anything). That's the same failure mode GM Notes hit and fixed the same
+// way (see gm-notes-modal.html's GM_NOTES_METADATA_KEY comment for the
+// full story) - so saved-token templates now live in this page's own
+// IndexedDB (SAVED_TOKENS_DB_NAME below) instead, which has no practical
+// size limit. The tradeoff, same as GM Notes: the saved set is now
+// per-device, not live-synced to the GM's other devices via
+// OBR.room.onMetadataChange the way it briefly was. roomOwnerMap (small,
+// never anywhere near this cap on its own) stays in real room metadata.
 //
-// ROOM_TOKEN_TEMPLATE_KEY (below) is the OLD, pre-split scheme - kept only
-// so migrateLegacyTokenTemplates (see its own comment) can find and
-// migrate anything still stored there from before this change; nothing
-// ever writes new data under it again.
+// ROOM_TOKEN_TEMPLATE_KEY/ROOM_TOKEN_TEMPLATE_PREFIX are the OLD,
+// room-metadata-based schemes - kept only so migrateLegacyTokenTemplates
+// (see its own comment) can find, pull into IndexedDB, and then clear
+// anything still stored under them from before this change; nothing ever
+// writes new data under either again.
 const ROOM_TOKEN_TEMPLATE_KEY = "com.claude.monster-sheet/token-templates";
 const ROOM_TOKEN_TEMPLATE_PREFIX = "com.claude.monster-sheet/token-template:";
-function tokenTemplateKeyFor(rosterId) {
-  return ROOM_TOKEN_TEMPLATE_PREFIX + rosterId;
+
+// IndexedDB store for saved-token templates - one record per roster id
+// (or legacy name, pre-migration), keyed the same way roomTokenTemplates
+// always has been. Mirrors gm-notes-modal.html's own openPdfPagesDb
+// pattern (a lazily-opened, cached DB-open promise).
+const SAVED_TOKENS_DB_NAME = "dcc-saved-tokens";
+const SAVED_TOKENS_DB_VERSION = 1;
+let savedTokensDbPromise = null;
+function openSavedTokensDb() {
+  if (!savedTokensDbPromise) {
+    savedTokensDbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(SAVED_TOKENS_DB_NAME, SAVED_TOKENS_DB_VERSION);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains("templates")) {
+          db.createObjectStore("templates", { keyPath: "key" });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  return savedTokensDbPromise;
 }
 // Rebuilds the familiar {rosterId: template, ...} in-memory shape every
-// other function in this file already expects, by scanning ALL room
-// metadata keys for ones carrying the per-token prefix - this is the only
-// place that needs to know the storage is actually split across many keys.
-function extractRoomTokenTemplates(roomMeta) {
-  const result = {};
-  Object.keys(roomMeta || {}).forEach(key => {
-    if (!key.startsWith(ROOM_TOKEN_TEMPLATE_PREFIX)) return;
-    const value = roomMeta[key];
-    if (value && typeof value === "object") {
-      result[key.slice(ROOM_TOKEN_TEMPLATE_PREFIX.length)] = value;
-    }
+// other function in this file already expects.
+async function getAllSavedTokenTemplates() {
+  const db = await openSavedTokensDb();
+  const rows = await new Promise((resolve, reject) => {
+    const req = db.transaction("templates", "readonly").objectStore("templates").getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
   });
+  const result = {};
+  rows.forEach(row => { result[row.key] = row.template; });
   return result;
+}
+async function putSavedTokenTemplate(key, template) {
+  const db = await openSavedTokensDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction("templates", "readwrite");
+    tx.objectStore("templates").put({ key, template });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+async function deleteSavedTokenTemplate(key) {
+  const db = await openSavedTokensDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction("templates", "readwrite");
+    tx.objectStore("templates").delete(key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 let roomTokenTemplates = {};
 
-// Serializes every "read the latest ROOM_OWNER_MAP_KEY/
-// ROOM_TOKEN_TEMPLATE_KEY, compute the next state, write it back" cycle
-// in this file (ensureRosterIds, applyPersistentOwnership's template
-// refresh, cloneMissingAssignedTokens, toggleTokenSaved, and the Owner
-// dropdown's assignment handler all do this independently). Without a
-// shared lock, two of these running concurrently - trivially easy to
-// trigger, since items.onChange fires constantly during play and
-// clicking two different roster ★ toggles in quick succession does it
-// too - race: whichever's own read lands first doesn't see the other's
-// not-yet-committed write, so its own write later silently overwrites
-// (loses) that change. This was the actual mechanism behind both "only
-// one save toggle sticks when I click several" and an NPC quietly losing
-// its roomTokenTemplates entry mid-play, which cloneMissingAssignedTokens
-// then (correctly, given what it can see) treats as legitimately missing
-// and clones a duplicate of. Every function that touches either key
-// wraps its whole body in withRoomMetadataLock so at most one such cycle
-// is ever in flight at a time, regardless of which of the several call
-// paths triggered it.
+// Serializes every "read the latest roomOwnerMap/roomTokenTemplates,
+// compute the next state, write it back (OBR room metadata for the
+// former, the saved-tokens IndexedDB store for the latter)" cycle in this
+// file (ensureRosterIds, applyPersistentOwnership's template refresh,
+// cloneMissingAssignedTokens, toggleTokenSaved, and the Owner dropdown's
+// assignment handler all do this independently). Without a shared lock,
+// two of these running concurrently - trivially easy to trigger, since
+// items.onChange fires constantly during play and clicking two different
+// roster ★ toggles in quick succession does it too - race: whichever's
+// own read lands first doesn't see the other's not-yet-committed write,
+// so its own write later silently overwrites (loses) that change. This
+// was the actual mechanism behind both "only one save toggle sticks when
+// I click several" and an NPC quietly losing its roomTokenTemplates entry
+// mid-play, which cloneMissingAssignedTokens then (correctly, given what
+// it can see) treats as legitimately missing and clones a duplicate of.
+// Every function that touches either piece of state wraps its whole body
+// in withRoomMetadataLock so at most one such cycle is ever in flight at
+// a time, regardless of which of the several call paths triggered it.
 // Every locked function below merges into the current in-memory
-// roomOwnerMap/roomTokenTemplates rather than re-fetching via
-// OBR.room.getMetadata() first - an earlier version of this code (from
-// before this lock existed) DID re-fetch fresh each time, specifically to
-// avoid clobbering a write that landed between "we last synced" and "we
-// finish this write." That's exactly what this lock now guarantees can't
-// happen for same-client calls, and OBR.room.onMetadataChange (below) is
-// what keeps these vars current for a genuinely concurrent OTHER client's
-// writes. Re-fetching on top of that turned out to be actively harmful,
-// not just redundant: OBR.room.getMetadata() right after this SAME
-// client's own setMetadata() has resolved isn't guaranteed to already
-// reflect it (the read and the write don't share a synchronous local
-// cache), so a queued call landing inside that gap would read pre-write
-// data and silently revert the previous call's change on its own next
-// write - this was the actual mechanism behind "only one ★ save toggle
-// sticks when I click several in a row."
+// roomOwnerMap/roomTokenTemplates rather than re-fetching first - an
+// earlier version of this code (from before this lock existed) DID
+// re-fetch fresh each time, specifically to avoid clobbering a write that
+// landed between "we last synced" and "we finish this write." That's
+// exactly what this lock now guarantees can't happen for same-client
+// calls, and OBR.room.onMetadataChange (below) is what keeps roomOwnerMap
+// current for a genuinely concurrent OTHER client's writes - it no longer
+// does the same for roomTokenTemplates now that saved-token templates
+// live in local IndexedDB rather than room metadata (see its own comment
+// on the tradeoff). Re-fetching roomOwnerMap on top of the lock turned out
+// to be actively harmful, not just redundant: OBR.room.getMetadata()
+// right after this SAME client's own setMetadata() has resolved isn't
+// guaranteed to already reflect it (the read and the write don't share a
+// synchronous local cache), so a queued call landing inside that gap
+// would read pre-write data and silently revert the previous call's
+// change on its own next write - this was the actual mechanism behind
+// "only one ★ save toggle sticks when I click several in a row."
 let roomMetadataQueue = Promise.resolve();
 function withRoomMetadataLock(fn) {
   const run = roomMetadataQueue.then(fn, fn);
@@ -16680,28 +16725,26 @@ async function toggleTokenSavedImpl(itemId) {
   // Merges into the current in-memory maps, not a fresh network re-fetch -
   // see withRoomMetadataLock's own comment on why. Both PRE-toggle values
   // are kept so a failed write below can roll the optimistic update back
-  // instead of leaving the ★ showing "saved" locally while the room's own
-  // copy silently never got it - which used to mean the star only told the
-  // truth again after the next reload (see the catch block).
+  // instead of leaving the ★ showing "saved" locally while the actual
+  // storage silently never got it - which used to mean the star only told
+  // the truth again after the next reload (see the catch block).
   const previousMap = roomOwnerMap;
   const previousTemplates = roomTokenTemplates;
   const nextMap = { ...roomOwnerMap };
   const nextTemplates = { ...roomTokenTemplates };
-  const templateWrites = {};
+  let ownerMapChanged = false;
   if (!existingRosterId) {
-    delete nextMap[item.name];
-    if (nextTemplates[item.name]) {
-      delete nextTemplates[item.name];
-      templateWrites[tokenTemplateKeyFor(item.name)] = null;
+    if (nextMap[item.name]) {
+      delete nextMap[item.name];
+      ownerMapChanged = true;
     }
+    delete nextTemplates[item.name];
   }
   const wasSaved = !!nextTemplates[rosterId];
   if (wasSaved) {
     delete nextTemplates[rosterId];
-    templateWrites[tokenTemplateKeyFor(rosterId)] = null;
   } else {
     nextTemplates[rosterId] = cloneItemForTemplate(item);
-    templateWrites[tokenTemplateKeyFor(rosterId)] = nextTemplates[rosterId];
   }
   roomOwnerMap = nextMap;
   roomTokenTemplates = nextTemplates;
@@ -16711,15 +16754,14 @@ async function toggleTokenSavedImpl(itemId) {
   renderTokenRoster();
 
   try {
-    // roomOwnerMap still lives under one shared key (small per-entry, so
-    // no real risk of hitting the 16 kB cap there) - only the template
-    // side is split, one key per saved token (see ROOM_TOKEN_TEMPLATE_
-    // PREFIX), so THIS write only ever touches the one token actually
-    // being toggled, never every other saved token's data along with it.
-    await OBR.room.setMetadata({
-      [ROOM_OWNER_MAP_KEY]: roomOwnerMap,
-      ...templateWrites,
-    });
+    // roomOwnerMap stays in real room metadata (small, nowhere near OBR's
+    // ~16 kB total-room-metadata cap on its own) - only written here when
+    // a legacy name-keyed entry actually needed renaming to the roster id.
+    // The template itself now lives in the saved-tokens IndexedDB store
+    // (see its own comment on why), which has no such cap to silently hit.
+    if (ownerMapChanged) await OBR.room.setMetadata({ [ROOM_OWNER_MAP_KEY]: roomOwnerMap });
+    if (wasSaved) await deleteSavedTokenTemplate(rosterId);
+    else await putSavedTokenTemplate(rosterId, nextTemplates[rosterId]);
     showStatus(wasSaved
       ? `${item.name || "Token"} un-saved - won't follow the party into new scenes anymore.`
       : `${item.name || "Token"} saved - will follow the party into new scenes.`, false, 4000);
@@ -16727,19 +16769,12 @@ async function toggleTokenSavedImpl(itemId) {
     console.error("DCC sheet: failed to persist save toggle", err);
     // Roll back the optimistic update - the ★ needs to go back to
     // reflecting reality right now, not just whenever this popover next
-    // happens to reload. OBR.room.setMetadata caps each room-metadata
-    // VALUE at 16 kB - a full character sheet clone for just this one
-    // token can still individually exceed that on its own for a
-    // sufficiently rich sheet, so this is still worth a specific,
-    // actionable message rather than a generic "sync failed".
+    // happens to reload.
     roomOwnerMap = previousMap;
     roomTokenTemplates = previousTemplates;
     if (rosterIdx !== -1) lastRosterItems[rosterIdx] = item;
     renderTokenRoster();
-    const isSizeLimit = /size limit/i.test(err.message || "");
-    showStatus(isSizeLimit
-      ? "Couldn't save - this token's own character sheet is too large on its own (over Owlbear's 16 kB per-item limit). Trim it down (fewer spells/notes) and try again."
-      : `Couldn't save - sync failed (${err.message}). Try again.`, true, 8000);
+    showStatus(`Couldn't save - sync failed (${err.message}). Try again.`, true, 8000);
   }
 }
 
@@ -16825,11 +16860,11 @@ async function ensureRosterIdsImpl(items) {
   // see withRoomMetadataLock's own comment on why.
   const nextMap = { ...roomOwnerMap };
   const nextTemplates = { ...roomTokenTemplates };
-  // Each renamed template entry needs its OLD per-token key (see
-  // ROOM_TOKEN_TEMPLATE_PREFIX) explicitly cleared and its NEW one written -
-  // unlike roomOwnerMap, which still lives under one shared key so moving
-  // an entry within that in-memory object is enough on its own.
-  const templateWrites = {};
+  // Each renamed template entry needs its OLD IndexedDB record deleted and
+  // a new one written under the roster id - unlike roomOwnerMap, which
+  // still lives under one shared room-metadata key so moving an entry
+  // within that in-memory object is enough on its own.
+  const templateRenames = [];
   needsId.forEach(item => {
     const rosterId = idByItem.get(item.id);
     if (nextMap[item.name]) {
@@ -16839,18 +16874,18 @@ async function ensureRosterIdsImpl(items) {
     if (nextTemplates[item.name]) {
       nextTemplates[rosterId] = nextTemplates[item.name];
       delete nextTemplates[item.name];
-      templateWrites[tokenTemplateKeyFor(item.name)] = null;
-      templateWrites[tokenTemplateKeyFor(rosterId)] = nextTemplates[rosterId];
+      templateRenames.push({ oldKey: item.name, newKey: rosterId, template: nextTemplates[rosterId] });
     }
   });
   roomOwnerMap = nextMap;
   roomTokenTemplates = nextTemplates;
 
   try {
-    await OBR.room.setMetadata({
-      [ROOM_OWNER_MAP_KEY]: roomOwnerMap,
-      ...templateWrites,
-    });
+    await OBR.room.setMetadata({ [ROOM_OWNER_MAP_KEY]: roomOwnerMap });
+    for (const { oldKey, newKey, template } of templateRenames) {
+      await putSavedTokenTemplate(newKey, template);
+      await deleteSavedTokenTemplate(oldKey);
+    }
   } catch (err) {
     console.error("DCC sheet: failed to persist roster-id migration", err);
   }
@@ -16897,22 +16932,24 @@ async function applyPersistentOwnershipImpl(items) {
   });
   if (templatesChanged) {
     // Merges into the current in-memory roomTokenTemplates, not a fresh
-    // network re-fetch - see withRoomMetadataLock's own comment on why.
-    // Each refreshed entry writes only its OWN per-token key (see
-    // ROOM_TOKEN_TEMPLATE_PREFIX) - never a combined re-write of every
-    // other saved token's data along with it.
+    // re-fetch - see withRoomMetadataLock's own comment on why. Each
+    // refreshed entry writes only its own IndexedDB record (see
+    // SAVED_TOKENS_DB_NAME) - never a combined re-write of every other
+    // saved token's data along with it.
     const nextTemplates = { ...roomTokenTemplates };
-    const templateWrites = {};
+    const refreshed = [];
     items.forEach(item => {
       const key = rosterKeyFor(item);
       if (nextTemplates[key] && templateNeedsRefresh(item)) {
         nextTemplates[key] = cloneItemForTemplate(item);
-        templateWrites[tokenTemplateKeyFor(key)] = nextTemplates[key];
+        refreshed.push({ key, template: nextTemplates[key] });
       }
     });
     roomTokenTemplates = nextTemplates;
     try {
-      await OBR.room.setMetadata(templateWrites);
+      for (const { key, template } of refreshed) {
+        await putSavedTokenTemplate(key, template);
+      }
     } catch (err) {
       console.error("DCC sheet: failed to persist token templates", err);
     }
@@ -17004,81 +17041,80 @@ function pruneOrphanedTokenTemplates() {
 async function pruneOrphanedTokenTemplatesImpl() {
   if (currentPlayerRole !== "GM") return;
   const nextTemplates = { ...roomTokenTemplates };
-  const deletions = {};
+  const orphanedKeys = [];
   Object.keys(nextTemplates).forEach(key => {
     const snapshot = nextTemplates[key];
     const snapshotRosterId = snapshot && snapshot.metadata && snapshot.metadata[ROSTER_ID_METADATA_KEY];
     if (snapshotRosterId !== key) {
       delete nextTemplates[key];
-      // null clears a room-metadata key (same convention this file already
-      // uses elsewhere, e.g. Rulebook Data's "Clear All") - each pruned
-      // entry has its OWN key now (see ROOM_TOKEN_TEMPLATE_PREFIX), so this
-      // only ever removes the orphan itself, never touches any other saved
-      // token's data.
-      deletions[tokenTemplateKeyFor(key)] = null;
+      orphanedKeys.push(key);
     }
   });
-  if (!Object.keys(deletions).length) return;
+  if (!orphanedKeys.length) return;
   roomTokenTemplates = nextTemplates;
   try {
-    await OBR.room.setMetadata(deletions);
+    for (const key of orphanedKeys) {
+      await deleteSavedTokenTemplate(key);
+    }
   } catch (err) {
     console.error("DCC sheet: failed to persist orphaned-template cleanup", err);
   }
 }
 
-// One-time cleanup for anything still stored under the OLD, pre-split
-// ROOM_TOKEN_TEMPLATE_KEY (see its own comment) - copies each entry over
-// to its own new per-token key, then clears the old key so this never
-// runs again once it's done. Reading the old value is unaffected by the
-// 16 kB per-VALUE write cap (it was already sitting in room metadata
-// before this ever existed, and reads aren't capped the way writes are);
-// writing each entry back out individually is what actually gets it under
-// that cap going forward, one token at a time. Runs early in
-// refreshTokenRoster's maintenance chain, before pruneOrphanedTokenTemplates
-// would otherwise have nothing to work with under the new keys yet.
+// One-time cleanup for anything still stored in OBR room metadata under
+// either OLD scheme - the single combined ROOM_TOKEN_TEMPLATE_KEY, or the
+// later per-token ROOM_TOKEN_TEMPLATE_PREFIX split (see roomTokenTemplates'
+// own comment for why both turned out to be the wrong place for this data
+// at all). Copies whatever's found into the saved-tokens IndexedDB store,
+// then clears every one of those room-metadata keys - both to stop this
+// running again once done, and to actually free up the room's ~16 kB
+// TOTAL metadata budget for everything else sharing it (GM Notes,
+// Rulebook Data, roomOwnerMap...), which is the whole reason this
+// migration exists. Runs early in refreshTokenRoster's maintenance chain,
+// before pruneOrphanedTokenTemplates would otherwise have nothing to work
+// with yet.
 function migrateLegacyTokenTemplates() {
   return withRoomMetadataLock(() => migrateLegacyTokenTemplatesImpl());
 }
 async function migrateLegacyTokenTemplatesImpl() {
   if (currentPlayerRole !== "GM") return;
-  let legacy;
+  let roomMeta;
   try {
-    const roomMeta = await OBR.room.getMetadata();
-    legacy = roomMeta[ROOM_TOKEN_TEMPLATE_KEY];
+    roomMeta = await OBR.room.getMetadata();
   } catch (err) {
     console.error("DCC sheet: failed to check for legacy token templates", err);
     return;
   }
-  if (!legacy || typeof legacy !== "object" || !Object.keys(legacy).length) return;
 
-  const writes = { [ROOM_TOKEN_TEMPLATE_KEY]: null };
-  Object.entries(legacy).forEach(([key, template]) => {
-    writes[tokenTemplateKeyFor(key)] = template;
+  const legacyCombined = roomMeta[ROOM_TOKEN_TEMPLATE_KEY];
+  const toMigrate = {};
+  if (legacyCombined && typeof legacyCombined === "object") {
+    Object.assign(toMigrate, legacyCombined);
+  }
+  const clears = {};
+  if (legacyCombined !== undefined) clears[ROOM_TOKEN_TEMPLATE_KEY] = null;
+  Object.keys(roomMeta).forEach(key => {
+    if (!key.startsWith(ROOM_TOKEN_TEMPLATE_PREFIX)) return;
+    const value = roomMeta[key];
+    if (value && typeof value === "object") {
+      toMigrate[key.slice(ROOM_TOKEN_TEMPLATE_PREFIX.length)] = value;
+    }
+    clears[key] = null;
   });
-  roomTokenTemplates = { ...roomTokenTemplates, ...legacy };
+  if (!Object.keys(toMigrate).length) return;
+
+  roomTokenTemplates = { ...roomTokenTemplates, ...toMigrate };
   try {
-    await OBR.room.setMetadata(writes);
+    // Every entry lands in IndexedDB (no size cap to hit) before the
+    // room-metadata side is touched at all - a failure partway through
+    // just leaves the untouched OBR keys as the retryable source of truth
+    // for next pass, nothing is lost either way.
+    for (const [key, template] of Object.entries(toMigrate)) {
+      await putSavedTokenTemplate(key, template);
+    }
+    await OBR.room.setMetadata(clears);
   } catch (err) {
-    // Most likely cause: the legacy blob itself was already over 16 kB in
-    // total (the exact problem this migration exists to fix), and this
-    // attempt bundled every entry into ONE setMetadata call rather than
-    // writing them one at a time. Left in place to retry next pass rather
-    // than losing anything - the old key is only cleared once every entry
-    // has actually landed under its own new key.
-    console.error("DCC sheet: failed to migrate legacy token templates in one batch - retrying one at a time", err);
-    for (const [key, template] of Object.entries(legacy)) {
-      try {
-        await OBR.room.setMetadata({ [tokenTemplateKeyFor(key)]: template });
-      } catch (innerErr) {
-        console.error(`DCC sheet: failed to migrate legacy token template "${key}" - it may be too large on its own`, innerErr);
-      }
-    }
-    try {
-      await OBR.room.setMetadata({ [ROOM_TOKEN_TEMPLATE_KEY]: null });
-    } catch (err2) {
-      console.error("DCC sheet: failed to clear legacy token template key after migration", err2);
-    }
+    console.error("DCC sheet: failed to migrate legacy token templates out of room metadata - will retry next pass", err);
   }
 }
 
@@ -17316,14 +17352,14 @@ async function handleOwnerSelectChange(id, itemId, sel) {
   // re-fetching turned out to itself be the source of that exact bug).
   const nextMap = { ...roomOwnerMap };
   const nextTemplates = { ...roomTokenTemplates };
-  const templateWrites = {};
+  const templateDeletes = [];
   // Clean up any leftover legacy entry keyed by this token's current name
   // (from before roster ids existed) now that it's moving to rosterId.
   if (!existingRosterId) {
     delete nextMap[item.name];
     if (nextTemplates[item.name]) {
       delete nextTemplates[item.name];
-      templateWrites[tokenTemplateKeyFor(item.name)] = null;
+      templateDeletes.push(item.name);
     }
   }
   if (id) {
@@ -17345,14 +17381,14 @@ async function handleOwnerSelectChange(id, itemId, sel) {
   // unconditionally clone the item in here whenever id was truthy, which
   // silently started "saving" every token the moment it got assigned to a
   // player, whether the GM ever clicked ★ or not. Each saved snapshot is a
-  // full item clone (the whole character sheet) living in ROOM_TOKEN_
-  // TEMPLATE_KEY, a single shared room-metadata value OBR caps at 16 kB
-  // total - every token silently added here ate into that budget, making
-  // "the very next save fails with a mysterious size-limit error" far more
-  // likely to hit a GM who never even knew this was happening.
+  // full item clone (the whole character sheet) now living in the
+  // saved-tokens IndexedDB store (see roomTokenTemplates' own comment) -
+  // it no longer competes with everything else for the room's ~16 kB
+  // TOTAL metadata budget the way it used to.
+  let templatePut = null;
   if (id && nextTemplates[rosterId]) {
     nextTemplates[rosterId] = cloneItemForTemplate(item);
-    templateWrites[tokenTemplateKeyFor(rosterId)] = nextTemplates[rosterId];
+    templatePut = { key: rosterId, template: nextTemplates[rosterId] };
   }
   roomTokenTemplates = nextTemplates;
 
@@ -17371,10 +17407,9 @@ async function handleOwnerSelectChange(id, itemId, sel) {
   renderTokenRoster();
 
   try {
-    await OBR.room.setMetadata({
-      [ROOM_OWNER_MAP_KEY]: roomOwnerMap,
-      ...templateWrites,
-    });
+    await OBR.room.setMetadata({ [ROOM_OWNER_MAP_KEY]: roomOwnerMap });
+    for (const key of templateDeletes) await deleteSavedTokenTemplate(key);
+    if (templatePut) await putSavedTokenTemplate(templatePut.key, templatePut.template);
     sel.disabled = false;
     showStatus("Owner updated");
   } catch (err) {
@@ -21664,12 +21699,13 @@ OBR.onReady(async () => {
   OBR.room.onMetadataChange((metadata) => {
     const map = metadata[ROOM_OWNER_MAP_KEY];
     roomOwnerMap = (map && typeof map === "object") ? map : {};
-    // Rebuilt from every per-token key (see ROOM_TOKEN_TEMPLATE_PREFIX) -
-    // onMetadataChange always delivers the full current room metadata
-    // (confirmed against the SDK's own types: the callback is typed
-    // Metadata, not Partial<Metadata>), so this always sees every saved
-    // token's own key here, not just whichever one most recently changed.
-    roomTokenTemplates = extractRoomTokenTemplates(metadata);
+    // roomTokenTemplates is NOT updated here - saved-token templates live
+    // in this device's own IndexedDB now, not room metadata (see
+    // roomTokenTemplates' own comment on why), so there's nothing for this
+    // room-wide broadcast to deliver for them. That also means the saved
+    // set no longer live-syncs to the GM's other devices the way it
+    // briefly did; same tradeoff GM Notes already made for the same
+    // reason.
     if (viewSheetEl.style.display !== "none") renderTokenRoster();
     if (currentItemId) {
       const item = lastRosterItems.find(i => i.id === currentItemId);
@@ -21802,20 +21838,27 @@ OBR.onReady(async () => {
     if (!ready) return;
 
     // Re-fetch room metadata directly rather than trusting whatever
-    // roomOwnerMap/roomTokenTemplates already happen to be in memory from
-    // the onMetadataChange listener. That listener should keep them
-    // current on its own, but a scene transition is exactly the kind of
-    // moment where a missed or delayed event would matter most - it's the
-    // instant a stale "still owned by you" reading would actually be
-    // visible to a player, in a scene the GM may have just unassigned
-    // them from tokens in.
+    // roomOwnerMap already happens to be in memory from the
+    // onMetadataChange listener. That listener should keep it current on
+    // its own, but a scene transition is exactly the kind of moment where
+    // a missed or delayed event would matter most - it's the instant a
+    // stale "still owned by you" reading would actually be visible to a
+    // player, in a scene the GM may have just unassigned them from tokens
+    // in. roomTokenTemplates is re-read from this device's own IndexedDB
+    // instead (see its own comment on why it's no longer in room
+    // metadata) - not because it could be stale here specifically, just
+    // for one consistent source of truth alongside roomOwnerMap.
     try {
       const roomMeta = await OBR.room.getMetadata();
       const map = roomMeta[ROOM_OWNER_MAP_KEY];
       roomOwnerMap = (map && typeof map === "object") ? map : {};
-      roomTokenTemplates = extractRoomTokenTemplates(roomMeta);
     } catch (err) {
       console.error("DCC sheet: scene change room.getMetadata failed", err);
+    }
+    try {
+      roomTokenTemplates = await getAllSavedTokenTemplates();
+    } catch (err) {
+      console.error("DCC sheet: scene change saved-token template load failed", err);
     }
 
     try {
@@ -21886,9 +21929,14 @@ OBR.onReady(async () => {
     const roomMeta = await OBR.room.getMetadata();
     const map = roomMeta[ROOM_OWNER_MAP_KEY];
     roomOwnerMap = (map && typeof map === "object") ? map : {};
-    roomTokenTemplates = extractRoomTokenTemplates(roomMeta);
   } catch (err) {
     console.error("DCC sheet: initial room.getMetadata failed", err);
+  }
+
+  try {
+    roomTokenTemplates = await getAllSavedTokenTemplates();
+  } catch (err) {
+    console.error("DCC sheet: initial saved-token template load failed", err);
   }
 
   try {
