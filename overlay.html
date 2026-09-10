@@ -66,6 +66,34 @@ function openDiceModal(payload) {
   }, 6500);
 }
 
+// Shared by both the auto-jump-on-select below and the context menu icon
+// (kept as a manual fallback - e.g. re-opening a modal that was closed
+// without deselecting the pin). GM Notes is GM-only (see index.html's
+// refreshNotesTabVisibility) - there's no server-side privacy in OBR's
+// model to actually stop a player selecting a pin themselves, so this
+// checks the role itself before ever opening someone else's private
+// notes, rather than relying on the context menu icon's own filter
+// (which only matches item metadata, not player role).
+async function openRoomNotes(room) {
+  try {
+    const role = await OBR.player.getRole();
+    if (role !== "GM") return;
+    if (!room || room.isTest) return;
+    const params = new URLSearchParams({ jumpId: room.id });
+    OBR.modal.open({
+      id: GM_NOTES_MODAL_ID,
+      url: `${GM_NOTES_MODAL_URL}?${params.toString()}`,
+      width: 1300,
+      height: 760,
+    }).catch(() => {});
+    // Handles the modal-already-open case, where the open() call above is
+    // a no-op and its query params never reach the page.
+    OBR.broadcast.sendMessage(JUMP_TO_ROOM_CHANNEL, { id: room.id }).catch(() => {});
+  } catch (err) {
+    console.error("DCC overlay: failed to open room notes", err);
+  }
+}
+
 OBR.onReady(() => {
   OBR.broadcast.onMessage(DICE_ROLL_CHANNEL, (event) => {
     try {
@@ -75,13 +103,6 @@ OBR.onReady(() => {
     }
   });
 
-  // GM Notes is GM-only (see index.html's refreshNotesTabVisibility) -
-  // there's no server-side privacy in OBR's model to actually stop a
-  // player selecting a pin and clicking this icon themselves, so this
-  // checks the role itself before ever opening someone else's private
-  // notes, rather than relying on the context menu icon's own filter
-  // (which only matches item
-  // metadata, not player role).
   OBR.contextMenu.create({
     id: "com.claude.monster-sheet/open-room-pin",
     icons: [
@@ -93,26 +114,34 @@ OBR.onReady(() => {
         },
       },
     ],
-    async onClick(context) {
-      try {
-        const role = await OBR.player.getRole();
-        if (role !== "GM") return;
-        const room = context.items[0]?.metadata?.[ROOM_PIN_METADATA_KEY];
-        if (!room || room.isTest) return;
-        const params = new URLSearchParams({ jumpId: room.id });
-        OBR.modal.open({
-          id: GM_NOTES_MODAL_ID,
-          url: `${GM_NOTES_MODAL_URL}?${params.toString()}`,
-          width: 1300,
-          height: 760,
-        }).catch(() => {});
-        // Handles the modal-already-open case, where the open() call
-        // above is a no-op and its query params never reach the page.
-        OBR.broadcast.sendMessage(JUMP_TO_ROOM_CHANNEL, { id: room.id }).catch(() => {});
-      } catch (err) {
-        console.error("DCC overlay: failed to open room notes", err);
-      }
+    onClick(context) {
+      openRoomNotes(context.items[0]?.metadata?.[ROOM_PIN_METADATA_KEY]);
     },
+  });
+
+  // Jump straight to a pin's notes the moment it's SELECTED, rather than
+  // making the GM select it and then separately click the context menu
+  // icon above - a pin only exists to link a map spot to its notes, so
+  // there's no real case where selecting one and NOT wanting its notes
+  // matters enough to justify the extra click. lastPinSelectionId guards
+  // against OBR.player.onChange firing for reasons other than a genuinely
+  // NEW selection (tool switches, sync state, etc - see index.html's own
+  // onChange comment for the full list) re-triggering this repeatedly for
+  // a selection that hasn't actually changed.
+  let lastPinSelectionId = null;
+  OBR.player.onChange(async (player) => {
+    const selection = player.selection;
+    const id = selection && selection.length === 1 ? selection[0] : null;
+    if (id === lastPinSelectionId) return;
+    lastPinSelectionId = id;
+    if (!id) return;
+    try {
+      const [item] = await OBR.scene.items.getItems([id]);
+      const room = item?.metadata?.[ROOM_PIN_METADATA_KEY];
+      if (room) await openRoomNotes(room);
+    } catch (err) {
+      console.error("DCC overlay: failed to check selection for a room pin", err);
+    }
   });
 });
 </script>
