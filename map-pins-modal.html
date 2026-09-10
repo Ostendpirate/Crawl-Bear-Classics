@@ -242,7 +242,7 @@ const LEVEL_COLOR_PALETTE = [
 // A pin dot's diameter as a fraction of the scene's own grid DPI (see the
 // import handler) - proportionate on a tightly-drawn 70px grid or a
 // hi-res 280px one alike, rather than always the same fixed pixel size.
-const PIN_DIAMETER_RATIO = 0.35;
+const PIN_DIAMETER_RATIO = 0.5;
 
 let mapImages = [];
 // The room CATALOG - {doc, level, id, title}, no coordinates. What rooms
@@ -518,8 +518,12 @@ function buildPinItem(pin, position, hidden, diameter) {
     .width(diameter)
     .height(diameter)
     .fillColor(levelColorFor(pin.level))
-    .strokeColor("#000000")
-    .strokeWidth(2)
+    .fillOpacity(1)
+    // White rather than black - reads clearly as a "marker ring" against
+    // both light and dark map art, where a thin black outline tends to
+    // just blend into a dungeon floor's own linework.
+    .strokeColor("#ffffff")
+    .strokeWidth(3)
     // x/y (the original 0-100 percentages, not the scene position) ride
     // along so a future import can tell two pins for the same room apart
     // by where they actually are - see existingPositionKeys above. No
@@ -558,6 +562,17 @@ function buildPinLabelItem(pin, position, hidden) {
     .position(position)
     .plainText(pin.id)
     .backgroundColor(levelColorFor(pin.level))
+    .backgroundOpacity(0.95)
+    // Bold white text with a black outline reads clearly against every
+    // level color in LEVEL_COLOR_PALETTE, rather than relying on OBR's
+    // default text style to happen to contrast with whatever color a
+    // given level landed on.
+    .fontWeight(700)
+    .fontSize(22)
+    .fillColor("#ffffff")
+    .strokeColor("#000000")
+    .strokeWidth(2)
+    .padding(6)
     .layer("NOTE")
     // `role: "label"` is the ONLY difference from the marker's own
     // metadata shape (see buildPinItem) - refreshExistingPins uses it to
