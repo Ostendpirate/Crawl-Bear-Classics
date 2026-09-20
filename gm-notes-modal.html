@@ -250,17 +250,18 @@
           <div class="footer-row">
             <button type="button" class="btn-next" id="gm-notes-save-btn">💾 Save</button>
             <button type="button" class="hp-btn" id="gm-notes-extract-btn" title="Scans this note's text for &quot;## Monster: Name&quot; blocks and stages them for auto-fill on any Monster sheet with a matching Name.">🐉 Extract Monsters</button>
+            <button type="button" class="hp-btn" id="gm-notes-extract-tokens-btn" title="Does everything Extract Monsters does, and also drops one token per creature onto the current scene (using each block's Count, numbered when there's more than one of the same name), with its stats already filled in.">➕ Extract + Add Tokens</button>
             <div class="fumble-die-note" id="gm-notes-save-status"></div>
           </div>
           <div class="fumble-die-note" id="gm-notes-extract-status" style="margin-top:4px;"></div>
-          <div class="fumble-die-note" style="margin-top:2px;">Template: <code>## Monster: Name</code> followed by <code>- Field: value</code> bullets (Init, AC, HD, HP, MV, Act, Atk, SP, Fort/Ref/Will, AL) - stops at the next heading.</div>
+          <div class="fumble-die-note" style="margin-top:2px;">Template: <code>## Monster: Name</code> followed by <code>- Field: value</code> bullets (Init, AC, HD, HP, MV, Act, Atk, SP, Fort/Ref/Will, AL, and Count for how many tokens Extract + Add Tokens creates) - stops at the next heading.</div>
         </div>
       </div>
     </div>
   </div>
 
 <script type="module">
-import OBR from "https://esm.sh/@owlbear-rodeo/sdk@2";
+import OBR, { buildShape, buildText } from "https://esm.sh/@owlbear-rodeo/sdk@2";
 
 // OBR turned out to enforce a hard ~16 kB cap on a room's (and a scene's)
 // ENTIRE metadata object, TOTAL, shared across every key any extension
@@ -1066,6 +1067,14 @@ function assignMonsterField(entry, key, value) {
     case "ref": case "reflex": entry.ref = value; break;
     case "will": entry.will = value; break;
     case "al": case "alignment": entry.al = normalizeAlignment(value); break;
+    // How many tokens "Extract + Add Tokens" creates (first number found,
+    // so "7" or "1 + 6 more" both work) - clamped so a typo can't flood
+    // the scene. Never staged into Rulebook Data (see extractMonsters).
+    case "count": case "number": case "qty": case "quantity": {
+      const n = parseInt((value.match(/\d+/) || [])[0], 10);
+      if (n >= 1) entry.count = Math.min(n, MAX_TOKENS_PER_MONSTER);
+      break;
+    }
     // "Atk: club +6 melee (1d10+4) or thrown crate +4 ranged (1d8+2)" is a
     // common DCC shorthand for "pick one of these" - split into separate
     // attack rows on " or " rather than letting the single-attack regex
@@ -1100,7 +1109,110 @@ function parseMonsterBlock(block) {
   return entry;
 }
 
-document.getElementById("gm-notes-extract-btn").addEventListener("click", async () => {
+// Same keys/shape index.html's defaultData("monster") + MONSTER_METADATA_KEY
+// use - duplicated here since this is a separate page. A token built with
+// this needs no name-matching auto-fill afterward: its sheet is already
+// populated when it lands on the scene.
+const MONSTER_METADATA_KEY = "com.claude.monster-sheet/dcc-data";
+const MODE_METADATA_KEY = "com.claude.monster-sheet/sheet-mode";
+const MAX_TOKENS_PER_MONSTER = 30;
+const MONSTER_TOKEN_COLORS = ["#a83f2b", "#3d6b96", "#1c7a52", "#96701f", "#6b5b8a", "#1c6d7a", "#7a4f1c", "#8a5b7a"];
+
+function monsterSheetData(entry) {
+  const data = {};
+  ["init","crit","hd","mv","act","fort","ref","will","sp","notes","ac","al","montype"].forEach(id => { data[id] = entry[id] || ""; });
+  data.hpCurrent = entry.hp || "";
+  data.hpMax = entry.hp || "";
+  data.attacks = (entry.attacks || []).map(a => ({
+    id: "a" + Math.random().toString(36).slice(2, 9),
+    name: a.name || "", bonus: a.bonus || "", damage: a.damage || "",
+    weapon: "", equipped: false, bonusAuto: false, bonusSource: "", damageAuto: false, damageBase: "",
+    damageStrApplies: false, twoWeaponRole: "", backstabActive: false, deedType: "", deedCustom: "",
+    actionDieIndex: "", lineDeeds: {}, ammo: "", poisoned: false, luckLastRoll: {}, fumblePending: {},
+  }));
+  data.armorItems = [];
+  data.pcSpells = [];
+  data.pcSkillOverrides = {};
+  data.injuries = [];
+  return data;
+}
+
+// "Emerald eidolons (1, then 6 more; ...)" -> "Emerald eidolons": the
+// parenthetical is a stat-block aside, not part of what a token should be
+// called. The staged Rulebook Data entry keeps the full heading text.
+function tokenBaseName(heading) {
+  return heading.replace(/\s*\([^)]*\)\s*$/, "").trim() || heading;
+}
+
+// Numbers continue from whatever's already on the scene under the same
+// base name (an existing un-numbered "Goblin" counts as #1), so importing
+// the same block twice never produces two "Goblin 1"s. A lone creature
+// with nothing already there keeps its plain name.
+function nextTokenNames(base, count, sceneItems) {
+  const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^${escaped}(?: (\\d+))?$`);
+  let highest = 0;
+  sceneItems.forEach(item => {
+    if (item.layer !== "CHARACTER") return;
+    const m = (item.name || "").match(re);
+    if (m) highest = Math.max(highest, m[1] ? parseInt(m[1], 10) : 1);
+  });
+  if (highest === 0 && count === 1) return [base];
+  return Array.from({ length: count }, (_, i) => `${base} ${highest + i + 1}`);
+}
+
+async function addMonsterTokens(monsters, statusEl) {
+  const dpi = await OBR.scene.grid.getDpi();
+  const size = dpi * 0.9;
+  const sceneItems = await OBR.scene.items.getItems();
+  let origin = { x: 0, y: 0 };
+  try {
+    const [w, h] = await Promise.all([OBR.viewport.getWidth(), OBR.viewport.getHeight()]);
+    origin = await OBR.viewport.inverseTransformPoint({ x: w / 2, y: h / 2 });
+  } catch (err) { /* falls back to the scene origin */ }
+
+  const shapes = [];
+  Object.entries(monsters).forEach(([heading, entry], monsterIdx) => {
+    const base = tokenBaseName(heading);
+    const names = nextTokenNames(base, entry.count || 1, sceneItems);
+    names.forEach(name => {
+      const slot = shapes.length;
+      shapes.push(buildShape()
+        .width(size).height(size).shapeType("CIRCLE")
+        .position({ x: origin.x + (slot % 8) * dpi, y: origin.y + Math.floor(slot / 8) * dpi })
+        .fillColor(MONSTER_TOKEN_COLORS[monsterIdx % MONSTER_TOKEN_COLORS.length])
+        .fillOpacity(0.9).strokeColor("#ffffff").strokeWidth(3)
+        .name(name).layer("CHARACTER")
+        .metadata({ [MODE_METADATA_KEY]: "monster", [MONSTER_METADATA_KEY]: monsterSheetData(entry) })
+        .build());
+    });
+  });
+  await OBR.scene.items.addItems(shapes);
+
+  // A Shape can't show its own name on the map, so numbered creatures
+  // would be indistinguishable - overlay a Text item attached to each
+  // (deleted/moved with it). Sized off the shape's ACTUAL bounds rather
+  // than assuming which corner/center its position anchors to. Purely
+  // cosmetic, so a failure here doesn't undo the tokens themselves.
+  try {
+    const labels = await Promise.all(shapes.map(async shape => {
+      const b = await OBR.scene.items.getItemBounds([shape.id]);
+      return buildText()
+        .position(b.min).width(b.width).height(b.height)
+        .plainText(shape.name).textAlign("CENTER").textAlignVertical("MIDDLE")
+        .fontSize(Math.max(12, dpi * 0.2)).fontWeight(700)
+        .fillColor("#ffffff").strokeColor("#000000").strokeWidth(2)
+        .layer("TEXT").attachedTo(shape.id).disableHit(true)
+        .build();
+    }));
+    await OBR.scene.items.addItems(labels);
+  } catch (err) {
+    console.error("DCC GM notes: token name labels failed (tokens themselves were added)", err);
+  }
+  return shapes.length;
+}
+
+async function extractMonsters(addTokens) {
   const statusEl = document.getElementById("gm-notes-extract-status");
   const blocks = extractMonsterBlocks(document.getElementById("gm-notes-textarea").value);
   if (!blocks.length) {
@@ -1108,8 +1220,15 @@ document.getElementById("gm-notes-extract-btn").addEventListener("click", async 
     statusEl.style.color = "#c97b7b";
     return;
   }
+  const parsed = {};
+  blocks.forEach(b => { parsed[b.name] = parseMonsterBlock(b); });
+  // Count only drives token creation - kept out of the staged Rulebook
+  // Data, which is shared scene metadata with a tight ~16 kB budget.
   const monsters = {};
-  blocks.forEach(b => { monsters[b.name] = parseMonsterBlock(b); });
+  Object.entries(parsed).forEach(([name, { count, ...rest }]) => { monsters[name] = rest; });
+  const names = Object.keys(monsters).join(", ");
+  let stagedNote = "";
+  let stagedOk = true;
   try {
     const sceneMeta = await OBR.scene.getMetadata();
     const existing = sceneMeta[RULEBOOK_DATA_METADATA_KEY] || {};
@@ -1121,20 +1240,38 @@ document.getElementById("gm-notes-extract-btn").addEventListener("click", async 
     };
     const budget = checkRulebookDataFitsSceneBudget(sceneMeta, next);
     if (!budget.fits) {
-      statusEl.textContent = `Couldn't save - this scene's shared rulebook data would reach ~${Math.ceil((budget.otherBytes + budget.rulebookBytes) / 1024)} KB, over Owlbear's ~${Math.ceil(SAFE_SCENE_METADATA_BUDGET_BYTES / 1024)} KB limit. Trim existing spells/monsters (via the Sheet's Rulebook Data Import) before extracting more.`;
-      statusEl.style.color = "#c97b7b";
-      return;
+      stagedOk = false;
+      stagedNote = `Couldn't stage stats for name-matching - this scene's shared rulebook data would reach ~${Math.ceil((budget.otherBytes + budget.rulebookBytes) / 1024)} KB, over Owlbear's ~${Math.ceil(SAFE_SCENE_METADATA_BUDGET_BYTES / 1024)} KB limit. Trim existing spells/monsters (via the Sheet's Rulebook Data Import) before extracting more.`;
+    } else {
+      await OBR.scene.setMetadata({ [RULEBOOK_DATA_METADATA_KEY]: next });
     }
-    await OBR.scene.setMetadata({ [RULEBOOK_DATA_METADATA_KEY]: next });
-    const names = Object.keys(monsters).join(", ");
-    statusEl.textContent = `Imported ${blocks.length} monster${blocks.length === 1 ? "" : "s"}: ${names}. Type a matching Name on a Monster sheet to auto-fill it.`;
-    statusEl.style.color = "var(--good)";
   } catch (err) {
     console.error("DCC GM notes: monster extraction failed", err);
-    statusEl.textContent = `Couldn't save extracted monsters: ${err.message}`;
+    stagedOk = false;
+    stagedNote = `Couldn't save extracted monsters: ${err.message}`;
+  }
+
+  if (!addTokens) {
+    statusEl.textContent = stagedOk
+      ? `Imported ${blocks.length} monster${blocks.length === 1 ? "" : "s"}: ${names}. Type a matching Name on a Monster sheet to auto-fill it.`
+      : stagedNote;
+    statusEl.style.color = stagedOk ? "var(--good)" : "#c97b7b";
+    return;
+  }
+  try {
+    const withCounts = {};
+    Object.keys(monsters).forEach(name => { withCounts[name] = { ...monsters[name], count: parsed[name].count }; });
+    const added = await addMonsterTokens(withCounts, statusEl);
+    statusEl.textContent = `Added ${added} token${added === 1 ? "" : "s"} for ${names}.${stagedOk ? "" : " " + stagedNote}`;
+    statusEl.style.color = stagedOk ? "var(--good)" : "#c97b7b";
+  } catch (err) {
+    console.error("DCC GM notes: adding monster tokens failed", err);
+    statusEl.textContent = `Couldn't add tokens: ${err.message}`;
     statusEl.style.color = "#c97b7b";
   }
-});
+}
+document.getElementById("gm-notes-extract-btn").addEventListener("click", () => extractMonsters(false));
+document.getElementById("gm-notes-extract-tokens-btn").addEventListener("click", () => extractMonsters(true));
 
 // pdf.js is only needed once a GM actually picks a PDF, so it's loaded
 // lazily from the same esm.sh CDN this page already pulls the OBR SDK
