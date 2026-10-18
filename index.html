@@ -415,6 +415,22 @@
     font-size: 12.5px;
   }
   .token-roster-item:hover { border-color: var(--accent); }
+  .token-roster-item.inactive { opacity: 0.6; }
+  .token-roster-inactive-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: transparent;
+    border: none;
+    padding: 4px 2px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--muted);
+  }
+  .token-roster-inactive-toggle:hover { color: var(--accent); }
   .token-roster-item.active {
     border-color: var(--accent);
     box-shadow: 0 0 0 1px var(--accent);
@@ -1638,7 +1654,7 @@
       <button class="tab-btn" id="nav-notes" style="display:none;">Notes</button>
       <button class="tab-btn" id="nav-pins" style="display:none;">Pins</button>
     </div>
-    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-10-18 14:58</div>
+    <div class="build-stamp" id="build-stamp" title="If this doesn't match what you just pushed, Owlbear Rodeo (or GitHub Pages) is still serving a cached copy - try closing and reopening this popover, or a hard refresh.">Build 2026-10-18 15:29</div>
 
     <div id="view-sheet">
     <div class="token-roster-wrap">
@@ -16645,8 +16661,31 @@ function renderTokenRoster() {
       : "No tokens assigned to you yet. Ask your GM to assign one, or drop your own token onto the scene.";
   } else {
     emptyEl.style.display = "none";
-    const sorted = visible.slice().sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-    listEl.innerHTML = sorted.map(item => tokenRosterItemHtml(item, isGm)).join("");
+    // PCs always lead the list, then NPCs/monsters - each group
+    // alphabetical. Tokens switched off in the Combat Tracker (a room's
+    // not-yet-fought creatures, an absent PC) fold into a collapsed
+    // "Inactive" group at the bottom, same PC-first order, so a scene full
+    // of dormant monsters doesn't bury the active roster.
+    const isPc = item => (item.metadata[MODE_METADATA_KEY] || "monster") === "pc";
+    const isInactive = item => (item.metadata[COMBAT_METADATA_KEY] || {}).enabled === false;
+    const byPcThenName = (a, b) => (isPc(b) - isPc(a)) || (a.name || "").localeCompare(b.name || "");
+    const sorted = visible.slice().sort(byPcThenName);
+    const activeItems = sorted.filter(item => !isInactive(item));
+    const inactiveItems = sorted.filter(isInactive);
+    const rowHtml = item => tokenRosterItemHtml(item, isGm).replace('class="token-roster-item', isInactive(item) ? 'class="token-roster-item inactive' : 'class="token-roster-item');
+    let html = activeItems.map(rowHtml).join("");
+    if (inactiveItems.length) {
+      html += `<button type="button" class="token-roster-inactive-toggle" id="token-roster-inactive-toggle">${rosterInactiveExpanded ? "▾" : "▸"} Inactive (${inactiveItems.length})</button>`;
+      if (rosterInactiveExpanded) html += inactiveItems.map(rowHtml).join("");
+    }
+    listEl.innerHTML = html;
+    const inactiveToggle = document.getElementById("token-roster-inactive-toggle");
+    if (inactiveToggle) {
+      inactiveToggle.addEventListener("click", () => {
+        rosterInactiveExpanded = !rosterInactiveExpanded;
+        renderTokenRoster();
+      });
+    }
     listEl.querySelectorAll(".token-roster-item").forEach(row => {
       row.addEventListener("click", () => OBR.player.select([row.dataset.id], true));
       const saveBtn = row.querySelector(".token-roster-save-btn");
@@ -16661,6 +16700,10 @@ function renderTokenRoster() {
 }
 
 let tokenRosterCollapsed = true;
+// Whether the roster's "Inactive" group (tokens switched off in the Combat
+// Tracker) is open - collapsed by default, and stays wherever it was left
+// across re-renders within a session.
+let rosterInactiveExpanded = false;
 
 function applyTokenRosterCollapsedState() {
   const contentEl = document.getElementById("token-roster-content");
