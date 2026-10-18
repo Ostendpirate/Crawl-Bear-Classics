@@ -30,6 +30,7 @@ const ROOM_PIN_METADATA_KEY = "com.claude.monster-sheet/room-pin";
 // id they were written under (and start inactive in the tracker) - see
 // gm-notes-modal.html's ENCOUNTER_ROOM_METADATA_KEY.
 const ENCOUNTER_ROOM_METADATA_KEY = "com.claude.monster-sheet/encounter-room";
+const ENCOUNTER_STAGED_METADATA_KEY = "com.claude.monster-sheet/encounter-staged";
 const COMBAT_METADATA_KEY = "com.claude.monster-sheet/combat-data";
 const DIM_OVERLAY_METADATA_KEY = "com.claude.monster-sheet/dim-overlay";
 const GM_NOTES_MODAL_ID = "com.claude.monster-sheet/gm-notes-modal";
@@ -81,36 +82,102 @@ function openDiceModal(payload) {
 // notes, rather than relying on the context menu icon's own filter
 // (which only matches item metadata, not player role).
 
-// Switches on (in the Combat Tracker) every creature token tagged to this
-// room that's currently inactive, and clears the dim overlay the tracker
-// draws over inactive tokens (same overlay index.html's setTokenDimmed
-// makes). Only ever activates - creatures from rooms already fought in are
-// left alone rather than guessing the GM is done with them mid-session.
-async function activateEncounter(roomId) {
-  const sleeping = await OBR.scene.items.getItems(item =>
-    item.metadata?.[ENCOUNTER_ROOM_METADATA_KEY] === roomId &&
-    item.metadata?.[COMBAT_METADATA_KEY]?.enabled === false);
-  if (!sleeping.length) return 0;
-  const ids = sleeping.map(i => i.id);
+// Brings a room's creatures onstage: moves each staged token (parked hidden
+// in the strip beside the map - see gm-notes-modal.html) onto the pin,
+// unhides it and its attached name label, switches it on in the Combat
+// Tracker and clears the dim overlay the tracker draws over inactive
+// tokens (same overlay index.html's setTokenDimmed makes). Only ever
+// activates - creatures from rooms already fought in are left alone rather
+// than guessing the GM is done with them mid-session. Tokens from before
+// staging existed (inactive but never parked) are just activated in place.
+async function activateEncounter(room, selectedPin) {
+  const waiting = await OBR.scene.items.getItems(item =>
+    item.metadata?.[ENCOUNTER_ROOM_METADATA_KEY] === room.id &&
+    (item.metadata?.[ENCOUNTER_STAGED_METADATA_KEY] || item.metadata?.[COMBAT_METADATA_KEY]?.enabled === false));
+  if (!waiting.length) return 0;
+  const ids = waiting.map(i => i.id);
+
+  // Where the pin's DOT actually sits: selecting its floating label should
+  // land creatures on the dot, not on the label hovering above it.
+  const dots = await OBR.scene.items.getItems(item => {
+    const m = item.metadata?.[ROOM_PIN_METADATA_KEY];
+    return m && !m.isTest && m.role !== "label" && m.id === room.id && m.doc === room.doc && m.x === room.x && m.y === room.y;
+  });
+  const pinBounds = await OBR.scene.items.getItemBounds([(dots[0] || selectedPin).id]);
+  const center = { x: (pinBounds.min.x + pinBounds.max.x) / 2, y: (pinBounds.min.y + pinBounds.max.y) / 2 };
+
+  // Fan the tokens out in a grid centred on the pin, shifting each by the
+  // gap between where its bounds are now and where they should be - works
+  // whichever point of the shape its `position` happens to anchor to.
+  const staged = waiting.filter(i => i.metadata?.[ENCOUNTER_STAGED_METADATA_KEY]);
+  const dpi = await OBR.scene.grid.getDpi();
+  const cols = Math.ceil(Math.sqrt(staged.length));
+  const rows = Math.ceil(staged.length / cols);
+  const shifts = new Map();
+  await Promise.all(staged.map(async (token, i) => {
+    const b = await OBR.scene.items.getItemBounds([token.id]);
+    const want = {
+      x: center.x + ((i % cols) - (cols - 1) / 2) * dpi,
+      y: center.y + (Math.floor(i / cols) - (rows - 1) / 2) * dpi,
+    };
+    shifts.set(token.id, { x: want.x - (b.min.x + b.max.x) / 2, y: want.y - (b.min.y + b.max.y) / 2 });
+  }));
+
+  // Name labels (and the dim overlay) are separate attached items - read
+  // them BEFORE the update so unhiding them doesn't depend on whether an
+  // attached item follows its parent's visibility automatically.
+  const attached = await OBR.scene.items.getItems(item => ids.includes(item.attachedTo));
   await OBR.scene.items.updateItems(ids, items => {
     items.forEach(it => {
       it.metadata[COMBAT_METADATA_KEY] = { ...(it.metadata[COMBAT_METADATA_KEY] || {}), enabled: true };
+      const shift = shifts.get(it.id);
+      if (shift) {
+        it.position = { x: it.position.x + shift.x, y: it.position.y + shift.y };
+        it.visible = true;
+        delete it.metadata[ENCOUNTER_STAGED_METADATA_KEY];
+      }
     });
   });
-  const overlays = await OBR.scene.items.getItems(item =>
-    ids.includes(item.attachedTo) && item.metadata?.[DIM_OVERLAY_METADATA_KEY]);
+  const overlays = attached.filter(i => i.metadata?.[DIM_OVERLAY_METADATA_KEY]);
   if (overlays.length) await OBR.scene.items.deleteItems(overlays.map(i => i.id));
+  // Unhide the labels, and re-seat each on its token by measured bounds: an
+  // attached item may or may not travel with its parent on a programmatic
+  // move, so this corrects either way instead of guessing (a label left
+  // behind in the staging strip would be visible there once unhidden).
+  const labels = attached.filter(i => !i.metadata?.[DIM_OVERLAY_METADATA_KEY] && shifts.has(i.attachedTo));
+  if (labels.length) {
+    const fixes = new Map();
+    await Promise.all(labels.map(async label => {
+      const [tb, lb] = await Promise.all([
+        OBR.scene.items.getItemBounds([label.attachedTo]),
+        OBR.scene.items.getItemBounds([label.id]),
+      ]);
+      fixes.set(label.id, {
+        x: (tb.min.x + tb.max.x) / 2 - (lb.min.x + lb.max.x) / 2,
+        y: (tb.min.y + tb.max.y) / 2 - (lb.min.y + lb.max.y) / 2,
+      });
+    }));
+    await OBR.scene.items.updateItems(labels.map(l => l.id), items => {
+      items.forEach(it => {
+        const fix = fixes.get(it.id);
+        if (fix && (Math.abs(fix.x) > 1 || Math.abs(fix.y) > 1)) {
+          it.position = { x: it.position.x + fix.x, y: it.position.y + fix.y };
+        }
+        it.visible = true;
+      });
+    });
+  }
   return ids.length;
 }
 
-async function openRoomNotes(room) {
+async function openRoomNotes(room, selectedPin) {
   try {
     const role = await OBR.player.getRole();
     if (role !== "GM") return;
     if (!room || room.isTest) return;
     // Independent of the notes jump below - a failure here (or in it)
     // shouldn't stop the other from happening.
-    activateEncounter(room.id).then(count => {
+    activateEncounter(room, selectedPin).then(count => {
       if (count) OBR.notification.show(`Room ${room.id}: ${count} creature${count === 1 ? "" : "s"} activated in the tracker.`).catch(() => {});
     }).catch(err => console.error("DCC overlay: failed to activate room encounter", err));
     const params = new URLSearchParams({ jumpId: room.id });
@@ -149,7 +216,7 @@ OBR.onReady(() => {
       },
     ],
     onClick(context) {
-      openRoomNotes(context.items[0]?.metadata?.[ROOM_PIN_METADATA_KEY]);
+      openRoomNotes(context.items[0]?.metadata?.[ROOM_PIN_METADATA_KEY], context.items[0]);
     },
   });
 
@@ -172,7 +239,7 @@ OBR.onReady(() => {
     try {
       const [item] = await OBR.scene.items.getItems([id]);
       const room = item?.metadata?.[ROOM_PIN_METADATA_KEY];
-      if (room) await openRoomNotes(room);
+      if (room) await openRoomNotes(room, item);
     } catch (err) {
       console.error("DCC overlay: failed to check selection for a room pin", err);
     }

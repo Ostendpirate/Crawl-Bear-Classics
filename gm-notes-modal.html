@@ -1126,6 +1126,9 @@ const DIM_OVERLAY_METADATA_KEY = "com.claude.monster-sheet/dim-overlay";
 // Tags a creature token with the Area id it was extracted under; selecting
 // that room's map pin activates every token carrying it (see overlay.html).
 const ENCOUNTER_ROOM_METADATA_KEY = "com.claude.monster-sheet/encounter-room";
+// Set while a room's creatures are parked hidden in the staging strip
+// beside the map; cleared when that room's pin brings them onstage.
+const ENCOUNTER_STAGED_METADATA_KEY = "com.claude.monster-sheet/encounter-staged";
 const MAX_TOKENS_PER_MONSTER = 30;
 const MONSTER_TOKEN_COLORS = ["#a83f2b", "#3d6b96", "#1c7a52", "#96701f", "#6b5b8a", "#1c6d7a", "#7a4f1c", "#8a5b7a"];
 
@@ -1181,6 +1184,20 @@ async function addMonsterTokens(groups) {
     const [w, h] = await Promise.all([OBR.viewport.getWidth(), OBR.viewport.getHeight()]);
     origin = await OBR.viewport.inverseTransformPoint({ x: w / 2, y: h / 2 });
   } catch (err) { /* falls back to the scene origin */ }
+  // Room creatures are parked HIDDEN (visible:false - invisible to players
+  // with no fog involved, merely dimmed for the GM) in a strip just right
+  // of the map until their pin is selected. Falls back to the view centre
+  // when the scene has no Map-layer image to measure.
+  let staging = origin;
+  try {
+    const mapIds = (await OBR.scene.items.getItems(item => item.layer === "MAP")).map(i => i.id);
+    if (mapIds.length) {
+      const mb = await OBR.scene.items.getItemBounds(mapIds);
+      staging = { x: mb.max.x + dpi * 2, y: mb.min.y };
+    }
+  } catch (err) { /* keeps the view-centre fallback */ }
+  const STAGING_COLUMNS = 6;
+  let stagingRow = 0;
 
   const shapes = [];
   groups.forEach(({ heading, entry, area }, monsterIdx) => {
@@ -1189,7 +1206,9 @@ async function addMonsterTokens(groups) {
     // Two groups sharing a base name in one import must number past each
     // other, and the scene snapshot above can't see tokens not yet added.
     names.forEach(name => sceneItems.push({ layer: "CHARACTER", name }));
-    names.forEach(name => {
+    const groupStartRow = stagingRow;
+    if (area) stagingRow += Math.ceil(names.length / STAGING_COLUMNS);
+    names.forEach((name, nameIdx) => {
       const slot = shapes.length;
       const metadata = { [MODE_METADATA_KEY]: "monster", [MONSTER_METADATA_KEY]: monsterSheetData(entry) };
       // Creatures that belong to a keyed room start INACTIVE in the tracker
@@ -1197,11 +1216,16 @@ async function addMonsterTokens(groups) {
       // first fight) and are switched on when that room's pin is selected.
       if (area) {
         metadata[ENCOUNTER_ROOM_METADATA_KEY] = area;
+        metadata[ENCOUNTER_STAGED_METADATA_KEY] = true;
         metadata[COMBAT_METADATA_KEY] = { enabled: false };
       }
+      const position = area
+        ? { x: staging.x + (nameIdx % STAGING_COLUMNS) * dpi, y: staging.y + (groupStartRow + Math.floor(nameIdx / STAGING_COLUMNS)) * dpi }
+        : { x: origin.x + (slot % 8) * dpi, y: origin.y + Math.floor(slot / 8) * dpi };
       shapes.push(buildShape()
         .width(size).height(size).shapeType("CIRCLE")
-        .position({ x: origin.x + (slot % 8) * dpi, y: origin.y + Math.floor(slot / 8) * dpi })
+        .position(position)
+        .visible(!area)
         .fillColor(MONSTER_TOKEN_COLORS[monsterIdx % MONSTER_TOKEN_COLORS.length])
         .fillOpacity(0.9).strokeColor("#ffffff").strokeWidth(3)
         .name(name).layer("CHARACTER")
@@ -1225,6 +1249,10 @@ async function addMonsterTokens(groups) {
         .fontSize(Math.max(12, dpi * 0.2)).fontWeight(700)
         .fillColor("#ffffff").strokeColor("#000000").strokeWidth(2)
         .layer("TEXT").attachedTo(shape.id).disableHit(true)
+        // Explicit rather than trusting an attached item to inherit its
+        // parent's hidden state - a visible name label floating by itself
+        // in the staging strip would spoil what's in the room.
+        .visible(shape.visible)
         .build();
     }));
     await OBR.scene.items.addItems(labels);
@@ -1243,6 +1271,7 @@ async function addMonsterTokens(groups) {
         .width(b.width).height(b.height).shapeType("RECTANGLE").position(b.min)
         .fillColor("#000000").fillOpacity(0.55).strokeOpacity(0).strokeWidth(0)
         .attachedTo(shape.id).layer("ATTACHMENT").locked(true).disableHit(true)
+        .visible(shape.visible)
         .metadata({ [DIM_OVERLAY_METADATA_KEY]: true })
         .build();
     }));
@@ -1308,7 +1337,7 @@ async function extractMonsters(addTokens) {
     });
     const added = await addMonsterTokens(groups);
     const roomCount = new Set(groups.map(g => g.area).filter(Boolean)).size;
-    const roomNote = roomCount ? ` Creatures under an Area heading (${roomCount} area${roomCount === 1 ? "" : "s"}) start inactive in the tracker - select that area's map pin to activate them.` : "";
+    const roomNote = roomCount ? ` Creatures under an Area heading (${roomCount} area${roomCount === 1 ? "" : "s"}) are parked hidden beside the map and inactive in the tracker - select that area's map pin to move them there, reveal them and activate them.` : "";
     statusEl.textContent = `Added ${added} token${added === 1 ? "" : "s"} for ${names}.${roomNote}${stagedOk ? "" : " " + stagedNote}`;
     statusEl.style.color = stagedOk ? "var(--good)" : "#c97b7b";
   } catch (err) {
