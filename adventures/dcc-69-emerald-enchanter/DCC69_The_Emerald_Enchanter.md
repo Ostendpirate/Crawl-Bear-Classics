@@ -96,7 +96,19 @@ The more detailed specimen actually was a man prior to being dipped in the sorce
 
 **Door:** The great door is carved from solid pewter, intricately engraved with elaborate designs. It is set with a single large keyhole and locked (DC 13 check to pick locks, DC 18 to smash).
 
-> **Emerald eidolons (2: 1 transmuted and 1 carved):** Init +2; Atk sword +6 melee (1d8+2); AC 16; HD 2d8; hp 10 each; MV 30'; SP death throes (carved eidolon explodes into 1d10 10-gp emeralds when killed; transmuted eidolon reverts to man when killed); Act 1d20; SV Fort +4, Ref +4, Will +4; AL N.
+#### Monster: Emerald Eidolon
+- Count: 2
+- Init: +2
+- Atk: sword +6 melee (1d8+2)
+- AC: 16
+- HD: 2d8
+- HP: 10
+- MV: 30'
+- Act: 1d20
+- SP: death throes (carved eidolon explodes into 1d10 10-gp emeralds when killed; transmuted eidolon reverts to man when killed)
+- Fort: +4, Ref: +4, Will: +4
+- AL: N
+- Notes: 1 transmuted, 1 carved
 
 > **Party of 3:** Drop this to **1 emerald eidolon** (the transmuted one — keep the "Thesdipedes knows the word…" hook). Two eidolons as the very first fight, before the party has any information, is a rough opener for 3 low-level PCs. If you'd rather keep both, remember they're motionless until approached within 30' — a thief who scouts ahead can let the party open with ranged attacks or a spell before melee starts.
 
@@ -129,9 +141,29 @@ The secret door is hidden behind tiles, and cannot be opened without breaking th
 
 There are also two 6-inch wide peepholes, allowing visibility from the empty corridors to either side. They also allow emerald skulls to pass (see area 1-4). These are easily detected with a careful search (or a DC 10 search check).
 
-> **Tile golem:** Init -4; Atk slash +5 melee (1d6+1); AC 10; HD 10d10; hp 50; MV 30'; SP draw tiles (as above: heal, blast, or summon, in addition to move and normal action), magical creature (treat as DC 25 to dispel); Act 1d20 + free tile draw; SV Fort +8, Ref +3, Will +6; AL N.
->
-> **Tile creatures (summoned by tile golem):** Init (as golem); Atk bite +2 melee (1d4); AC 10; HD 1d6; hp 4 each; MV 40'; Act 1d20; SV Fort +2, Ref +4, Will +1; AL N.
+#### Monster: Tile Golem
+- Init: -4
+- Atk: slash +5 melee (1d6+1)
+- AC: 10
+- HD: 10d10
+- HP: 50
+- MV: 30'
+- Act: 1d20 + free tile draw
+- SP: draw tiles (heal, blast, or summon, in addition to move and normal action), magical creature (treat as DC 25 to dispel)
+- Fort: +8, Ref: +3, Will: +6
+- AL: N
+
+#### Monster: Tile Creature
+- Init: as golem
+- Atk: bite +2 melee (1d4)
+- AC: 10
+- HD: 1d6
+- HP: 4
+- MV: 40'
+- Act: 1d20
+- Fort: +2, Ref: +4, Will: +1
+- AL: N
+- Notes: summoned by the tile golem
 
 > **Party of 3:** Cut the tile golem's **hp from 50 to 30**, its healing from **10 hp/round to 5 hp/round**, and tile summoning from **1d4 tile creatures to 1d3**. Everything else stays as written — it's a puzzle-fight the party can also starve out by destroying wall sections, which works just as well with 3 people as with 10.
 
@@ -161,7 +193,19 @@ If these skulls are killed, the emerald enchanter "sees" them die. He waits a fe
 
 **Room contents:** This room is filled with valuable curios discovered with a casual search, as follows: four ivory vases worth 40 gp each (but very breakable), a silver paperweight worth 10 gp, a bronze statuette of a knight worth 10 gp, and a crystal ball (non-magical) worth 20 gp. The rugs and wall hangings are worth 50 gp per 100 pounds; there are a total of 1,000 pounds of carpets. The massive emerald slab is not actually pure emerald but a green-tinted crystal. It is worth 100 gp intact, but is 20 feet long and weighs 500 pounds.
 
-> **Flying emerald skulls (2 or more):** Init +4; Atk bite +1 melee (1); AC 16; HD ½d8; hp 3 each; MV fly 60'; SP emerald enchanter can "see" through the skull's eyes; Act 1d20; SV Fort +1, Ref +7, Will +2; AL N.
+#### Monster: Flying Emerald Skull
+- Count: 2
+- Init: +4
+- Atk: bite +1 melee (1)
+- AC: 16
+- HD: ½d8
+- HP: 3
+- MV: fly 60'
+- Act: 1d20
+- SP: emerald enchanter can "see" through the skull's eyes
+- Fort: +1, Ref: +7, Will: +2
+- AL: N
+- Notes: more can be sent through the tabletop as replacements if these are killed
 
 ### Area 1-5 – Hall of Anguish
 
@@ -181,7 +225,19 @@ There are a total of six ebon spirits, starting three to each side of the corrid
 
 The ceilings are 10 feet tall, and the ebon spirits can form overhead. If cornered, an ebon spirit will melt into the wall, floor, or ceiling, move safely away, then re-form and attack. They can withdraw without triggering a free attack.
 
-> **Ebon spirit (6):** Init +4; Atk claws +4 melee (1d4+1); AC 16/20 (hit vs. AC 20 causes normal damage; hit vs. AC 16 causes damage but attacker's weapon has 25% chance (10% for magic weapons) of breaking as it strikes solid stone); HD 2d8; hp 8 each; MV 30'; SP wall walk (as part of move action can "disappear" into wall; completely impervious to attack in this mode; can re-emerge in a following round at point within range of normal movement; does not trigger free attack when withdrawing this way); Act 1d20; SV Fort +4, Ref +2, Will +4; AL C.
+#### Monster: Ebon Spirit
+- Count: 6
+- Init: +4
+- Atk: claws +4 melee (1d4+1)
+- AC: 16/20 (hit vs. AC 20 causes normal damage; hit vs. AC 16 causes damage but the attacker's weapon has a 25% chance — 10% for magic weapons — of breaking as it strikes solid stone)
+- HD: 2d8
+- HP: 8
+- MV: 30'
+- Act: 1d20
+- SP: wall walk (as part of a move action can "disappear" into a wall, completely impervious to attack in this mode; can re-emerge in a following round at a point within range of normal movement; does not trigger a free attack when withdrawing this way)
+- Fort: +4, Ref: +2, Will: +4
+- AL: C
+- Notes: starts split three to each side of the corridor
 
 > **Party of 3:** Cut **6 ebon spirits to 3** (still split, 1-2 to a side). Everything else as written; 6 simultaneous attackers on a 10-foot-wide corridor was clearly built for a bigger party filling the hallway.
 
@@ -191,7 +247,17 @@ The ceilings are 10 feet tall, and the ebon spirits can form overhead. If corner
 
 This emerald eidolon actually was a man prior to being dipped in the sorcerer's transmogrification vats (see area 3-5). When slain, it transforms back into flesh and blood before dying. (Its axe can be recovered.) As it dies, it whispers the sentence, "Ask Thesdipedes to save my wife…" This is a reference to the consultorium in area 1-13.
 
-> **Emerald eidolon:** Init +2; Atk battleaxe +6 melee (1d8+2); AC 16; HD 2d8; hp 10; MV 30'; SP death throes (reverts to man when killed); Act 1d20; SV Fort +4, Ref +4, Will +4; AL N.
+#### Monster: Emerald Eidolon
+- Init: +2
+- Atk: battleaxe +6 melee (1d8+2)
+- AC: 16
+- HD: 2d8
+- HP: 10
+- MV: 30'
+- Act: 1d20
+- SP: death throes (reverts to man when killed)
+- Fort: +4, Ref: +4, Will: +4
+- AL: N
 
 ### Area 1-7 – Passageway, Continued
 
@@ -233,7 +299,19 @@ An emerald eidolon guards this hall. As the first line of defense to the emerald
 
 There is nothing else of interest in this hall.
 
-> **Emerald eidolons (1, then 6 more; 2 transmuted and 5 carved):** Init +2; Atk sword +6 melee (1d8+2); AC 16; HD 2d8; hp 10 each; MV 30'; SP death throes (carved eidolon explodes into 1d10 10-gp emeralds when killed, transmuted eidolon reverts to man when killed); Act 1d20; SV Fort +4, Ref +4, Will +4; AL N.
+#### Monster: Emerald Eidolon
+- Count: 7
+- Init: +2
+- Atk: sword +6 melee (1d8+2)
+- AC: 16
+- HD: 2d8
+- HP: 10
+- MV: 30'
+- Act: 1d20
+- SP: death throes (carved eidolon explodes into 1d10 10-gp emeralds when killed, transmuted eidolon reverts to man when killed)
+- Fort: +4, Ref: +4, Will: +4
+- AL: N
+- Notes: 2 transmuted, 5 carved; 1 attacks first, then 6 more arrive from the barracks
 
 > **Party of 3:** This is the single biggest overkill in the dungeon as written — 7 eidolons total, 70 hp of AC 16 attackers. Change to **1 eidolon, then 2 more** (3 total) emerging from the barracks. Keep the flavor (noise draws reinforcements) but a full garrison response would flatten this party.
 
@@ -273,7 +351,17 @@ Note, to casual examination, there doesn't appear to be any way of opening the c
 
 Once mundane tigers, these cats have been bred and implanted with elemental gemstones. In addition to their claw and bite, they emit heat waves from the rubies.
 
-> **Ruby cats (2):** Init +2; Atk bite +5 melee (3d4) or claw +3 melee (1d6) or heat wave +6 missile fire (1d7); AC 15; HD 2d8; hp 9 each; MV 40'; Act 2d20; SV Fort +2, Ref +2, Will -1; AL N.
+#### Monster: Ruby Cat
+- Count: 2
+- Init: +2
+- Atk: bite +5 melee (3d4) or claw +3 melee (1d6) or heat wave +6 missile fire (1d7)
+- AC: 15
+- HD: 2d8
+- HP: 9
+- MV: 40'
+- Act: 2d20
+- Fort: +2, Ref: +2, Will: -1
+- AL: N
 
 **Cell B:**
 
@@ -281,7 +369,16 @@ Once mundane tigers, these cats have been bred and implanted with elemental gems
 
 This topaz serpent is slow but deadly. Its skin and blood are acidic, and for every hit against it, a weapon takes a -1 damage modifier as it slowly corrodes. Its bite is also acidic.
 
-> **Topaz serpent:** Init -2; Atk bite +8 melee (2d6 + 1d4 acid); AC 16; HD 3d8; hp 20; MV 20'; Act 1d20; SV Fort +6, Ref +4, Will +2; AL N.
+#### Monster: Topaz Serpent
+- Init: -2
+- Atk: bite +8 melee (2d6 + 1d4 acid)
+- AC: 16
+- HD: 3d8
+- HP: 20
+- MV: 20'
+- Act: 1d20
+- Fort: +6, Ref: +4, Will: +2
+- AL: N
 
 **Cell C:**
 
@@ -289,7 +386,18 @@ This topaz serpent is slow but deadly. Its skin and blood are acidic, and for ev
 
 This is a highly intelligent extra-spatial life form, which, unfortunately, lacks the means to communicate with mere three-dimensional creatures. Its pseudopods are each 10 feet long and can reach through the cell bars, but the central orb cannot fit through. It would like to discuss philosophy but will fight if threatened.
 
-> **Intelligent but misunderstood alien creature (15' x 5'):** Init -6; Atk pseudopod +4 melee (1d4 plus paralysis); AC 10; HD 3d8; hp 14; MV 5', climb 5'; Act 3d20; SP paralysis (DC 14 Fort save or paralyzed for 1 hour), half damage from slicing and piercing weapons; SV Fort +6, Ref -8, Will -6; AL N.
+#### Monster: Intelligent But Misunderstood Alien Creature
+- Init: -6
+- Atk: pseudopod +4 melee (1d4 plus paralysis)
+- AC: 10
+- HD: 3d8
+- HP: 14
+- MV: 5', climb 5'
+- Act: 3d20
+- SP: paralysis (DC 14 Fort save or paralyzed for 1 hour), half damage from slicing and piercing weapons
+- Fort: +6, Ref: -8, Will: -6
+- AL: N
+- Notes: roughly 15' x 5'; pseudopods reach 10' through the cell bars but the central orb cannot fit through
 
 ### Area 1-15 – Door Opener
 
@@ -319,9 +427,30 @@ Emerald skulls (from area 1-4) gain enhanced abilities in this area. When the la
 
 **The secret door:** One stone in the wall depresses when pushed, and the door clicks open (DC 14 search check).
 
-> **Giant skull carving:** Init +6; Atk bite +4 melee (1d4+2) or eye-beams +8 missile fire (1d10); AC 16/20 (hit vs. AC 20 causes normal damage; hit vs. AC 16 causes damage but attacker's weapon has 25% chance (10% for magic weapons) of breaking as it strikes solid stone); HD 7d10; hp 30; MV N/A; Act 2d20 (eye-beams or eye-beams + bite); SV Fort +6, Ref -4, Will -2; AL N.
->
-> **Flying emerald skulls (2 or more):** Init +4; Atk bite +1 melee (1) or eye-beams +2 missile fire (1d3); AC 16; HD ½d8; hp 3 each; MV fly 60'; SP eye-beams activated in area 1-17, emerald enchanter can "see" through the skull's eyes; Act 1d20; SV Fort +1, Ref +7, Will +2; AL N.
+#### Monster: Giant Skull Carving
+- Init: +6
+- Atk: bite +4 melee (1d4+2) or eye-beams +8 missile fire (1d10)
+- AC: 16/20 (hit vs. AC 20 causes normal damage; hit vs. AC 16 causes damage but the attacker's weapon has a 25% chance — 10% for magic weapons — of breaking as it strikes solid stone)
+- HD: 7d10
+- HP: 30
+- MV: N/A
+- Act: 2d20 (eye-beams or eye-beams + bite)
+- Fort: +6, Ref: -4, Will: -2
+- AL: N
+
+#### Monster: Flying Emerald Skull
+- Count: 2
+- Init: +4
+- Atk: bite +1 melee (1) or eye-beams +2 missile fire (1d3)
+- AC: 16
+- HD: ½d8
+- HP: 3
+- MV: fly 60'
+- Act: 1d20
+- SP: eye-beams activated in this area, emerald enchanter can "see" through the skull's eyes
+- Fort: +1, Ref: +7, Will: +2
+- AL: N
+- Notes: more can join from area 1-4 if not killed quickly
 
 > **Party of 3:** Cut the **giant skull carving's hp from 30 to 20**, and set the flying emerald skulls at **exactly 2** rather than rolling more in.
 
@@ -345,7 +474,19 @@ The hands have no treasure, but are holding various things of potential interest
 
 **Grate:** The iron grate in the corner is heavy (DC 14 Str check to lift) and chained shut (DC 16 Str check to burst chain, or 8 points of damage vs. AC 18). If breached, it opens onto a 40-foot vertical drop to area 2-1A.
 
-> **Reanimated severed hands (total of 20):** Init +3; Atk scratch +2 melee (1d2); AC 11; HD 1/4d8; hp 2 each; MV 30'; SP undead traits (can be turned by cleric); Act 1d20; SV Fort -2, Ref +1, Will -2; AL N.
+#### Monster: Reanimated Severed Hand
+- Count: 20
+- Init: +3
+- Atk: scratch +2 melee (1d2)
+- AC: 11
+- HD: 1/4d8
+- HP: 2
+- MV: 30'
+- Act: 1d20
+- SP: undead traits (can be turned by a cleric)
+- Fort: -2, Ref: +1, Will: -2
+- AL: N
+- Notes: total across areas 1-18 to 1-21, emerging in clumps of 3-5
 
 > **Party of 3:** Cut the total from **20 hands (across areas 1-18 to 1-21) to 8-10**, emerging in clumps of **2-3** instead of 3-5. Each hand is individually trivial, but 20 of them is built to grind down a large party over four rooms — against 3 PCs it's just an unwinnable war of attrition at full count.
 
@@ -380,7 +521,17 @@ Smashing the laboratory, carelessly mixing chemicals, or throwing beakers produc
 | 5 | Mood change. Living creatures become (roll 1d4): (1) depressed, (2) angry, (3) happy, or (4) friendly for 1d6 hours. |
 | 6 | Duplication. The target is suddenly duplicated. If a person, it now has an identical twin. If an object, a second version is created. |
 
-> **Protoplasmic demon:** Init +6; Atk lash +4 melee (1d6 + poison (DC 14 Fort or additional 1d8 stinging damage)); AC 13; HD 10d10; hp 65; MV 20', climb 20'; SP demon traits (can be turned by cleric, immune to weapons of less than +2 enchantment); Act 4d20; SV Fort +8, Ref +4, Will +8; AL C.
+#### Monster: Protoplasmic Demon
+- Init: +6
+- Atk: lash +4 melee (1d6 + poison; DC 14 Fort or an additional 1d8 stinging damage)
+- AC: 13
+- HD: 10d10
+- HP: 65
+- MV: 20', climb 20'
+- Act: 4d20
+- SP: demon traits (can be turned by a cleric, immune to weapons of less than +2 enchantment)
+- Fort: +8, Ref: +4, Will: +8
+- AL: C
 
 > **Party of 3:** The demon already prefers to ignore the party and go pick a fight with the enchanter (a great outcome — encourage it). If it does end up fighting the PCs directly, cut **hp from 65 to 40** and **Act from 4d20 to 2d20** — dangerous without four attacks a round against three targets.
 
@@ -400,10 +551,6 @@ If the characters speak the word learned from Thesdipedes in area 1-13, the eido
 
 Note: If the characters advance past the threshold of this room, the mutant plants attack as well (see below).
 
-> **Ogre, emerald eidolon form:** Init +2; Atk blade +7 melee (2d8+4); AC 16; HD 4d8+4; hp 25; MV 20'; SP death throes (reverts to ogre when killed); Act 2d20; SV Fort +5, Ref +5, Will +5; AL N.
->
-> **Ogre, natural form:** Init +2; Atk blade +5 melee (2d8+6); AC 16; HD 4d8+4; hp 25; MV 20'; Act 1d20; SP bear hug (see DCC RPG, page 422); SV Fort +4, Ref +2, Will +1; AL C.
-
 When the emerald eidolon is killed, read or paraphrase the following:
 
 > This large room is a garden, but not like any garden you have ever seen. In the center of the room is a shimmering globe hanging in mid-air. Heat and light radiate from the globe. Cultivated plants line walkways throughout the area, but these plants do not look friendly. They are covered in barbs, whips, tentacles, beaks, and, in some cases, what appear to human-like hands and heads.
@@ -412,21 +559,63 @@ The emerald enchanter's many hobbies include anthropohorticulture—more commonl
 
 The entire room is filled with deadly plants. Advancing more than 5 feet into the room triggers an attack, and the attacks continue constantly. The statistics below are for a 5-foot square; assume every 5-foot square has similar capability for offense. Creative characters may burn or freeze the entire room, depending on their inspiration.
 
-> **Mutant plants (5-foot square):** Init +0; Atk lash/bite/sting +3 melee (1d4 plus 25% chance of poison); AC 11; HD 5d8; hp 25; MV 5'; SP double damage from fire or cold, poison (DC 12 Fort save or effect (roll 1d4): (1) sleep for 1d6 rounds, (2) stinging acid for 1d6 damage, (3) caustic substance for 1d3 Stamina loss, (4) blindness for 1d4 hours); Act 4d20; SV Fort +1, Ref -4, Will -4; AL N.
-
-> **Party of 3:** The eidolon guard (25 hp, AC 16) is fine as a solo fight. The plant swarm is not — as written, every 5-foot square gets Act 4d20, a meat grinder built to punish a big party pushing through a large room. For 3 PCs: only the squares the PCs are actually standing in or moved through attack, not the whole room at once; each attacking square's **Act 4d20 → 1d20** (one attack, not four); and consider letting the party skirt the room's edge or retreat after triggering it once — the grate to area 2-1B doesn't require crossing the whole garden.
-
 **Grate:** The iron grate in the corner is hidden by plants. It is heavy (DC 14 Str check to lift) and chained shut (DC 16 Str check to burst chain, or 8 points of damage vs. AC 16). If breached, it opens onto a 40-foot vertical drop to area 2-1B.
 
 **The globe:** The magic globe provides sunlight for the entire room. It levitates in mid-air and is burning hot to the touch (1d4 damage per round of contact; ignites flammable objects in 1d2 rounds). A spellcaster can control it with a DC 18 spell check; with concentration, he can move it 5 feet per round in any direction.
 
+#### Monster: Emerald Eidolon Ogre
+- Init: +2
+- Atk: blade +7 melee (2d8+4)
+- AC: 16
+- HD: 4d8+4
+- HP: 25
+- MV: 20'
+- Act: 2d20
+- SP: death throes (reverts to ogre when killed)
+- Fort: +5, Ref: +5, Will: +5
+- AL: N
+- Notes: this is the eidolon's transmuted combat form; if the word "yasmilon" is spoken it reverts to the Natural-Form Ogre below (and still attacks)
+
+#### Monster: Natural-Form Ogre
+- Init: +2
+- Atk: blade +5 melee (2d8+6)
+- AC: 16
+- HD: 4d8+4
+- HP: 25
+- MV: 20'
+- Act: 1d20
+- SP: bear hug (see DCC RPG, page 422)
+- Fort: +4, Ref: +2, Will: +1
+- AL: C
+
+#### Monster: Mutant Plant Patch
+- Init: +0
+- Atk: lash/bite/sting +3 melee (1d4 plus 25% chance of poison)
+- AC: 11
+- HD: 5d8
+- HP: 25
+- MV: 5'
+- Act: 4d20
+- SP: double damage from fire or cold, poison (DC 12 Fort save or roll 1d4: 1 sleep for 1d6 rounds, 2 stinging acid for 1d6 damage, 3 caustic substance for 1d3 Stamina loss, 4 blindness for 1d4 hours)
+- Fort: +1, Ref: -4, Will: -4
+- AL: N
+- Notes: one patch per 5-foot square of garden; every square in the room has this statline
+
+> **Party of 3:** The eidolon guard (25 hp, AC 16) is fine as a solo fight. The plant swarm is not — as written, every 5-foot square gets Act 4d20, a meat grinder built to punish a big party pushing through a large room. For 3 PCs: only the squares the PCs are actually standing in or moved through attack, not the whole room at once; each attacking square's **Act 4d20 → 1d20** (one attack, not four); and consider letting the party skirt the room's edge or retreat after triggering it once — the grate to area 2-1B doesn't require crossing the whole garden.
+
 ## Level 2: The Dungeons
 
-### Areas 2-1A and 2-1B – Tunnels
+### Area 2-1A – Tunnels
 
 > These dark tunnels are carved from solid rock. The floor and walls are uneven and pitch black beyond the reach of your sight.
 
-The grates from areas 1-18 and 1-22 lead here, but without any kind of ladder; characters must provide their own rope. These dark, dank tunnels sit 40 feet below ground level. They are unremarkable except for the fact they lead to the moon-devil.
+The grate from area 1-18 leads here, but without any kind of ladder; characters must provide their own rope. These dark, dank tunnels sit 40 feet below ground level. They are unremarkable except for the fact they lead to the moon-devil.
+
+### Area 2-1B – Tunnels
+
+> These dark tunnels are carved from solid rock. The floor and walls are uneven and pitch black beyond the reach of your sight.
+
+The grate from area 1-22 leads here, but without any kind of ladder; characters must provide their own rope. These dark, dank tunnels sit 40 feet below ground level. They are unremarkable except for the fact they lead to the moon-devil.
 
 ### Area 2-2 – The Moon-Devil's Dungeon
 
@@ -477,7 +666,18 @@ This emerald statue is the last and most powerful guardian before the emerald en
 
 If the entire party fails their saves and cannot pass, there are still two options for advancement. They can use the emerald tabletop at area 1-4 to pass into area 3-2. They can also climb the chimney at area 2-3 into area 3-5. Allow a Luck check to help the characters' recollections, as needed.
 
-> **Emerald eidolon with claws and scorpion tail (carved):** Init +3; Atk claw +8 melee (1d8+1) or scorpion tail +6 melee (1d6 plus magical poison (DC 14 Fort save or 1d4 Stamina loss)); AC 18; HD 8d8+8; hp 45 (25 if it fought protoplasmic demon); MV 30'; SP death throes (explodes into 2d10 10-gp emeralds when killed); Act 3d20 (2 claws + tail); SV Fort +6, Ref +6, Will +4; AL N.
+#### Monster: Scorpion-Tailed Emerald Eidolon
+- Init: +3
+- Atk: claw +8 melee (1d8+1) or scorpion tail +6 melee (1d6 plus magical poison; DC 14 Fort save or 1d4 Stamina loss)
+- AC: 18
+- HD: 8d8+8
+- HP: 45
+- MV: 30'
+- Act: 3d20 (2 claws + tail)
+- SP: death throes (explodes into 2d10 10-gp emeralds when killed)
+- Fort: +6, Ref: +6, Will: +4
+- AL: N
+- Notes: carved eidolon; HP drops to 25 if it already fought the protoplasmic demon from area 1-20
 
 > **Party of 3:** No change needed. A single strong solo monster (45 hp, or 25 if softened by the protoplasmic demon) is a good climactic fight for 3 characters, especially with the demon's rampage as a possible assist.
 
@@ -554,17 +754,53 @@ A heavy metal grate is integrated into the machinery; it opens onto a 60-foot ve
 - *Round 6:* The cages dip below the vat water level. The maidens are killed.
 - *Round 7:* The cage doors open, and the maidens crawl forth as new emerald eidolons to attack the characters.
 
-> **Flying emerald skulls (8):** Init +4; Atk bite +1 melee (1) or eye-beams +2 missile fire (1d3); AC 16; HD ½d8; hp 3 each; MV fly 60'; Act 1d20; SV Fort +1, Ref +7, Will +2; AL N.
->
-> **Emerald eidolons (2 or 4, transmuted):** Init +2; Atk sword +6 melee (1d8+2); AC 16; HD 2d8; hp 10 each; MV 30'; SP death throes (reverts to man when killed); Act 1d20; SV Fort +4, Ref +4, Will +4; AL N.
->
-> **Emerald enchanter (high-level wizard):** Init +2; Atk wizard staff +3 melee (1d4+6) or dagger +3 melee (1d4+2) or dagger +2 missile fire (1d4+2); AC 13; HD 6d4+4; hp 24; MV 30'; SP spellcasting (see below), familiar (see below), patron (Azi Dahaka), wizard staff (+2 to saves, +2 to spell checks on magic missile), above-average ability scores (Str 14, Stm 14, Int 16); Act 1d20+1d14; SV Fort +5 (+7 vs. poison), Ref +4, Will +5; AL C.
->
-> *Equipment:* wizard staff, padded armor, 3 daggers, ring of protection (+2 AC), ring of consultation (cast speak with the dead 1/day).
->
-> *Spells:* Spell check +8 in general; +9 on invoke patron, +10 on magic missile. Spells known: (level 1) cantrip, find familiar, invoke patron (+9 spell check), magic missile (green arrows; +10 spell check due to wizard staff; cast without motion due to mentalism aspect of mercurial magic), magic shield, patron bond (2/day), runic alphabet (mortal), spider climb, (level 2) wizard staff, (level 3) make potion.
->
-> *Familiar:* Emerald scorpion. Atk +2 melee (1d3), AC 14, HP 1.
+#### Emerald Enchanter — Equipment and Spells
+
+- **Equipment:** wizard staff, padded armor, 3 daggers, ring of protection (+2 AC), ring of consultation (cast *speak with the dead* 1/day).
+- **Spells:** Spell check +8 in general; +9 on invoke patron, +10 on magic missile. Spells known: (level 1) cantrip, find familiar, invoke patron (+9 spell check), magic missile (green arrows; +10 spell check due to wizard staff; cast without motion due to mentalism aspect of mercurial magic), magic shield, patron bond (2/day), runic alphabet (mortal), spider climb; (level 2) wizard staff; (level 3) make potion.
+
+#### Monster: Flying Emerald Skull
+- Count: 8
+- Init: +4
+- Atk: bite +1 melee (1) or eye-beams +2 missile fire (1d3)
+- AC: 16
+- HD: ½d8
+- HP: 3
+- MV: fly 60'
+- Act: 1d20
+- Fort: +1, Ref: +7, Will: +2
+- AL: N
+
+#### Monster: Emerald Eidolon
+- Count: 4
+- Init: +2
+- Atk: sword +6 melee (1d8+2)
+- AC: 16
+- HD: 2d8
+- HP: 10
+- MV: 30'
+- Act: 1d20
+- SP: death throes (reverts to man when killed)
+- Fort: +4, Ref: +4, Will: +4
+- AL: N
+- Notes: transmuted; 2 or 4 rise from the vats depending on how many the enchanter has completed
+
+#### Monster: Emerald Enchanter
+- Init: +2
+- Atk: wizard staff +3 melee (1d4+6) or dagger +3 melee (1d4+2) or dagger +2 missile fire (1d4+2)
+- AC: 13
+- HD: 6d4+4
+- HP: 24
+- MV: 30'
+- Act: 1d20+1d14
+- SP: spellcasting, familiar (see Emerald Scorpion Familiar below), patron (Azi Dahaka), wizard staff (+2 to saves, +2 to spell checks on magic missile), above-average ability scores (Str 14, Stm 14, Int 16)
+- Fort: +5 (+7 vs. poison), Ref: +4, Will: +5
+- AL: C
+
+#### Monster: Emerald Scorpion Familiar
+- Atk: sting +2 melee (1d3)
+- AC: 14
+- HP: 1
 
 > **Party of 3:** This is the encounter most likely to kill a 3-person party as written (8 flying skulls + 2-4 emerald eidolons + the enchanter, all at once). Trim the escort, not the boss: **flying emerald skulls 8 → 3-4**; **emerald eidolons 2-4 → 1**; **the emerald enchanter himself: no change.** At hp 24, AC 13, with one attack routine and no legendary actions, he's already a well-built solo boss for a small party — the problem was never him, it was his entourage. The maiden-cage subplot (rounds 1-7, chain apparatus, cage saves) needs no adjustment — it's a timer and a skill challenge, not a combat-scaling issue, and it gives the thief and cleric something heroic to do besides trading blows with the boss.
 
@@ -683,7 +919,20 @@ Anyone with ties to the region knows the plateau as Flat Rock. The site is unuse
 
 Flying emerald skulls from the Emerald Enchanter's ruined citadel now roost at Flat Rock feeding off the sporadic road travelers. The skulls swoop down on the party as they travel along roads adjacent to Flat Rock. They prefer to attack with the sun at their backs to surprise opponents.
 
-> **Flying emerald skulls (10):** Init +4; Atk bite +1 melee (1) or eye-beams +2 missile fire (1d3); AC 16; HD ½d8; hp 3 each; MV fly 60'; Act 1d20; SV Fort +1, Ref +7, Will +2; AL N.
+#### Monster: Flying Emerald Skull
+- Count: 10
+- Init: +4
+- Atk: bite +1 melee (1) or eye-beams +2 missile fire (1d3)
+- AC: 16
+- HD: ½d8
+- HP: 3
+- MV: fly 60'
+- Act: 1d20
+- Fort: +1, Ref: +7, Will: +2
+- AL: N
+- Notes: prefer to attack with the sun at their backs for surprise
+
+> **Party of 3:** Cut **10 skulls to 4-5**. Each is individually trivial (3 hp, a single 1-point bite), but ten of them against three PCs is the same war-of-attrition problem as the reanimated hands in the original citadel — thin the swarm rather than the stats.
 
 ### Area 1-5 – Riverdown
 
@@ -693,7 +942,20 @@ Riverdown is the most recent victim of the Emerald Titan's fury. A 12-inch thick
 
 Villagers trapped within the barrier are slowly turning into aquamarine thralls of the Emerald Enchanter. Crystalline shards of aquamarine grow through their bodies, pulsing with light in time with the staff in the square. The villagers hide in buildings during the day and wander like automatons through the dark alleys at night. The villagers are nimble-footed, and wait for outsiders to stroll into town before ambushing in a small group with whatever makeshift weapons they have on hand (e.g. farmer with pitchfork, butcher with cleaver, or candle maker with candelabra). Each time a building is entered, there is a 30% chance of encountering more thralls, and some salvageable items; roll 1d3 times on Table F: Found Items. A group of 1d3+1 thralls is always milling around the town square.
 
-> **Crystal thralls (2d4):** Init +3; Atk improvised weapon +6 melee (1d6); AC 15; HD 2d8; hp 9 each; MV 30'; Act 1d20; SV Fort +4, Ref +3, Will +2; AL N.
+#### Monster: Crystal Thrall
+- Count: 5
+- Init: +3
+- Atk: improvised weapon +6 melee (1d6)
+- AC: 15
+- HD: 2d8
+- HP: 9
+- MV: 30'
+- Act: 1d20
+- Fort: +4, Ref: +3, Will: +2
+- AL: N
+- Notes: roll 2d4 for a group encountered in a building; 1d3+1 always mill in the town square
+
+> **Party of 3:** Roll **1d4 instead of 2d4** for thralls encountered in a building, and cap the town-square group at **2** instead of 1d3+1. Each thrall is a fair single fight for one PC, but the book's group sizes assume a party that can spread the incoming attacks across more bodies.
 
 Smashing the staff gem in the town square drops the force field and releases the villagers from its spell. The shards stop glowing and the villagers fall to the ground. Depending on the extent of crystalline growth, the villagers have a 25-50% chance of dying after 1d3 days. Cleaning and bandaging wounds reduces the chance by 10%. Use of healing magic and potions completely negates the effects. Survivors' memories are foggy, but a few can recall brief flashes of the attack; roll on Table S: Survivor Stories.
 
@@ -744,7 +1006,14 @@ The townsfolk refer the adventurers to Treesha Mangrave if questioned about rece
 
 When the party departs, Treesha's sons, Sage and Guder, eager to embark on adventures of their own, offer their services as hirelings (4 cp per week each). The brothers come equipped with leather jerkins and hatchets. Neither can fail a morale check when the other is present.
 
-> **The Brothers Mangrave (2):** Atk hatchet +1 melee (1d6); AC 12; hp 3 each.
+#### Monster: Brother Mangrave
+- Count: 2
+- Atk: hatchet +1 melee (1d6)
+- AC: 12
+- HP: 3
+- Notes: Sage and Guder, hirelings (4 cp/week each); neither fails a morale check while the other is present
+
+> **Party of 3:** This campaign runs without hirelings — skip the Brothers' offer to join, or have them decline to leave Philbin if the party asks. If you'd rather use them anyway just this once, they're a fair one-off pair of extra bodies for a fragile trio.
 
 ### Area 1-8 – Hirot
 
@@ -768,7 +1037,20 @@ Once the titan is found, the judge should allow the players ample time to formul
 
 The titan armor is a marvel of arcane engineering. From the inside, localized gravity allows one to walk on the walls as if under the effects of centrifugal force. Hatches separate the lower limbs, upper limbs, torso, and head.
 
-> **Emerald titan:** Init +6; Atk punch or stomp +10 melee (1d20); AC 24; HD 20d12; hp 130; MV 55'; Act 1d24; SP immune to mind effects and critical hits, crit on 20-24; SV Fort +18, Ref +17, Will Immune; AL N.
+#### Monster: Emerald Titan
+- Init: +6
+- Atk: punch or stomp +10 melee (1d20)
+- AC: 24
+- HD: 20d12
+- HP: 130
+- MV: 55'
+- Act: 1d24
+- SP: immune to mind effects and critical hits, crits on a roll of 20-24
+- Fort: +18, Ref: +17, Will: Immune
+- AL: N
+- Notes: the party fights its way through the armor (areas 2-1 to 2-4) rather than damaging the titan directly
+
+> **Party of 3:** The titan's own stat block barely matters — as written this is a skill-and-positioning encounter (breach the armor, survive each limb's hazard) rather than a stand-up fight against hp 130/AC 24. No change needed; if you want a mechanical fallback for a party that tries to slug it out directly, treat it as unwinnable by force and steer them back toward finding a way in.
 
 ### Area 2-1 – Lower Limb
 
@@ -776,11 +1058,27 @@ The right ankle and the left forearm of the titan's armor have loose plates; DC 
 
 ### Area 2-2 – Upper Limb
 
-Each upper limb contains 1 green-skin warrior (stats below). Every other round the titan pokes a splintered tree through a crack in the armor. A random creature must succeed in a DC 20 Reflex save or take 1d10 damage from impaling.
+Each upper limb contains 1 green-skin warrior. Every other round the titan pokes a splintered tree through a crack in the armor. A random creature must succeed in a DC 20 Reflex save or take 1d10 damage from impaling.
+
+#### Monster: Green-Skin Warrior
+- Init: +4
+- Atk: crystal claw +8 melee (1d10+1)
+- AC: 16
+- HD: 3d8
+- HP: 17
+- MV: 30'
+- Act: 1d20
+- Fort: +5, Ref: +4, Will: +2
+- AL: N
+- Notes: 1 per upper limb (area 2-2), 2 in the torso (area 2-3)
+
+> **Party of 3:** A single 17-hp, AC 16 warrior per limb is already a fair fight for whichever PC breaches that hatch — no change needed. If the whole party ends up fighting one together, that's fine too.
 
 ### Area 2-3 – Torso
 
-An enormous glowing emerald spins on its axis at the center of the large chamber. Destroying the gem (AC 22; hp 20) causes the titan to shut down, but doesn't prevent a dome launch (area 2-4). A loose plate on the back can be popped off from outside with a DC 20 Strength check. The room contains 2 green-skin warriors. In round 2, a hive of angry bees is pushed in via a crack in the armor (-1 to all rolls as bees harass PCs).
+An enormous glowing emerald spins on its axis at the center of the large chamber. Destroying the gem (AC 22; hp 20) causes the titan to shut down, but doesn't prevent a dome launch (area 2-4). A loose plate on the back can be popped off from outside with a DC 20 Strength check. The room contains 2 green-skin warriors (see area 2-2 for stats). In round 2, a hive of angry bees is pushed in via a crack in the armor (-1 to all rolls as bees harass PCs).
+
+> **Party of 3:** Two green-skin warriors (17 hp, AC 16 each) at once is a tougher fight than the single warriors in the limbs — for 3 PCs, consider having them arrive one at a time (a few rounds apart) rather than both immediately, especially with the bee swarm's -1 penalty stacking on top.
 
 ### Area 2-4 – Glass Dome Head
 
@@ -797,15 +1095,29 @@ The Emerald Enchanter holds one last trick up his sleeve. After combat starts, t
 - *Round 6:* G-forces halve all movement. The dome gains 80'.
 - *Round 7:* G-forces pin everyone down. All occupants of the dome are prone and immobile until the dome reaches its final location.
 
-> **Green-skin warriors (10):** Init +4; Atk crystal claw +8 melee (1d10+1); AC 16; HD 3d8; hp 17 each; MV 30'; Act 1d20; SV Fort +5, Ref +4, Will +2; AL N.
->
-> **Emerald enchanter (high-level wizard):** Init +2; Atk wizard staff +3 melee (1d4+6) or dagger +3 melee (1d4+2) or dagger +2 missile fire (1d4+2); AC 11; HD 6d4+4; hp 24; MV 30'; SP spellcasting (see below), familiar (see below), patron (Azi Dahaka), wizard staff (+2 to saves, +2 to spell checks on magic missile), above-average ability scores (Str 14, Sta 14, Int 16, Luck 7); Act 1d20+1d14; SV Fort +5 (+7 vs. poison), Ref +4, Will +5; AL C.
->
-> *Equipment:* wizard staff, padded armor, 6 daggers, potion of slow falling (no damage from a single fall), green rabbit's foot (+2 Luck checks), iron skeleton key.
->
-> *Spells:* Spell check +8 in general; +9 on invoke patron, +10 on magic missile. Spells known: (level 1) cantrip, find familiar, invoke patron (+9 spell check), magic missile (green arrows; +10 spell check due to wizard staff; cast without motion due to mentalism aspect of mercurial magic), magic shield, patron bond (2/day), runic alphabet (mortal), spider climb, (level 2) wizard staff, (level 3) make potion.
->
-> *Familiar:* Scorpion. Atk sting +2 melee (1d4 + poison, DC 15 Fort save or death), AC 14, HP 1.
+#### Emerald Enchanter — Equipment and Spells
+
+- **Equipment:** wizard staff, padded armor, 6 daggers, potion of slow falling (no damage from a single fall), green rabbit's foot (+2 Luck checks), iron skeleton key.
+- **Spells:** Spell check +8 in general; +9 on invoke patron, +10 on magic missile. Spells known: (level 1) cantrip, find familiar, invoke patron (+9 spell check), magic missile (green arrows; +10 spell check due to wizard staff; cast without motion due to mentalism aspect of mercurial magic), magic shield, patron bond (2/day), runic alphabet (mortal), spider climb; (level 2) wizard staff; (level 3) make potion.
+
+#### Monster: Emerald Enchanter
+- Init: +2
+- Atk: wizard staff +3 melee (1d4+6) or dagger +3 melee (1d4+2) or dagger +2 missile fire (1d4+2)
+- AC: 11
+- HD: 6d4+4
+- HP: 24
+- MV: 30'
+- Act: 1d20+1d14
+- SP: spellcasting, familiar (see Enchanter's Familiar below), patron (Azi Dahaka), wizard staff (+2 to saves, +2 to spell checks on magic missile), above-average ability scores (Str 14, Sta 14, Int 16, Luck 7)
+- Fort: +5 (+7 vs. poison), Ref: +4, Will: +5
+- AL: C
+
+#### Monster: Enchanter's Familiar
+- Atk: sting +2 melee (1d4 plus poison; DC 15 Fort save or death)
+- AC: 14
+- HP: 1
+
+> **Party of 3:** As with the first fight, the enchanter himself (hp 24, AC 11) is a fine solo boss for 3 PCs — the danger here is the falling and G-force effects on top of him, not extra minions. Consider giving the party a couple of extra rounds of warning before the countdown reaches zero (round 2 instead of immediate), so a 3-person group has time to reach the dome before it launches.
 
 **Treasure:** 1 small locked chest containing 2d30 gp, 1d100 sp, and 3 flawless rubies (30 gp each). A bulky backpack with extra strength straps and a pull cord contains several books of fiction and dirty laundry. Swiftly pulling the cord releases the contents to the floor.
 
