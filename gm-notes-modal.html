@@ -1015,12 +1015,18 @@ document.getElementById("gm-notes-close-btn").addEventListener("click", () => {
 function extractMonsterBlocks(markdown) {
   const blocks = [];
   let current = null;
+  // The most recent "Area <id> –" heading above a block, so Extract + Add
+  // Tokens can tag each creature with the room it belongs to (selecting
+  // that room's map pin activates them in the tracker - see overlay.html).
+  let areaId = null;
   (markdown || "").split("\n").forEach(line => {
     const heading = line.match(/^#+\s*(.*)$/);
     if (heading) {
       if (current) blocks.push(current);
+      const areaHeading = heading[1].match(/^Area\s+(\S+)\s*[–-]/i);
+      if (areaHeading) areaId = areaHeading[1];
       const monsterHeading = heading[1].match(/^Monster:\s*(.+)$/i);
-      current = monsterHeading ? { name: monsterHeading[1].trim(), lines: [] } : null;
+      current = monsterHeading ? { name: monsterHeading[1].trim(), area: areaId, lines: [] } : null;
       return;
     }
     if (current) current.lines.push(line);
@@ -1115,6 +1121,11 @@ function parseMonsterBlock(block) {
 // populated when it lands on the scene.
 const MONSTER_METADATA_KEY = "com.claude.monster-sheet/dcc-data";
 const MODE_METADATA_KEY = "com.claude.monster-sheet/sheet-mode";
+const COMBAT_METADATA_KEY = "com.claude.monster-sheet/combat-data";
+const DIM_OVERLAY_METADATA_KEY = "com.claude.monster-sheet/dim-overlay";
+// Tags a creature token with the Area id it was extracted under; selecting
+// that room's map pin activates every token carrying it (see overlay.html).
+const ENCOUNTER_ROOM_METADATA_KEY = "com.claude.monster-sheet/encounter-room";
 const MAX_TOKENS_PER_MONSTER = 30;
 const MONSTER_TOKEN_COLORS = ["#a83f2b", "#3d6b96", "#1c7a52", "#96701f", "#6b5b8a", "#1c6d7a", "#7a4f1c", "#8a5b7a"];
 
@@ -1161,7 +1172,7 @@ function nextTokenNames(base, count, sceneItems) {
   return Array.from({ length: count }, (_, i) => `${base} ${highest + i + 1}`);
 }
 
-async function addMonsterTokens(monsters, statusEl) {
+async function addMonsterTokens(groups) {
   const dpi = await OBR.scene.grid.getDpi();
   const size = dpi * 0.9;
   const sceneItems = await OBR.scene.items.getItems();
@@ -1172,18 +1183,29 @@ async function addMonsterTokens(monsters, statusEl) {
   } catch (err) { /* falls back to the scene origin */ }
 
   const shapes = [];
-  Object.entries(monsters).forEach(([heading, entry], monsterIdx) => {
+  groups.forEach(({ heading, entry, area }, monsterIdx) => {
     const base = tokenBaseName(heading);
     const names = nextTokenNames(base, entry.count || 1, sceneItems);
+    // Two groups sharing a base name in one import must number past each
+    // other, and the scene snapshot above can't see tokens not yet added.
+    names.forEach(name => sceneItems.push({ layer: "CHARACTER", name }));
     names.forEach(name => {
       const slot = shapes.length;
+      const metadata = { [MODE_METADATA_KEY]: "monster", [MONSTER_METADATA_KEY]: monsterSheetData(entry) };
+      // Creatures that belong to a keyed room start INACTIVE in the tracker
+      // (so the next room's monsters aren't all rolling initiative from the
+      // first fight) and are switched on when that room's pin is selected.
+      if (area) {
+        metadata[ENCOUNTER_ROOM_METADATA_KEY] = area;
+        metadata[COMBAT_METADATA_KEY] = { enabled: false };
+      }
       shapes.push(buildShape()
         .width(size).height(size).shapeType("CIRCLE")
         .position({ x: origin.x + (slot % 8) * dpi, y: origin.y + Math.floor(slot / 8) * dpi })
         .fillColor(MONSTER_TOKEN_COLORS[monsterIdx % MONSTER_TOKEN_COLORS.length])
         .fillOpacity(0.9).strokeColor("#ffffff").strokeWidth(3)
         .name(name).layer("CHARACTER")
-        .metadata({ [MODE_METADATA_KEY]: "monster", [MONSTER_METADATA_KEY]: monsterSheetData(entry) })
+        .metadata(metadata)
         .build());
     });
   });
@@ -1208,6 +1230,25 @@ async function addMonsterTokens(monsters, statusEl) {
     await OBR.scene.items.addItems(labels);
   } catch (err) {
     console.error("DCC GM notes: token name labels failed (tokens themselves were added)", err);
+  }
+
+  // Same dim overlay index.html's setTokenDimmed draws for a deactivated
+  // tracker row, so a room's sleeping creatures look the same as any other
+  // inactive token until their pin wakes them.
+  try {
+    const dimmed = shapes.filter(sh => sh.metadata[COMBAT_METADATA_KEY]);
+    const overlays = await Promise.all(dimmed.map(async shape => {
+      const b = await OBR.scene.items.getItemBounds([shape.id]);
+      return buildShape()
+        .width(b.width).height(b.height).shapeType("RECTANGLE").position(b.min)
+        .fillColor("#000000").fillOpacity(0.55).strokeOpacity(0).strokeWidth(0)
+        .attachedTo(shape.id).layer("ATTACHMENT").locked(true).disableHit(true)
+        .metadata({ [DIM_OVERLAY_METADATA_KEY]: true })
+        .build();
+    }));
+    if (overlays.length) await OBR.scene.items.addItems(overlays);
+  } catch (err) {
+    console.error("DCC GM notes: inactive-token dimming failed (tokens themselves were added)", err);
   }
   return shapes.length;
 }
@@ -1259,10 +1300,16 @@ async function extractMonsters(addTokens) {
     return;
   }
   try {
-    const withCounts = {};
-    Object.keys(monsters).forEach(name => { withCounts[name] = { ...monsters[name], count: parsed[name].count }; });
-    const added = await addMonsterTokens(withCounts, statusEl);
-    statusEl.textContent = `Added ${added} token${added === 1 ? "" : "s"} for ${names}.${stagedOk ? "" : " " + stagedNote}`;
+    // One group per BLOCK (not per name) so the same creature type in two
+    // different rooms gets its own tokens tagged to each room.
+    const groups = blocks.map(b => {
+      const entry = parseMonsterBlock(b);
+      return { heading: b.name, entry, area: b.area };
+    });
+    const added = await addMonsterTokens(groups);
+    const roomCount = new Set(groups.map(g => g.area).filter(Boolean)).size;
+    const roomNote = roomCount ? ` Creatures under an Area heading (${roomCount} area${roomCount === 1 ? "" : "s"}) start inactive in the tracker - select that area's map pin to activate them.` : "";
+    statusEl.textContent = `Added ${added} token${added === 1 ? "" : "s"} for ${names}.${roomNote}${stagedOk ? "" : " " + stagedNote}`;
     statusEl.style.color = stagedOk ? "var(--good)" : "#c97b7b";
   } catch (err) {
     console.error("DCC GM notes: adding monster tokens failed", err);

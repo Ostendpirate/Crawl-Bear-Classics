@@ -26,6 +26,12 @@ const DICE_MODAL_URL = "https://ostendpirate.github.io/Crawl-Bear-Classics/dice-
 // API shows its icon(s) when an item is SELECTED, not on right-click -
 // see docs.owlbear.rodeo's own Context Menu tutorial).
 const ROOM_PIN_METADATA_KEY = "com.claude.monster-sheet/room-pin";
+// Creature tokens added by GM Notes' "Extract + Add Tokens" carry the Area
+// id they were written under (and start inactive in the tracker) - see
+// gm-notes-modal.html's ENCOUNTER_ROOM_METADATA_KEY.
+const ENCOUNTER_ROOM_METADATA_KEY = "com.claude.monster-sheet/encounter-room";
+const COMBAT_METADATA_KEY = "com.claude.monster-sheet/combat-data";
+const DIM_OVERLAY_METADATA_KEY = "com.claude.monster-sheet/dim-overlay";
 const GM_NOTES_MODAL_ID = "com.claude.monster-sheet/gm-notes-modal";
 const GM_NOTES_MODAL_URL = "https://ostendpirate.github.io/Crawl-Bear-Classics/gm-notes-modal.html";
 // gm-notes-modal.html listens on this so an ALREADY-OPEN copy of that
@@ -74,11 +80,39 @@ function openDiceModal(payload) {
 // checks the role itself before ever opening someone else's private
 // notes, rather than relying on the context menu icon's own filter
 // (which only matches item metadata, not player role).
+
+// Switches on (in the Combat Tracker) every creature token tagged to this
+// room that's currently inactive, and clears the dim overlay the tracker
+// draws over inactive tokens (same overlay index.html's setTokenDimmed
+// makes). Only ever activates - creatures from rooms already fought in are
+// left alone rather than guessing the GM is done with them mid-session.
+async function activateEncounter(roomId) {
+  const sleeping = await OBR.scene.items.getItems(item =>
+    item.metadata?.[ENCOUNTER_ROOM_METADATA_KEY] === roomId &&
+    item.metadata?.[COMBAT_METADATA_KEY]?.enabled === false);
+  if (!sleeping.length) return 0;
+  const ids = sleeping.map(i => i.id);
+  await OBR.scene.items.updateItems(ids, items => {
+    items.forEach(it => {
+      it.metadata[COMBAT_METADATA_KEY] = { ...(it.metadata[COMBAT_METADATA_KEY] || {}), enabled: true };
+    });
+  });
+  const overlays = await OBR.scene.items.getItems(item =>
+    ids.includes(item.attachedTo) && item.metadata?.[DIM_OVERLAY_METADATA_KEY]);
+  if (overlays.length) await OBR.scene.items.deleteItems(overlays.map(i => i.id));
+  return ids.length;
+}
+
 async function openRoomNotes(room) {
   try {
     const role = await OBR.player.getRole();
     if (role !== "GM") return;
     if (!room || room.isTest) return;
+    // Independent of the notes jump below - a failure here (or in it)
+    // shouldn't stop the other from happening.
+    activateEncounter(room.id).then(count => {
+      if (count) OBR.notification.show(`Room ${room.id}: ${count} creature${count === 1 ? "" : "s"} activated in the tracker.`).catch(() => {});
+    }).catch(err => console.error("DCC overlay: failed to activate room encounter", err));
     const params = new URLSearchParams({ jumpId: room.id });
     OBR.modal.open({
       id: GM_NOTES_MODAL_ID,
